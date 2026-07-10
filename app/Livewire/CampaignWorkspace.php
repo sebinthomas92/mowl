@@ -3,17 +3,22 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use App\Jobs\GenerateCampaignPack;
 use App\Models\Brand;
+use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
+use App\Models\MediaAsset;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
-use App\Services\MockCampaignPackGenerator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 class CampaignWorkspace extends Component
 {
     use InteractsWithWorkspace;
+    use WithFileUploads;
 
     public int $step = 1;
 
@@ -28,6 +33,14 @@ class CampaignWorkspace extends Component
     public string $productSummary = '';
 
     public string $sourceUrl = '';
+
+    public string $analysisMode = 'standard';
+
+    public string $regenerationSection = 'meta';
+
+    public ?int $selectedVersion = null;
+
+    public array $mediaUploads = [];
 
     public ?int $brandId = null;
 
@@ -66,6 +79,9 @@ class CampaignWorkspace extends Component
         ]);
 
         $workspace = $this->currentWorkspace();
+        if ($workspace->brands()->count() >= config('campaigns.brand_limit')) {
+            throw ValidationException::withMessages(['brandName' => 'This workspace has reached its beta brand limit.']);
+        }
         $brand = $workspace->brands()->create([
             'name' => $data['brandName'],
             'website' => $data['brandWebsite'] ?: null,
@@ -99,54 +115,200 @@ class CampaignWorkspace extends Component
         $this->step = 3;
     }
 
-    public function generatePack(MockCampaignPackGenerator $generator): void
+    public function generatePack(): void
     {
         abort_unless($this->productId, 422);
-        $data = $this->validate(['sourceUrl' => ['required', 'url', 'max:2000']]);
+        $data = $this->validate([
+            'sourceUrl' => ['required', 'url:http,https', 'max:2000'],
+            'analysisMode' => ['required', 'in:standard,deep'],
+            'mediaUploads' => ['array', 'max:8'],
+            'mediaUploads.*' => ['file', 'mimetypes:image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm', 'max:102400'],
+        ]);
+        $workspace = $this->currentWorkspace();
+        $creditCost = $data['analysisMode'] === 'deep' ? 3 : 1;
 
-        $pack = DB::transaction(function () use ($data, $generator): CampaignPack {
+        [$pack, $generationJob] = DB::transaction(function () use ($data, $workspace, $creditCost): array {
+            $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
+            if ($lockedWorkspace->creditBalance() < $creditCost) {
+                throw ValidationException::withMessages(['sourceUrl' => 'This workspace does not have enough pack credits.']);
+            }
+
             $product = Product::query()
-                ->whereHas('brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id))
+                ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
                 ->findOrFail($this->productId);
             $source = SourceSnapshot::create([
                 'product_id' => $product->id,
                 'url' => $data['sourceUrl'],
                 'content_hash' => hash('sha256', $data['sourceUrl']),
-                'extracted_truth' => [
-                    'name' => $product->name,
-                    'price' => $product->price,
-                    'source_url' => $data['sourceUrl'],
-                ],
+                'status' => 'pending',
             ]);
+
+            foreach ($this->mediaUploads as $upload) {
+                $realPath = $upload->getRealPath();
+                $hash = hash_file('sha256', $realPath);
+                $extension = strtolower($upload->getClientOriginalExtension() ?: $upload->extension() ?: 'bin');
+                $mimeType = $upload->getMimeType();
+                $originalName = $upload->getClientOriginalName();
+                $size = $upload->getSize();
+                $disk = config('campaigns.media.disk');
+                $path = $upload->storeAs(
+                    "campaign-media/{$workspace->id}/{$product->id}/originals",
+                    "{$hash}.{$extension}",
+                    $disk,
+                );
+                MediaAsset::firstOrCreate(
+                    ['product_id' => $product->id, 'content_hash' => $hash],
+                    [
+                        'workspace_id' => $workspace->id,
+                        'source_snapshot_id' => $source->id,
+                        'type' => str_starts_with($mimeType, 'video/') ? 'video' : 'image',
+                        'disk' => $disk,
+                        'path' => $path,
+                        'original_name' => $originalName,
+                        'mime_type' => $mimeType,
+                        'size_bytes' => $size,
+                    ],
+                );
+            }
 
             $pack = CampaignPack::create([
                 'product_id' => $product->id,
                 'source_snapshot_id' => $source->id,
                 'name' => "{$product->name} Campaign Pack",
-                'estimated_cost' => 0.0180,
+                'status' => 'queued',
+                'analysis_mode' => $data['analysisMode'],
+                'credit_cost' => $creditCost,
+                'current_version' => 0,
+                'estimated_cost' => 0,
             ]);
 
-            $pack->versions()->create([
-                'content' => $generator->generate($product, $source),
-                'evidence' => [[
-                    'claim' => 'Product identity and supplied details',
-                    'source' => $data['sourceUrl'],
-                    'status' => 'source-linked',
-                ]],
-                'compliance_flags' => [],
+            $generationJob = CampaignGenerationJob::create([
+                'workspace_id' => $workspace->id,
+                'campaign_pack_id' => $pack->id,
+                'source_snapshot_id' => $source->id,
+                'analysis_mode' => $data['analysisMode'],
+                'credit_cost' => $creditCost,
+            ]);
+            $workspace->credits()->create([
+                'campaign_pack_id' => $pack->id,
+                'amount' => -$creditCost,
+                'event' => 'pack_generation',
+                'description' => ucfirst($data['analysisMode']).' campaign pack generation',
             ]);
 
-            return $pack;
+            return [$pack, $generationJob];
         });
 
+        GenerateCampaignPack::dispatch($generationJob->id);
         $this->packId = $pack->id;
         $this->step = 4;
+        $this->redirectRoute('campaign-packs.show', ['pack' => $pack], navigate: true);
+    }
+
+    public function retryGeneration(): void
+    {
+        $workspace = $this->currentWorkspace();
+        $pack = CampaignPack::query()
+            ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
+            ->with('latestGenerationJob')
+            ->findOrFail($this->packId);
+
+        abort_unless($pack->status === 'failed', 422);
+
+        $job = DB::transaction(function () use ($workspace, $pack): CampaignGenerationJob {
+            $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
+            if ($lockedWorkspace->creditBalance() < $pack->credit_cost) {
+                throw ValidationException::withMessages(['sourceUrl' => 'This workspace does not have enough pack credits to retry.']);
+            }
+
+            $job = CampaignGenerationJob::create([
+                'workspace_id' => $workspace->id,
+                'campaign_pack_id' => $pack->id,
+                'source_snapshot_id' => $pack->source_snapshot_id,
+                'analysis_mode' => $pack->analysis_mode,
+                'credit_cost' => $pack->credit_cost,
+            ]);
+            $workspace->credits()->create([
+                'campaign_pack_id' => $pack->id,
+                'amount' => -$pack->credit_cost,
+                'event' => 'generation_retry',
+                'description' => 'Campaign pack generation retry',
+            ]);
+            $pack->update(['status' => 'queued']);
+
+            return $job;
+        });
+
+        GenerateCampaignPack::dispatch($job->id);
+    }
+
+    public function regenerateSection(): void
+    {
+        $data = $this->validate([
+            'regenerationSection' => ['required', 'in:direction,positioning,meta,hooks,script,captions,shot_log'],
+        ]);
+        $workspace = $this->currentWorkspace();
+        $pack = CampaignPack::query()
+            ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
+            ->with('latestGenerationJob')
+            ->findOrFail($this->packId);
+        abort_unless($pack->status === 'approved' && $pack->current_version > 0, 422);
+        abort_if(in_array($pack->latestGenerationJob?->status, ['queued', 'processing', 'retrying']), 422, 'A generation job is already running.');
+
+        $includedUsed = $pack->generationJobs()
+            ->whereNotNull('section')
+            ->where('status', 'completed')
+            ->where('created_at', '<=', $pack->created_at->copy()->addDay())
+            ->count();
+        $included = now()->lte($pack->created_at->copy()->addDay()) && $includedUsed < 3;
+        $creditCost = $included ? 0 : 1;
+
+        $job = DB::transaction(function () use ($workspace, $pack, $data, $creditCost): CampaignGenerationJob {
+            $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
+            if ($creditCost > 0 && $lockedWorkspace->creditBalance() < $creditCost) {
+                throw ValidationException::withMessages(['regenerationSection' => 'This workspace does not have enough credits for another regeneration.']);
+            }
+
+            $job = CampaignGenerationJob::create([
+                'workspace_id' => $workspace->id,
+                'campaign_pack_id' => $pack->id,
+                'source_snapshot_id' => $pack->source_snapshot_id,
+                'analysis_mode' => $pack->analysis_mode,
+                'section' => $data['regenerationSection'],
+                'base_version' => $pack->current_version,
+                'credit_cost' => $creditCost,
+            ]);
+
+            if ($creditCost > 0) {
+                $workspace->credits()->create([
+                    'campaign_pack_id' => $pack->id,
+                    'amount' => -$creditCost,
+                    'event' => 'section_regeneration',
+                    'description' => 'Regenerated '.$data['regenerationSection'].' section',
+                    'metadata' => ['section' => $data['regenerationSection']],
+                ]);
+            }
+
+            return $job;
+        });
+
+        GenerateCampaignPack::dispatch($job->id);
+        $this->selectedVersion = null;
+    }
+
+    public function selectVersion(int $version): void
+    {
+        $pack = CampaignPack::query()
+            ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id))
+            ->findOrFail($this->packId);
+        abort_unless($pack->versions()->where('version', $version)->exists(), 404);
+
+        $this->selectedVersion = $version;
     }
 
     public function startAnother(): void
     {
-        $this->reset(['brandName', 'brandWebsite', 'productName', 'productPrice', 'productSummary', 'sourceUrl', 'brandId', 'productId', 'packId']);
-        $this->step = 1;
+        $this->redirectRoute('campaign-packs.create', navigate: true);
     }
 
     public function render()
@@ -155,7 +317,7 @@ class CampaignWorkspace extends Component
         $pack = $this->packId
             ? CampaignPack::query()
                 ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-                ->with(['product.brand', 'sourceSnapshot', 'versions'])
+                ->with(['product.brand', 'sourceSnapshot', 'versions', 'latestGenerationJob'])
                 ->findOrFail($this->packId)
             : null;
 
@@ -163,6 +325,9 @@ class CampaignWorkspace extends Component
             'workspace' => $workspace,
             'brands' => $workspace->brands()->orderBy('name')->get(),
             'pack' => $pack,
+            'includedRegenerationsRemaining' => $pack
+                ? max(0, 3 - $pack->generationJobs()->whereNotNull('section')->where('status', 'completed')->where('created_at', '<=', $pack->created_at->copy()->addDay())->count())
+                : 3,
         ])
             ->layout('components.layouts.app');
     }

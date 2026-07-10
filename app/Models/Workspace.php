@@ -19,4 +19,19 @@ class Workspace extends Model
     {
         return $this->belongsToMany(User::class, 'workspace_user')->withPivot('role')->withTimestamps();
     }
+
+    public function credits(): HasMany
+    {
+        return $this->hasMany(WorkspaceCredit::class);
+    }
+
+    public function generationJobs(): HasMany
+    {
+        return $this->hasMany(CampaignGenerationJob::class);
+    }
+
+    public function creditBalance(): int
+    {
+        return (int) $this->credits()->sum('amount');
+    }
 }

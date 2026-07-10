@@ -1,3 +1,6 @@
+@php($creditBalance = $workspace->creditBalance())
+@php($monthlyCredits = config('campaigns.monthly_credits'))
+@php($creditsUsed = max(0, $monthlyCredits - $creditBalance))
 <aside class="sidebar" :class="mobileNav && 'is-open'" aria-label="Main navigation">
     <button type="button" class="sidebar-close" @click="mobileNav = false" aria-label="Close navigation">×</button>
     <a href="{{ route('campaign-packs.index') }}" class="brand-lockup">
@@ -19,9 +22,9 @@
 
     <div class="nav-label"><span>Workspace</span><i></i></div>
     <div class="workspace-usage">
-        <div><span>Pack credits</span><strong>50</strong></div>
-        <div class="usage-meter"><i style="width: 2%"></i></div>
-        <small>1 used this cycle</small>
+        <div><span>Pack credits</span><strong>{{ $creditBalance }}</strong></div>
+        <div class="usage-meter"><i style="width: {{ min(100, ($creditsUsed / max(1, $monthlyCredits)) * 100) }}%"></i></div>
+        <small>{{ $creditsUsed }} used this cycle</small>
     </div>
 
     <div class="sidebar-footer">

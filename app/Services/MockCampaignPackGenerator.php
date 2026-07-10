@@ -2,16 +2,18 @@
 
 namespace App\Services;
 
+use App\Contracts\CampaignPackGenerator;
+use App\Data\GenerationResult;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
 
-class MockCampaignPackGenerator
+class MockCampaignPackGenerator implements CampaignPackGenerator
 {
-    public function generate(Product $product, SourceSnapshot $source): array
+    public function generate(Product $product, SourceSnapshot $source, array $page = []): GenerationResult
     {
         $name = $product->name;
 
-        return [
+        $content = [
             'product_truth' => [
                 'name' => $name,
                 'price' => $product->price ?: 'Price not supplied',
@@ -40,5 +42,43 @@ class MockCampaignPackGenerator
             'captions' => ['A practical upgrade for the everyday. ✦', "Meet {$name}. Details in the link."],
             'shot_log' => ['0–3s: Problem-led opening detail', '3–8s: Clean product reveal', '8–14s: Product in an everyday setting', '14–20s: Detail close-up and CTA'],
         ];
+
+        if ($section = $page['regeneration_section'] ?? null) {
+            $content = $this->applyMockVariation($content, $section, $name);
+        }
+
+        $description = data_get($page, 'description') ?: $product->summary ?: 'Supplied product page';
+
+        return new GenerationResult(
+            content: $content,
+            evidence: [[
+                'claim' => 'Product identity and supplied details',
+                'source' => $source->url,
+                'excerpt' => mb_substr($description, 0, 280),
+                'status' => 'source-linked',
+            ]],
+            complianceFlags: [],
+            provider: 'mock',
+            model: null,
+        );
+    }
+
+    private function applyMockVariation(array $content, string $section, string $name): array
+    {
+        match ($section) {
+            'direction' => $content['direction'] = [
+                'title' => "A fresh everyday angle for {$name}.",
+                'summary' => "Lead with the moment {$name} becomes useful, then make the product details easy to verify and act on.",
+            ],
+            'positioning' => [$content['audiences'], $content['benefits']] = [array_reverse($content['audiences']), array_reverse($content['benefits'])],
+            'meta' => $content['meta']['primary_text'] = "See where {$name} fits into the everyday. A clear product story, practical details, and an easy next step.",
+            'hooks' => $content['hooks'] = array_reverse($content['hooks']),
+            'script' => $content['script'][0]['line'] = 'Start with the everyday moment that needs a better answer.',
+            'captions' => $content['captions'] = array_reverse($content['captions']),
+            'shot_log' => $content['shot_log'] = array_reverse($content['shot_log']),
+            default => null,
+        };
+
+        return $content;
     }
 }

@@ -15,7 +15,7 @@ class CampaignPackIndex extends Component
         $workspace = $this->currentWorkspace();
         $packs = CampaignPack::query()
             ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-            ->with(['product.brand'])
+            ->with(['product.brand', 'latestGenerationJob'])
             ->latest()
             ->get();
 

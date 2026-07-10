@@ -4,7 +4,7 @@ Agency-first campaign intelligence workspace. The first vertical slice persists:
 
 `Workspace → Brand → Product → Source Snapshot → Campaign Pack → Version`
 
-It supports account registration, private agency workspaces, tenant-scoped brand/product/pack libraries, creating a product-page source, generating a structured mock campaign pack, and copying individual sections or the whole approved pack.
+It supports account registration, private agency workspaces, tenant-scoped brand/product/pack libraries, queued product-page extraction, structured campaign-pack generation, local media preparation, section regeneration, and copying individual sections or the whole approved pack.
 
 ## Current milestone
 
@@ -15,6 +15,12 @@ It supports account registration, private agency workspaces, tenant-scoped brand
 - Brands, Products, and Campaign Packs libraries
 - Existing-brand reuse in the pack builder
 - Direct cross-workspace pack access blocked with a 404 response
+- Safe product-page fetching with private-network blocking, redirect checks, normalized extraction, and content-hash caching
+- Queued generation with progress, retries, automatic credit refunds, version history, and three included section regenerations within 24 hours
+- Standard (1 credit) and premium deep analysis (3 credits), with a 50-credit beta allocation
+- Provider usage, request IDs, estimated COGS, cache hits, and the $0.50 cost alert stored per job
+- Optional image/video uploads with FFmpeg audio extraction and 8–16 deduplicated 512px frame candidates
+- Mock and OpenAI Responses API generators behind the same structured result contract
 
 ## Run locally
 
@@ -29,11 +35,26 @@ npm run build
 composer run dev
 ```
 
+`composer run dev` starts the web app, frontend watcher, and default queue worker. To run the campaign worker separately:
+
+```bash
+php artisan queue:work --queue=campaigns --tries=3 --timeout=180
+```
+
 ## Processing boundary
 
-`App\Services\MockCampaignPackGenerator` is the current generation adapter. Source snapshots, SHA-256 content hashes, versioned content, evidence references, compliance flags, and estimated costs are already stored separately.
+`App\Contracts\CampaignPackGenerator` is the boundary between processing and generation. The default `mock` driver makes local development deterministic. Set these values to use the real text-and-image pipeline:
 
-The production processor can replace that adapter with a queued workflow that parses the product page, uses FFmpeg locally for media extraction, sends deduplicated frames and transcripts to the OpenAI Responses API, and writes the same version payload. Laravel's jobs table is included for queued processing. The next infrastructure slice is the text-only queued OpenAI pipeline, followed by S3-compatible media storage, provider usage records, and Stripe billing.
+```dotenv
+CAMPAIGN_GENERATOR=openai
+OPENAI_API_KEY=
+OPENAI_CAMPAIGN_MODEL=gpt-5.4-mini
+OPENAI_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
+```
+
+The OpenAI adapter uses strict structured output and writes the same version payload as the mock driver. Without an API key, page extraction and FFmpeg processing still complete locally and audio transcription remains `pending_credentials`.
+
+Media uses Laravel's configured filesystem disk. `CAMPAIGN_MEDIA_DISK=local` is the local default; an S3-compatible disk can be selected after its endpoint and credentials are configured. FFmpeg and FFprobe default to Homebrew paths and can be overridden with `FFMPEG_PATH` and `FFPROBE_PATH`.
 
 ## Verification
 

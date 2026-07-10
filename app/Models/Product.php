@@ -24,4 +24,9 @@ class Product extends Model
     {
         return $this->hasMany(CampaignPack::class);
     }
+
+    public function mediaAssets(): HasMany
+    {
+        return $this->hasMany(MediaAsset::class);
+    }
 }
