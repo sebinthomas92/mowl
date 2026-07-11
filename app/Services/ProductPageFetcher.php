@@ -19,11 +19,16 @@ class ProductPageFetcher
         $response = null;
 
         for ($redirects = 0; $redirects <= config('campaigns.source.max_redirects'); $redirects++) {
-            $this->assertSafeUrl($currentUrl);
+            $binding = $this->publicAddressBinding($currentUrl);
+            $options = ['allow_redirects' => false];
+            if ($binding) {
+                $options['curl'] = [CURLOPT_RESOLVE => [$binding]];
+            }
+
             $response = Http::accept('text/html,application/xhtml+xml')
                 ->withUserAgent('MarketingOwl/1.0 (+campaign-source-snapshot)')
                 ->timeout(config('campaigns.source.timeout_seconds'))
-                ->withOptions(['allow_redirects' => false])
+                ->withOptions($options)
                 ->get($currentUrl);
 
             if (! in_array($response->status(), [301, 302, 303, 307, 308], true)) {
@@ -55,11 +60,23 @@ class ProductPageFetcher
 
     public function assertSafeUrl(string $url): void
     {
+        $this->publicAddressBinding($url);
+    }
+
+    private function publicAddressBinding(string $url): ?string
+    {
         $parts = parse_url($url);
         $scheme = strtolower($parts['scheme'] ?? '');
         $host = strtolower($parts['host'] ?? '');
+        $port = (int) ($parts['port'] ?? ($scheme === 'https' ? 443 : 80));
 
-        if (! in_array($scheme, ['http', 'https'], true) || $host === '' || isset($parts['user']) || isset($parts['pass'])) {
+        if (
+            ! in_array($scheme, ['http', 'https'], true)
+            || $host === ''
+            || ! in_array($port, [80, 443], true)
+            || isset($parts['user'])
+            || isset($parts['pass'])
+        ) {
             throw new UnsafeSourceUrlException('Only public HTTP or HTTPS product-page URLs are allowed.');
         }
 
@@ -78,6 +95,12 @@ class ProductPageFetcher
                 throw new UnsafeSourceUrlException('Private and reserved network addresses are not allowed.');
             }
         }
+
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return null;
+        }
+
+        return "{$host}:{$port}:{$addresses[0]}";
     }
 
     private function assertHtmlResponse(Response $response): void

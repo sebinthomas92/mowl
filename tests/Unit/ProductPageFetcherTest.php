@@ -33,4 +33,11 @@ HTML;
 
         app(ProductPageFetcher::class)->assertSafeUrl('http://127.0.0.1/private-product');
     }
+
+    public function test_it_blocks_non_web_ports(): void
+    {
+        $this->expectException(UnsafeSourceUrlException::class);
+
+        app(ProductPageFetcher::class)->assertSafeUrl('https://93.184.216.34:8080/product');
+    }
 }
