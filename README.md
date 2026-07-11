@@ -58,7 +58,7 @@ Media uses Laravel's configured filesystem disk. `CAMPAIGN_MEDIA_DISK=local` is 
 
 ## Vercel + Supabase deployment
 
-`Dockerfile.vercel` packages Laravel, PHP, and FFmpeg as one Vercel container. The beta runtime uses PHP's lightweight HTTP server for fast container startup; production state stays outside the container in Supabase Postgres and S3-compatible Storage. Configure Vercel with:
+The beta web app runs on Vercel's PHP 8.4 function runtime, close to Supabase in Mumbai. FFmpeg remains packaged in `Dockerfile.vercel` for a future on-demand media worker; production media uploads stay disabled until that durable worker and S3 credentials are configured. Production state stays in Supabase Postgres and S3-compatible Storage. Configure Vercel with:
 
 ```dotenv
 APP_ENV=production

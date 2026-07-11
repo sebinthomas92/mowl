@@ -1,19 +1,27 @@
 {
     "$schema": "https://openapi.vercel.sh/vercel.json",
     "framework": null,
+    "buildCommand": "npm run build",
     "regions": ["bom1"],
-    "services": {
-        "app": {
-            "root": ".",
-            "entrypoint": "Dockerfile.vercel"
+    "functions": {
+        "api/index.php": {
+            "runtime": "vercel-php@0.8.0",
+            "memory": 1024,
+            "maxDuration": 300
         }
     },
-    "rewrites": [
+    "routes": [
         {
-            "source": "/(.*)",
-            "destination": {
-                "service": "app"
-            }
+            "src": "/build/(.*)",
+            "dest": "/public/build/$1"
+        },
+        {
+            "src": "/(marketing-owl-logo.png|favicon.ico|robots.txt)",
+            "dest": "/public/$1"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/api/index.php"
         }
     ]
 }
