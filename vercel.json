@@ -1,7 +1,8 @@
 {
     "$schema": "https://openapi.vercel.sh/vercel.json",
     "framework": null,
-    "buildCommand": "npm run build",
+    "buildCommand": "npm run build && mkdir -p dist && cp -R public/build dist/build && cp public/marketing-owl-logo.png public/favicon.ico public/robots.txt dist/",
+    "outputDirectory": "dist",
     "regions": ["bom1"],
     "functions": {
         "api/index.php": {
@@ -12,12 +13,7 @@
     },
     "routes": [
         {
-            "src": "/build/(.*)",
-            "dest": "/public/build/$1"
-        },
-        {
-            "src": "/(marketing-owl-logo.png|favicon.ico|robots.txt)",
-            "dest": "/public/$1"
+            "handle": "filesystem"
         },
         {
             "src": "/(.*)",
