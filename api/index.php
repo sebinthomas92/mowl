@@ -1,6 +1,17 @@
 <?php
 
 $storagePath = getenv('LARAVEL_STORAGE_PATH') ?: '/tmp/marketing-owl-storage';
+$bootstrapCachePath = $storagePath.'/framework/cache';
+
+foreach ([
+    'APP_CONFIG_CACHE' => $bootstrapCachePath.'/config.php',
+    'APP_EVENTS_CACHE' => $bootstrapCachePath.'/events.php',
+    'APP_PACKAGES_CACHE' => $bootstrapCachePath.'/packages.php',
+    'APP_ROUTES_CACHE' => $bootstrapCachePath.'/routes.php',
+    'APP_SERVICES_CACHE' => $bootstrapCachePath.'/services.php',
+] as $key => $value) {
+    putenv($key.'='.$value);
+}
 
 foreach ([
     'app/private',
