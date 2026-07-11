@@ -17,6 +17,19 @@ class AuthenticationTest extends TestCase
         $this->get('/register')->assertOk()->assertSee('CREATE YOUR WORKSPACE');
     }
 
+    public function test_forwarded_https_is_used_for_livewire_assets(): void
+    {
+        $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.1'])
+            ->withHeaders([
+                'X-Forwarded-Host' => 'app.marketingowl.ai',
+                'X-Forwarded-Proto' => 'https',
+                'X-Forwarded-Port' => '443',
+            ])
+            ->get('/register')
+            ->assertOk()
+            ->assertSee('https://app.marketingowl.ai/livewire-', false);
+    }
+
     public function test_workspace_membership_records_the_owner_role(): void
     {
         $user = User::factory()->create();
