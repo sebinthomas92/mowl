@@ -97,6 +97,15 @@ class CampaignWorkspaceTest extends TestCase
         Storage::disk('local')->assertExists($asset->path);
     }
 
+    public function test_media_upload_controls_can_be_disabled_until_production_storage_is_configured(): void
+    {
+        config(['campaigns.media.uploads_enabled' => false]);
+        [$user] = $this->workspaceUser();
+
+        Livewire::actingAs($user)->test(CampaignWorkspace::class)
+            ->assertDontSee('Product images or short videos');
+    }
+
     public function test_each_setup_step_validates_required_input(): void
     {
         [$user] = $this->workspaceUser();

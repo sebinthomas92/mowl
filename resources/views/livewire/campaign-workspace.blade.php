@@ -75,11 +75,13 @@
                             <form wire:submit="generatePack">
                                 <div class="form-heading"><span>03 / 03</span><h2>Add a product-page source</h2><p>The source is captured, hashed, and linked to every factual claim in the generated pack.</p></div>
                                 <label>Product page URL<input wire:model="sourceUrl" type="url" placeholder="https://yourbrand.com/products/your-product" autofocus>@error('sourceUrl')<small class="error">{{ $message }}</small>@enderror</label>
-                                <label class="media-upload">Product images or short videos <small>Optional · up to 8 files</small><input wire:model="mediaUploads" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" multiple>@error('mediaUploads.*')<small class="error">{{ $message }}</small>@enderror</label>
-                                @if($mediaUploads)
-                                    <div class="upload-queue">@foreach($mediaUploads as $upload)<span>{{ $upload->getClientOriginalName() }} <small>{{ Illuminate\Support\Number::fileSize($upload->getSize()) }}</small></span>@endforeach</div>
+                                @if(config('campaigns.media.uploads_enabled'))
+                                    <label class="media-upload">Product images or short videos <small>Optional · up to 8 files</small><input wire:model="mediaUploads" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" multiple>@error('mediaUploads.*')<small class="error">{{ $message }}</small>@enderror</label>
+                                    @if($mediaUploads)
+                                        <div class="upload-queue">@foreach($mediaUploads as $upload)<span>{{ $upload->getClientOriginalName() }} <small>{{ Illuminate\Support\Number::fileSize($upload->getSize()) }}</small></span>@endforeach</div>
+                                    @endif
+                                    <div class="upload-progress" wire:loading wire:target="mediaUploads">Uploading media securely…</div>
                                 @endif
-                                <div class="upload-progress" wire:loading wire:target="mediaUploads">Uploading media securely…</div>
                                 <fieldset class="analysis-choice">
                                     <legend>Analysis depth</legend>
                                     <label><input wire:model="analysisMode" type="radio" value="standard"><span><strong>Standard pack</strong><small>Fast product truth and campaign content</small></span><b>1 credit</b></label>

@@ -122,8 +122,8 @@ class CampaignWorkspace extends Component
         $data = $this->validate([
             'sourceUrl' => ['required', 'url:http,https', 'max:2000'],
             'analysisMode' => ['required', 'in:standard,deep'],
-            'mediaUploads' => ['array', 'max:8'],
-            'mediaUploads.*' => ['file', 'mimetypes:image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm', 'max:102400'],
+            'mediaUploads' => config('campaigns.media.uploads_enabled') ? ['array', 'max:8'] : ['prohibited'],
+            'mediaUploads.*' => config('campaigns.media.uploads_enabled') ? ['file', 'mimetypes:image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm', 'max:102400'] : ['prohibited'],
         ]);
         $workspace = $this->currentWorkspace();
         $creditCost = $data['analysisMode'] === 'deep' ? 3 : 1;

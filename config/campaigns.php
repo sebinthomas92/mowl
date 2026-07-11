@@ -16,6 +16,7 @@ return [
         'max_extracted_characters' => 60_000,
     ],
     'media' => [
+        'uploads_enabled' => env('CAMPAIGN_MEDIA_UPLOADS_ENABLED', true),
         'disk' => env('CAMPAIGN_MEDIA_DISK', 'local'),
         'ffmpeg' => env('FFMPEG_PATH', '/opt/homebrew/bin/ffmpeg'),
         'ffprobe' => env('FFPROBE_PATH', '/opt/homebrew/bin/ffprobe'),
