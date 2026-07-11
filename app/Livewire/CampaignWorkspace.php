@@ -212,32 +212,32 @@ class CampaignWorkspace extends Component
         $workspace = $this->currentWorkspace();
         $pack = CampaignPack::query()
             ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-            ->with('latestGenerationJob')
             ->findOrFail($this->packId);
-
-        abort_unless($pack->status === 'failed', 422);
 
         $job = DB::transaction(function () use ($workspace, $pack): CampaignGenerationJob {
             $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
-            if ($lockedWorkspace->creditBalance() < $pack->credit_cost) {
+            $lockedPack = CampaignPack::query()->lockForUpdate()->findOrFail($pack->id);
+            abort_unless($lockedPack->status === 'failed', 422);
+
+            if ($lockedWorkspace->creditBalance() < $lockedPack->credit_cost) {
                 throw ValidationException::withMessages(['sourceUrl' => 'This workspace does not have enough pack credits to retry.']);
             }
 
             $job = CampaignGenerationJob::create([
                 'workspace_id' => $workspace->id,
-                'campaign_pack_id' => $pack->id,
-                'source_snapshot_id' => $pack->source_snapshot_id,
-                'analysis_mode' => $pack->analysis_mode,
-                'credit_cost' => $pack->credit_cost,
+                'campaign_pack_id' => $lockedPack->id,
+                'source_snapshot_id' => $lockedPack->source_snapshot_id,
+                'analysis_mode' => $lockedPack->analysis_mode,
+                'credit_cost' => $lockedPack->credit_cost,
             ]);
             $workspace->credits()->create([
-                'campaign_pack_id' => $pack->id,
+                'campaign_pack_id' => $lockedPack->id,
                 'campaign_generation_job_id' => $job->id,
-                'amount' => -$pack->credit_cost,
+                'amount' => -$lockedPack->credit_cost,
                 'event' => 'generation_retry',
                 'description' => 'Campaign pack generation retry',
             ]);
-            $pack->update(['status' => 'queued']);
+            $lockedPack->update(['status' => 'queued']);
 
             return $job;
         });
@@ -253,38 +253,43 @@ class CampaignWorkspace extends Component
         $workspace = $this->currentWorkspace();
         $pack = CampaignPack::query()
             ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-            ->with('latestGenerationJob')
             ->findOrFail($this->packId);
         abort_unless($pack->status === 'approved' && $pack->current_version > 0, 422);
-        abort_if(in_array($pack->latestGenerationJob?->status, ['queued', 'processing', 'retrying']), 422, 'A generation job is already running.');
 
-        $includedUsed = $pack->generationJobs()
-            ->whereNotNull('section')
-            ->where('status', 'completed')
-            ->where('created_at', '<=', $pack->created_at->copy()->addDay())
-            ->count();
-        $included = now()->lte($pack->created_at->copy()->addDay()) && $includedUsed < 3;
-        $creditCost = $included ? 0 : 1;
-
-        $job = DB::transaction(function () use ($workspace, $pack, $data, $creditCost): CampaignGenerationJob {
+        $job = DB::transaction(function () use ($workspace, $pack, $data): CampaignGenerationJob {
             $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
+            $lockedPack = CampaignPack::query()->lockForUpdate()->findOrFail($pack->id);
+            abort_unless($lockedPack->status === 'approved' && $lockedPack->current_version > 0, 422);
+            abort_if(
+                $lockedPack->generationJobs()->whereIn('status', ['queued', 'processing', 'retrying'])->exists(),
+                422,
+                'A generation job is already running.',
+            );
+
+            $includedUsed = $lockedPack->generationJobs()
+                ->whereNotNull('section')
+                ->where('status', 'completed')
+                ->where('created_at', '<=', $lockedPack->created_at->copy()->addDay())
+                ->count();
+            $included = now()->lte($lockedPack->created_at->copy()->addDay()) && $includedUsed < 3;
+            $creditCost = $included ? 0 : 1;
             if ($creditCost > 0 && $lockedWorkspace->creditBalance() < $creditCost) {
                 throw ValidationException::withMessages(['regenerationSection' => 'This workspace does not have enough credits for another regeneration.']);
             }
 
             $job = CampaignGenerationJob::create([
                 'workspace_id' => $workspace->id,
-                'campaign_pack_id' => $pack->id,
-                'source_snapshot_id' => $pack->source_snapshot_id,
-                'analysis_mode' => $pack->analysis_mode,
+                'campaign_pack_id' => $lockedPack->id,
+                'source_snapshot_id' => $lockedPack->source_snapshot_id,
+                'analysis_mode' => $lockedPack->analysis_mode,
                 'section' => $data['regenerationSection'],
-                'base_version' => $pack->current_version,
+                'base_version' => $lockedPack->current_version,
                 'credit_cost' => $creditCost,
             ]);
 
             if ($creditCost > 0) {
                 $workspace->credits()->create([
-                    'campaign_pack_id' => $pack->id,
+                    'campaign_pack_id' => $lockedPack->id,
                     'campaign_generation_job_id' => $job->id,
                     'amount' => -$creditCost,
                     'event' => 'section_regeneration',
