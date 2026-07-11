@@ -3,6 +3,8 @@
 return [
     'generator' => env('CAMPAIGN_GENERATOR', 'mock'),
     'queue' => env('CAMPAIGN_QUEUE', 'campaigns'),
+    'processing_mode' => env('CAMPAIGN_PROCESSING_MODE', 'queue'),
+    'cron_secret' => env('CRON_SECRET'),
     'monthly_credits' => (int) env('CAMPAIGN_MONTHLY_CREDITS', 50),
     'brand_limit' => (int) env('CAMPAIGN_BRAND_LIMIT', 10),
     'cogs_target' => (float) env('CAMPAIGN_COGS_TARGET', 0.25),

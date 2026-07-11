@@ -56,6 +56,47 @@ The OpenAI adapter uses strict structured output and writes the same version pay
 
 Media uses Laravel's configured filesystem disk. `CAMPAIGN_MEDIA_DISK=local` is the local default; an S3-compatible disk can be selected after its endpoint and credentials are configured. FFmpeg and FFprobe default to Homebrew paths and can be overridden with `FFMPEG_PATH` and `FFPROBE_PATH`.
 
+## Vercel + Supabase deployment
+
+`Dockerfile.vercel` packages Laravel, FrankenPHP, and FFmpeg as one Vercel container. Production state stays outside the container in Supabase Postgres and S3-compatible Storage. Configure Vercel with:
+
+```dotenv
+APP_ENV=production
+APP_DEBUG=false
+APP_KEY=
+APP_URL=https://app.marketingowl.ai
+LOG_CHANNEL=stderr
+
+DB_CONNECTION=pgsql
+DB_URL=
+DB_SSLMODE=require
+DB_EMULATE_PREPARES=true
+
+SESSION_DRIVER=database
+CACHE_STORE=database
+QUEUE_CONNECTION=database
+CAMPAIGN_PROCESSING_MODE=request
+CRON_SECRET=
+
+FILESYSTEM_DISK=s3
+CAMPAIGN_MEDIA_DISK=s3
+LIVEWIRE_TEMPORARY_FILE_UPLOAD_DISK=s3
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=
+AWS_BUCKET=
+AWS_ENDPOINT=
+AWS_USE_PATH_STYLE_ENDPOINT=true
+```
+
+Use the Supabase transaction-pooler connection string for `DB_URL`. Run migrations once against the production database:
+
+```bash
+php artisan migrate --force
+```
+
+In request-processing mode, the pack page starts a signed generation request and safely resumes stale jobs when reopened. The authenticated `/internal/campaign-jobs/recover` endpoint is also ready for a Vercel Cron once the project moves to Pro; Vercel supplies `CRON_SECRET` as its bearer token.
+
 ## Verification
 
 ```bash

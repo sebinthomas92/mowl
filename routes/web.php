@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CampaignJobController;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\Register;
 use App\Livewire\BrandIndex;
@@ -23,6 +24,9 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/campaign-packs', CampaignPackIndex::class)->name('campaign-packs.index');
     Route::get('/campaign-packs/create', CampaignWorkspace::class)->name('campaign-packs.create');
     Route::get('/campaign-packs/{pack}', CampaignWorkspace::class)->name('campaign-packs.show');
+    Route::post('/internal/campaign-jobs/{generationJob}/process', [CampaignJobController::class, 'process'])
+        ->middleware(['signed', 'throttle:6,1'])
+        ->name('campaign-jobs.process');
 
     Route::post('/logout', function (Request $request) {
         Auth::logout();
@@ -32,3 +36,7 @@ Route::middleware('auth')->group(function (): void {
         return redirect()->route('login');
     })->name('logout');
 });
+
+Route::get('/internal/campaign-jobs/recover', [CampaignJobController::class, 'recover'])
+    ->middleware('throttle:6,1')
+    ->name('campaign-jobs.recover');

@@ -3,14 +3,15 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
-use App\Jobs\GenerateCampaignPack;
 use App\Models\Brand;
 use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
 use App\Models\MediaAsset;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
+use App\Services\CampaignJobDispatcher;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -115,7 +116,7 @@ class CampaignWorkspace extends Component
         $this->step = 3;
     }
 
-    public function generatePack(): void
+    public function generatePack(CampaignJobDispatcher $dispatcher): void
     {
         abort_unless($this->productId, 422);
         $data = $this->validate([
@@ -199,13 +200,13 @@ class CampaignWorkspace extends Component
             return [$pack, $generationJob];
         });
 
-        GenerateCampaignPack::dispatch($generationJob->id);
+        $dispatcher->dispatch($generationJob->id);
         $this->packId = $pack->id;
         $this->step = 4;
         $this->redirectRoute('campaign-packs.show', ['pack' => $pack], navigate: true);
     }
 
-    public function retryGeneration(): void
+    public function retryGeneration(CampaignJobDispatcher $dispatcher): void
     {
         $workspace = $this->currentWorkspace();
         $pack = CampaignPack::query()
@@ -239,10 +240,10 @@ class CampaignWorkspace extends Component
             return $job;
         });
 
-        GenerateCampaignPack::dispatch($job->id);
+        $dispatcher->dispatch($job->id);
     }
 
-    public function regenerateSection(): void
+    public function regenerateSection(CampaignJobDispatcher $dispatcher): void
     {
         $data = $this->validate([
             'regenerationSection' => ['required', 'in:direction,positioning,meta,hooks,script,captions,shot_log'],
@@ -292,7 +293,7 @@ class CampaignWorkspace extends Component
             return $job;
         });
 
-        GenerateCampaignPack::dispatch($job->id);
+        $dispatcher->dispatch($job->id);
         $this->selectedVersion = null;
     }
 
@@ -321,10 +322,22 @@ class CampaignWorkspace extends Component
                 ->findOrFail($this->packId)
             : null;
 
+        if (
+            $pack?->latestGenerationJob?->status === 'processing'
+            && config('campaigns.processing_mode') === 'request'
+            && $pack->latestGenerationJob->updated_at->lt(now()->subMinutes(10))
+        ) {
+            $pack->latestGenerationJob->update(['status' => 'retrying', 'phase' => 'retry_wait']);
+            $pack->load('latestGenerationJob');
+        }
+
         return view('livewire.campaign-workspace', [
             'workspace' => $workspace,
             'brands' => $workspace->brands()->orderBy('name')->get(),
             'pack' => $pack,
+            'processJobUrl' => $pack?->latestGenerationJob && config('campaigns.processing_mode') === 'request'
+                ? URL::temporarySignedRoute('campaign-jobs.process', now()->addMinutes(30), ['generationJob' => $pack->latestGenerationJob])
+                : null,
             'includedRegenerationsRemaining' => $pack
                 ? max(0, 3 - $pack->generationJobs()->whereNotNull('section')->where('status', 'completed')->where('created_at', '<=', $pack->created_at->copy()->addDay())->count())
                 : 3,

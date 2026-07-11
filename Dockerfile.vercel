@@ -1,0 +1,44 @@
+FROM node:22-bookworm-slim AS assets
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY resources ./resources
+COPY vite.config.js ./
+RUN npm run build
+
+FROM composer:2 AS dependencies
+
+WORKDIR /app
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --prefer-dist --no-interaction --no-scripts --optimize-autoloader
+
+FROM dunglas/frankenphp:1-php8.4-bookworm
+
+RUN install-php-extensions pdo_pgsql gd intl zip opcache \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . .
+COPY --from=dependencies /app/vendor ./vendor
+COPY --from=assets /app/public/build ./public/build
+COPY docker/vercel-entrypoint.sh /usr/local/bin/marketing-owl-entrypoint
+
+RUN php artisan package:discover --ansi
+
+ENV APP_ENV=production \
+    APP_DEBUG=false \
+    LOG_CHANNEL=stderr \
+    LARAVEL_STORAGE_PATH=/tmp/marketing-owl-storage \
+    XDG_CONFIG_HOME=/tmp/frankenphp-config \
+    XDG_DATA_HOME=/tmp/frankenphp-data \
+    SERVER_NAME=:80 \
+    FFMPEG_PATH=/usr/bin/ffmpeg \
+    FFPROBE_PATH=/usr/bin/ffprobe
+
+RUN chmod +x /usr/local/bin/marketing-owl-entrypoint
+
+ENTRYPOINT ["marketing-owl-entrypoint"]
+CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]

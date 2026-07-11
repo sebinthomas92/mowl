@@ -40,24 +40,27 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
 
     public function handle(ProductPageFetcher $fetcher, MediaProcessor $mediaProcessor, CampaignGeneratorManager $generators, ProviderCostCalculator $costs): void
     {
-        $job = CampaignGenerationJob::with(['campaignPack.product', 'sourceSnapshot'])->findOrFail($this->generationJobId);
+        $provider = $generators->providerName();
+        $model = $generators->model();
+        $claimed = CampaignGenerationJob::query()
+            ->whereKey($this->generationJobId)
+            ->whereIn('status', ['queued', 'retrying'])
+            ->update([
+                'status' => 'processing',
+                'phase' => 'fetching_source',
+                'provider' => $provider,
+                'model' => $model,
+                'attempts' => DB::raw('attempts + 1'),
+                'started_at' => DB::raw('COALESCE(started_at, CURRENT_TIMESTAMP)'),
+                'error_code' => null,
+                'error_message' => null,
+            ]);
 
-        if ($job->status === 'completed') {
+        if ($claimed === 0) {
             return;
         }
 
-        $provider = $generators->providerName();
-        $model = $generators->model();
-        $job->update([
-            'status' => 'processing',
-            'phase' => 'fetching_source',
-            'provider' => $provider,
-            'model' => $model,
-            'attempts' => $job->attempts + 1,
-            'started_at' => $job->started_at ?: now(),
-            'error_code' => null,
-            'error_message' => null,
-        ]);
+        $job = CampaignGenerationJob::with(['campaignPack.product', 'sourceSnapshot'])->findOrFail($this->generationJobId);
         if (! $job->section) {
             $job->campaignPack->update(['status' => 'processing']);
         }

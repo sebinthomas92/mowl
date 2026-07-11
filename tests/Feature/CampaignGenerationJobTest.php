@@ -85,6 +85,22 @@ class CampaignGenerationJobTest extends TestCase
         ]);
     }
 
+    public function test_an_already_claimed_job_cannot_generate_a_duplicate_version(): void
+    {
+        [, , , , $job] = $this->generationFixture();
+        $job->update(['status' => 'processing', 'attempts' => 1]);
+
+        (new GenerateCampaignPack($job->id))->handle(
+            app(ProductPageFetcher::class),
+            app(MediaProcessor::class),
+            app(CampaignGeneratorManager::class),
+            app(ProviderCostCalculator::class),
+        );
+
+        $this->assertDatabaseCount('campaign_pack_versions', 0);
+        $this->assertSame(1, $job->fresh()->attempts);
+    }
+
     public function test_a_section_regeneration_creates_a_new_version_without_spending_an_included_credit(): void
     {
         [$workspace, , , $pack, $job] = $this->generationFixture();

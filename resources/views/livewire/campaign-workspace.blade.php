@@ -99,7 +99,12 @@
             @php($version = $selectedVersion ? $pack->versions->firstWhere('version', $selectedVersion) : $pack->versions->sortByDesc('version')->first())
             @if(!$version)
                 @php($job = $pack->latestGenerationJob)
-                <section class="processing-page" wire:poll.3s aria-live="polite">
+                <section class="processing-page" wire:poll.3s aria-live="polite"
+                    @if($processJobUrl && $job && in_array($job->status, ['queued', 'retrying']))
+                        wire:key="process-job-{{ $job->id }}-{{ $job->attempts }}"
+                        x-data
+                        x-init="fetch(@js($processJobUrl), { method: 'POST', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content, 'Accept': 'application/json' } }).finally(() => $wire.$refresh())"
+                    @endif>
                     <div class="processing-breadcrumbs"><a href="{{ route('campaign-packs.index') }}">Campaign packs</a><span>›</span><strong>{{ $pack->product->name }}</strong></div>
                     <div class="processing-console">
                         <div class="processing-mark"><span>{{ strtoupper(substr($pack->product->name, 0, 2)) }}</span></div>

@@ -54,7 +54,7 @@ class MediaProcessor
         }
 
         $asset->update(['status' => 'processing', 'error_message' => null]);
-        $temporaryDirectory = storage_path('app/processing/'.Str::uuid());
+        $temporaryDirectory = sys_get_temp_dir().'/marketing-owl-processing/'.Str::uuid();
         File::ensureDirectoryExists($temporaryDirectory);
         $temporarySource = null;
 
