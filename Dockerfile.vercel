@@ -35,6 +35,7 @@ ENV APP_ENV=production \
     XDG_CONFIG_HOME=/tmp/frankenphp-config \
     XDG_DATA_HOME=/tmp/frankenphp-data \
     SERVER_NAME=:80 \
+    FRANKENPHP_CONFIG="num_threads 1" \
     FFMPEG_PATH=/usr/bin/ffmpeg \
     FFPROBE_PATH=/usr/bin/ffprobe
 
