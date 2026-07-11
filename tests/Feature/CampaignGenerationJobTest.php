@@ -74,15 +74,48 @@ class CampaignGenerationJobTest extends TestCase
         $queued = new GenerateCampaignPack($job->id);
 
         $queued->failed(new RuntimeException('Source could not be reached.'));
+        $queued->failed(new RuntimeException('Source could not be reached.'));
 
         $this->assertSame('failed', $job->fresh()->status);
         $this->assertSame('failed', $pack->fresh()->status);
         $this->assertSame(50, $workspace->creditBalance());
         $this->assertDatabaseHas('workspace_credits', [
             'campaign_pack_id' => $pack->id,
+            'campaign_generation_job_id' => $job->id,
             'event' => 'generation_refund',
             'amount' => 1,
         ]);
+        $this->assertDatabaseCount('workspace_credits', 3);
+    }
+
+    public function test_each_failed_retry_is_refunded_once(): void
+    {
+        [$workspace, , , $pack, $initialJob] = $this->generationFixture();
+        (new GenerateCampaignPack($initialJob->id))->failed(new RuntimeException('Initial failure.'));
+
+        $retryJob = CampaignGenerationJob::create([
+            'workspace_id' => $workspace->id,
+            'campaign_pack_id' => $pack->id,
+            'source_snapshot_id' => $pack->source_snapshot_id,
+            'credit_cost' => 1,
+        ]);
+        $workspace->credits()->create([
+            'campaign_pack_id' => $pack->id,
+            'campaign_generation_job_id' => $retryJob->id,
+            'amount' => -1,
+            'event' => 'generation_retry',
+            'description' => 'Retry',
+        ]);
+
+        $retry = new GenerateCampaignPack($retryJob->id);
+        $retry->failed(new RuntimeException('Retry failure.'));
+        $retry->failed(new RuntimeException('Retry failure.'));
+
+        $this->assertSame(50, $workspace->creditBalance());
+        $this->assertSame(
+            2,
+            $workspace->credits()->where('event', 'generation_refund')->count(),
+        );
     }
 
     public function test_an_already_claimed_job_cannot_generate_a_duplicate_version(): void
@@ -156,6 +189,7 @@ class CampaignGenerationJobTest extends TestCase
         ]);
         $workspace->credits()->create([
             'campaign_pack_id' => $pack->id,
+            'campaign_generation_job_id' => $job->id,
             'amount' => -1,
             'event' => 'pack_generation',
             'description' => 'Standard pack',

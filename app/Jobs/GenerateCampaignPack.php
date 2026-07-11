@@ -216,18 +216,17 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 $job->campaignPack()->update(['status' => 'failed']);
             }
 
-            $alreadyRefunded = $job->workspace->credits()
-                ->where('campaign_pack_id', $job->campaign_pack_id)
-                ->where('event', 'generation_refund')
-                ->exists();
-            if (! $alreadyRefunded) {
-                $job->workspace->credits()->create([
+            $job->workspace->credits()->firstOrCreate(
+                [
+                    'campaign_generation_job_id' => $job->id,
+                    'event' => 'generation_refund',
+                ],
+                [
                     'campaign_pack_id' => $job->campaign_pack_id,
                     'amount' => $job->credit_cost,
-                    'event' => 'generation_refund',
                     'description' => 'Pack credits returned after generation failure',
-                ]);
-            }
+                ],
+            );
         });
     }
 

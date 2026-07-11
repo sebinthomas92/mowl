@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class WorkspaceCredit extends Model
 {
-    protected $fillable = ['workspace_id', 'campaign_pack_id', 'amount', 'event', 'description', 'metadata'];
+    protected $fillable = ['workspace_id', 'campaign_pack_id', 'campaign_generation_job_id', 'amount', 'event', 'description', 'metadata'];
 
     protected function casts(): array
     {
@@ -22,5 +22,10 @@ class WorkspaceCredit extends Model
     public function campaignPack(): BelongsTo
     {
         return $this->belongsTo(CampaignPack::class);
+    }
+
+    public function campaignGenerationJob(): BelongsTo
+    {
+        return $this->belongsTo(CampaignGenerationJob::class);
     }
 }

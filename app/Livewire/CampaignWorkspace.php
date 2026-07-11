@@ -192,6 +192,7 @@ class CampaignWorkspace extends Component
             ]);
             $workspace->credits()->create([
                 'campaign_pack_id' => $pack->id,
+                'campaign_generation_job_id' => $generationJob->id,
                 'amount' => -$creditCost,
                 'event' => 'pack_generation',
                 'description' => ucfirst($data['analysisMode']).' campaign pack generation',
@@ -231,6 +232,7 @@ class CampaignWorkspace extends Component
             ]);
             $workspace->credits()->create([
                 'campaign_pack_id' => $pack->id,
+                'campaign_generation_job_id' => $job->id,
                 'amount' => -$pack->credit_cost,
                 'event' => 'generation_retry',
                 'description' => 'Campaign pack generation retry',
@@ -283,6 +285,7 @@ class CampaignWorkspace extends Component
             if ($creditCost > 0) {
                 $workspace->credits()->create([
                     'campaign_pack_id' => $pack->id,
+                    'campaign_generation_job_id' => $job->id,
                     'amount' => -$creditCost,
                     'event' => 'section_regeneration',
                     'description' => 'Regenerated '.$data['regenerationSection'].' section',
