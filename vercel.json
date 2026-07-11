@@ -1,0 +1,23 @@
+{
+    "$schema": "https://openapi.vercel.sh/vercel.json",
+    "framework": null,
+    "buildCommand": "npm run build && mkdir -p dist && cp -R public/build dist/build && cp public/marketing-owl-logo.png public/favicon.ico public/robots.txt dist/",
+    "outputDirectory": "dist",
+    "regions": ["bom1"],
+    "functions": {
+        "api/index.php": {
+            "runtime": "vercel-php@0.8.0",
+            "memory": 1024,
+            "maxDuration": 300
+        }
+    },
+    "routes": [
+        {
+            "handle": "filesystem"
+        },
+        {
+            "src": "/(.*)",
+            "dest": "/api/index.php"
+        }
+    ]
+}
