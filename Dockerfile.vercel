@@ -34,12 +34,10 @@ ENV APP_ENV=production \
     LARAVEL_STORAGE_PATH=/tmp/marketing-owl-storage \
     XDG_CONFIG_HOME=/tmp/frankenphp-config \
     XDG_DATA_HOME=/tmp/frankenphp-data \
-    SERVER_NAME=:80 \
-    FRANKENPHP_CONFIG="num_threads 1" \
     FFMPEG_PATH=/usr/bin/ffmpeg \
     FFPROBE_PATH=/usr/bin/ffprobe
 
 RUN chmod +x /usr/local/bin/marketing-owl-entrypoint
 
 ENTRYPOINT ["marketing-owl-entrypoint"]
-CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
+CMD ["sh", "-c", "exec php -S 0.0.0.0:${PORT:-80} -t public public/index.php"]
