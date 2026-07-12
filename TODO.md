@@ -9,7 +9,7 @@ This is the execution backlog for the paid concierge beta. Work from the latest 
 - Deployed vertical slice: workspace → brand → product → source snapshot → campaign pack → version
 - Team operations: five-seat limit, secure invitations, owner controls
 - Usage operations: credit ledger, provider cost ledger, COGS alerts
-- Current verification baseline: 44 tests, 160 assertions
+- Current verification baseline: 47 tests, 167 assertions
 - Production generator: deterministic `mock`
 - Production media uploads: disabled
 
@@ -29,7 +29,7 @@ This is the execution backlog for the paid concierge beta. Work from the latest 
 
 ## Milestone 4 — Real OpenAI generation (P0)
 
-Dependency: production `OPENAI_API_KEY` (not yet configured in Vercel production or preview).
+Dependency: approved production AI Gateway budget or `OPENAI_API_KEY`.
 
 - [x] Review `OpenAIResponsesCampaignPackGenerator` against the current Responses API.
 - [x] Confirm strict structured output covers every campaign-pack section.
@@ -40,10 +40,10 @@ Dependency: production `OPENAI_API_KEY` (not yet configured in Vercel production
 - [x] Add provider/model fallbacks without bypassing the structured schema.
 - [x] Add fixture-backed tests for success, refusal, invalid schema, timeout, and rate limit responses.
 - [x] Add an owner-only setting or environment guard for switching `mock` → `openai`.
-- [ ] Run real standard and premium packs against representative ecommerce product pages.
-- [ ] Verify standard pack COGS is normally ≤ $0.25 and alerting begins at $0.50.
-- [ ] Enable `CAMPAIGN_GENERATOR=openai` in preview only.
-- [ ] Complete hosted pack generation, regeneration, evidence, compliance, and cost-ledger QA.
+- [x] Run real standard and premium packs against representative ecommerce product pages.
+- [x] Verify standard pack COGS is normally ≤ $0.25 and alerting begins at $0.50.
+- [x] Enable `CAMPAIGN_GENERATOR=openai` in preview only.
+- [x] Complete hosted pack generation, regeneration, evidence, compliance, and cost-ledger QA.
 - [ ] Enable OpenAI in production only after the preview checks pass.
 
 Acceptance criteria:
@@ -53,7 +53,7 @@ Acceptance criteria:
 - Provider usage and cost appear correctly on the Usage & Cost screen.
 - Failures are recoverable and do not consume credits permanently.
 
-> Milestone 4 implementation status (2026-07-13): Supabase schema migration for `provider_latency_ms` is applied and verified. A protected, mock-mode Vercel preview now passes desktop/mobile end-to-end QA against Supabase through a dedicated preview login that inherits the application RLS role; QA data was deleted afterward. No preview or production `OPENAI_API_KEY` exists, so real-pack acceptance and production activation remain intentionally blocked.
+> Milestone 4 implementation status (2026-07-13): Supabase schema migration for `provider_latency_ms` is applied and verified. A protected Vercel AI Gateway preview passes real standard ($0.004149) and premium ($0.006498) pack generation, evidence, cost ledger, and section-regeneration QA using `openai/gpt-5.4-mini`; all hosted QA data was deleted. Production remains deterministic mock mode pending an approved AI budget or production API key.
 
 ---
 
