@@ -11,6 +11,12 @@ return [
         'oidc_token' => env('VERCEL_OIDC_TOKEN'),
     ],
 
+    'stripe' => [
+        'secret' => env('STRIPE_SECRET_KEY'),
+        'price_id' => env('STRIPE_BETA_PRICE_ID'),
+        'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

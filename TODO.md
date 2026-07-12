@@ -9,7 +9,7 @@ This is the execution backlog for the paid concierge beta. Work from the latest 
 - Deployed vertical slice: workspace → brand → product → source snapshot → campaign pack → version
 - Team operations: five-seat limit, secure invitations, owner controls
 - Usage operations: credit ledger, provider cost ledger, COGS alerts
-- Current verification baseline: 47 tests, 167 assertions
+- Current verification baseline: 57 tests, 187 assertions
 - Production generator: deterministic `mock`
 - Production media uploads: disabled
 
@@ -61,21 +61,21 @@ Acceptance criteria:
 
 Dependencies: Stripe account, product/price IDs, webhook secret.
 
-- [ ] Install the official Stripe PHP SDK or Laravel Cashier after checking current compatibility.
-- [ ] Add billing/subscription fields without storing sensitive payment data.
+- [x] Install the official Stripe PHP SDK or Laravel Cashier after checking current compatibility.
+- [x] Add billing/subscription fields without storing sensitive payment data.
 - [ ] Create the $129/month concierge beta price.
-- [ ] Build owner-only checkout and billing-management flows.
-- [ ] Implement signed Stripe webhooks with idempotency.
+- [x] Build owner-only checkout and billing-management flows.
+- [x] Implement signed Stripe webhooks with idempotency.
 - [ ] Handle checkout completion, renewal, cancellation, failed payment, and refund events.
-- [ ] Gate paid features using server-side subscription entitlement checks.
-- [ ] Keep existing workspaces accessible in a safe read-only state after payment failure/cancellation.
-- [ ] Add monthly allocation of 50 pack credits exactly once per paid billing cycle.
+- [x] Gate paid features using server-side subscription entitlement checks.
+- [x] Keep existing workspaces accessible in a safe read-only state after payment failure/cancellation.
+- [x] Add monthly allocation of 50 pack credits exactly once per paid billing cycle.
 - [ ] Add $2 per-credit overage metering and reconciliation.
-- [ ] Ensure premium deep analysis consumes three credits.
-- [ ] Ensure one pack credit includes the initial generation plus three section regenerations within 24 hours.
-- [ ] Prevent unlimited or negative-credit usage.
-- [ ] Add Billing UI showing plan, seats, brands, credits, overages, next renewal, and payment status.
-- [ ] Test webhook replays, out-of-order events, duplicate events, and failed renewals.
+- [x] Ensure premium deep analysis consumes three credits.
+- [x] Ensure one pack credit includes the initial generation plus three section regenerations within 24 hours.
+- [x] Prevent unlimited or negative-credit usage.
+- [x] Add Billing UI showing plan, seats, brands, credits, overages, next renewal, and payment status.
+- [x] Test webhook replays, out-of-order events, duplicate events, and failed renewals.
 - [ ] Run Stripe test-mode checkout and webhook QA on Vercel preview.
 
 Acceptance criteria:
@@ -84,6 +84,8 @@ Acceptance criteria:
 - Each paid cycle grants exactly 50 credits once.
 - Overage is billed at $2 per credit and is auditable.
 - Duplicate webhooks cannot duplicate credits or charges.
+
+> Milestone 5 implementation status (2026-07-13): the official Stripe SDK, subscription state, owner-only Checkout/Portal routes, CSRF-exempt signed webhooks, invoice-ID idempotent allocations, event ordering guard, server-side read-only entitlement gate, and responsive Billing summary are implemented and locally verified. Stripe remains unconfigured everywhere. Creating the live $129 price, configuring test credentials/webhook endpoint, validating refund behavior, implementing $2 overage meter reconciliation, and Vercel/Supabase test-mode acceptance remain deliberately unchecked.
 
 ---
 

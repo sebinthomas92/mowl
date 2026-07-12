@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Workspace extends Model
 {
@@ -35,8 +36,22 @@ class Workspace extends Model
         return $this->hasMany(CampaignGenerationJob::class);
     }
 
+    public function subscription(): HasOne
+    {
+        return $this->hasOne(WorkspaceSubscription::class);
+    }
+
     public function creditBalance(): int
     {
         return (int) $this->credits()->sum('amount');
+    }
+
+    public function hasPaidAccess(): bool
+    {
+        if (! config('billing.enforce')) {
+            return true;
+        }
+
+        return in_array($this->subscription?->status, ['active', 'trialing'], true);
     }
 }

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\BillingController;
 use App\Http\Controllers\CampaignJobController;
 use App\Http\Controllers\WorkspaceInvitationController;
 use App\Livewire\Auth\Login;
@@ -33,6 +34,9 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/campaign-packs/{pack}', CampaignWorkspace::class)->name('campaign-packs.show');
     Route::get('/team', TeamIndex::class)->name('team.index');
     Route::get('/usage', UsageIndex::class)->name('usage.index');
+    Route::post('/billing/checkout', [BillingController::class, 'checkout'])->name('billing.checkout');
+    Route::post('/billing/portal', [BillingController::class, 'portal'])->name('billing.portal');
+    Route::get('/billing/success', [BillingController::class, 'success'])->name('billing.success');
     Route::post('/internal/campaign-jobs/{generationJob}/process', [CampaignJobController::class, 'process'])
         ->middleware(['signed', 'throttle:6,1'])
         ->name('campaign-jobs.process');
@@ -45,6 +49,8 @@ Route::middleware('auth')->group(function (): void {
         return redirect()->route('login');
     })->name('logout');
 });
+
+Route::post('/stripe/webhook', [BillingController::class, 'webhook'])->name('stripe.webhook');
 
 Route::get('/internal/campaign-jobs/recover', [CampaignJobController::class, 'recover'])
     ->middleware('throttle:6,1')

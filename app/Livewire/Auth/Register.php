@@ -78,11 +78,13 @@ class Register extends Component
             } else {
                 $workspace = Workspace::create(['name' => $data['workspaceName']]);
                 $workspace->users()->attach($user, ['role' => 'owner']);
-                $workspace->credits()->create([
-                    'amount' => config('campaigns.monthly_credits'),
-                    'event' => 'beta_allocation',
-                    'description' => 'Initial beta pack credits',
-                ]);
+                if (! config('billing.enforce')) {
+                    $workspace->credits()->create([
+                        'amount' => config('campaigns.monthly_credits'),
+                        'event' => 'beta_allocation',
+                        'description' => 'Initial beta pack credits',
+                    ]);
+                }
             }
 
             return $user;

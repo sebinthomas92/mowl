@@ -130,6 +130,9 @@ class CampaignWorkspace extends Component
 
         [$pack, $generationJob] = DB::transaction(function () use ($data, $workspace, $creditCost): array {
             $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
+            if (! $lockedWorkspace->hasPaidAccess()) {
+                throw ValidationException::withMessages(['sourceUrl' => 'An active subscription is required to generate campaign packs.']);
+            }
             if ($lockedWorkspace->creditBalance() < $creditCost) {
                 throw ValidationException::withMessages(['sourceUrl' => 'This workspace does not have enough pack credits.']);
             }
@@ -216,6 +219,9 @@ class CampaignWorkspace extends Component
 
         $job = DB::transaction(function () use ($workspace, $pack): CampaignGenerationJob {
             $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
+            if (! $lockedWorkspace->hasPaidAccess()) {
+                throw ValidationException::withMessages(['sourceUrl' => 'An active subscription is required to retry campaign packs.']);
+            }
             $lockedPack = CampaignPack::query()->lockForUpdate()->findOrFail($pack->id);
             abort_unless($lockedPack->status === 'failed', 422);
 
@@ -258,6 +264,9 @@ class CampaignWorkspace extends Component
 
         $job = DB::transaction(function () use ($workspace, $pack, $data): CampaignGenerationJob {
             $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
+            if (! $lockedWorkspace->hasPaidAccess()) {
+                throw ValidationException::withMessages(['regenerationSection' => 'An active subscription is required to regenerate sections.']);
+            }
             $lockedPack = CampaignPack::query()->lockForUpdate()->findOrFail($pack->id);
             abort_unless($lockedPack->status === 'approved' && $lockedPack->current_version > 0, 422);
             abort_if(

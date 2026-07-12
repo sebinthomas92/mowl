@@ -16,6 +16,12 @@ class UsageIndex extends Component
 
         return view('livewire.usage-index', [
             'workspace' => $workspace,
+            'subscription' => $workspace->subscription,
+            'canManageBilling' => auth()->user()->workspaces()
+                ->whereKey($workspace->id)
+                ->wherePivot('role', 'owner')
+                ->exists(),
+            'billingConfigured' => filled(config('services.stripe.secret')) && filled(config('services.stripe.price_id')),
             'jobs' => (clone $jobsQuery)->with('campaignPack.product.brand')->latest()->limit(25)->get(),
             'creditEvents' => $workspace->credits()->with('campaignPack')->latest()->limit(20)->get(),
             'creditBalance' => $workspace->creditBalance(),

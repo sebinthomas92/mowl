@@ -13,6 +13,29 @@
                 <article @class(['alert-metric' => $costAlerts > 0])><span>COST ALERTS</span><strong>{{ $costAlerts }}</strong><small>{{ $costAlerts ? 'Review jobs over $'.number_format($cogsAlert, 2) : 'No exceptions detected' }}</small></article>
             </div>
 
+            <section class="billing-summary" aria-labelledby="billing-heading">
+                <div>
+                    <p class="kicker">BILLING</p>
+                    <h2 id="billing-heading">{{ config('billing.plan_name') }}</h2>
+                    <p>${{ config('billing.monthly_price') }}/month · {{ config('campaigns.seat_limit') }} seats · {{ config('campaigns.brand_limit') }} brands · {{ config('campaigns.monthly_credits') }} pack credits</p>
+                </div>
+                <div class="billing-status">
+                    <span>PAYMENT STATUS</span>
+                    <strong>{{ $subscription ? str($subscription->status)->replace('_', ' ')->title() : 'Not subscribed' }}</strong>
+                    <small>{{ $subscription?->current_period_ends_at ? 'Renews '. $subscription->current_period_ends_at->format('M j, Y') : 'Access remains read-only without an active subscription.' }}</small>
+                </div>
+                @if($canManageBilling && $billingConfigured)
+                    <form method="POST" action="{{ $subscription && in_array($subscription->status, ['active', 'trialing'], true) ? route('billing.portal') : route('billing.checkout') }}">
+                        @csrf
+                        <button type="submit" class="billing-action">{{ $subscription && in_array($subscription->status, ['active', 'trialing'], true) ? 'Manage billing' : 'Start subscription' }}</button>
+                    </form>
+                @elseif($canManageBilling)
+                    <small class="billing-setup-note">Billing setup is in progress. Subscription actions will appear here when Stripe is configured.</small>
+                @else
+                    <small class="billing-setup-note">Only the workspace owner can manage billing.</small>
+                @endif
+            </section>
+
             <div class="usage-layout">
                 <section class="usage-ledger" aria-labelledby="jobs-heading">
                     <div class="team-section-heading"><div><p class="kicker">PROVIDER LEDGER</p><h2 id="jobs-heading">Generation jobs</h2></div><span>{{ $jobs->count() }} recent</span></div>
