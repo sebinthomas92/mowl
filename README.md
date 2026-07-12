@@ -11,6 +11,7 @@ It supports account registration, private agency workspaces, tenant-scoped brand
 - Workspace-owner registration and session authentication
 - Authenticated routes and logout
 - Workspace membership with owner/member roles
+- Five-seat beta enforcement with hashed, seven-day invite links, owner controls, and invited-user onboarding
 - Tenant-scoped brand, product, source, and campaign-pack queries
 - Brands, Products, and Campaign Packs libraries
 - Existing-brand reuse in the pack builder
@@ -19,6 +20,7 @@ It supports account registration, private agency workspaces, tenant-scoped brand
 - Queued generation with progress, retries, automatic credit refunds, version history, and three included section regenerations within 24 hours
 - Standard (1 credit) and premium deep analysis (3 credits), with a 50-credit beta allocation
 - Provider usage, request IDs, estimated COGS, cache hits, and the $0.50 cost alert stored per job
+- Workspace usage dashboard for credit balance, provider COGS, alerts, and recent generation history
 - Optional image/video uploads with FFmpeg audio extraction and 8–16 deduplicated 512px frame candidates
 - Mock and OpenAI Responses API generators behind the same structured result contract
 

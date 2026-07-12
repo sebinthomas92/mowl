@@ -6,11 +6,15 @@
     </section>
     <section class="auth-form-panel">
         <form wire:submit="register" class="auth-form register-form">
-            <p class="kicker">CREATE YOUR WORKSPACE</p><h2>Start with the agency.</h2><p>Your first workspace is private to your team.</p>
-            <div class="field-row"><label>Your name<input wire:model="name" type="text" autocomplete="name">@error('name')<small class="error">{{ $message }}</small>@enderror</label><label>Workspace name<input wire:model="workspaceName" type="text" placeholder="Agency name">@error('workspaceName')<small class="error">{{ $message }}</small>@enderror</label></div>
-            <label>Email address<input wire:model="email" type="email" autocomplete="email">@error('email')<small class="error">{{ $message }}</small>@enderror</label>
+            <p class="kicker">{{ $invitedWorkspaceName ? 'JOIN THE WORKSPACE' : 'CREATE YOUR WORKSPACE' }}</p><h2>{{ $invitedWorkspaceName ? 'Join '.$invitedWorkspaceName.'.' : 'Start with the agency.' }}</h2><p>{{ $invitedWorkspaceName ? 'Your seat is reserved for seven days.' : 'Your first workspace is private to your team.' }}</p>
+            @if($invitedWorkspaceName)
+                <label>Your name<input wire:model="name" type="text" autocomplete="name">@error('name')<small class="error">{{ $message }}</small>@enderror</label>
+            @else
+                <div class="field-row"><label>Your name<input wire:model="name" type="text" autocomplete="name">@error('name')<small class="error">{{ $message }}</small>@enderror</label><label>Workspace name<input wire:model="workspaceName" type="text" placeholder="Agency name">@error('workspaceName')<small class="error">{{ $message }}</small>@enderror</label></div>
+            @endif
+            <label>Email address<input wire:model="email" type="email" autocomplete="email" @readonly($invitedWorkspaceName)>@error('email')<small class="error">{{ $message }}</small>@enderror</label>
             <div class="field-row"><label>Password<input wire:model="password" type="password" autocomplete="new-password">@error('password')<small class="error">{{ $message }}</small>@enderror</label><label>Confirm password<input wire:model="password_confirmation" type="password" autocomplete="new-password"></label></div>
-            <button class="primary-button" type="submit">Create workspace <span>→</span></button>
+            <button class="primary-button" type="submit">{{ $invitedWorkspaceName ? 'Join workspace' : 'Create workspace' }} <span>→</span></button>
             <p class="auth-switch">Already have an account? <a href="{{ route('login') }}">Sign in</a></p>
         </form>
     </section>

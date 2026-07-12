@@ -25,6 +25,11 @@ class Workspace extends Model
         return $this->hasMany(WorkspaceCredit::class);
     }
 
+    public function invitations(): HasMany
+    {
+        return $this->hasMany(WorkspaceInvitation::class);
+    }
+
     public function generationJobs(): HasMany
     {
         return $this->hasMany(CampaignGenerationJob::class);
