@@ -9,6 +9,7 @@ use App\Livewire\CampaignPackIndex;
 use App\Livewire\CampaignWorkspace;
 use App\Livewire\ProductIndex;
 use App\Livewire\TeamIndex;
+use App\Livewire\UsageIndex;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
@@ -31,6 +32,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/campaign-packs/create', CampaignWorkspace::class)->name('campaign-packs.create');
     Route::get('/campaign-packs/{pack}', CampaignWorkspace::class)->name('campaign-packs.show');
     Route::get('/team', TeamIndex::class)->name('team.index');
+    Route::get('/usage', UsageIndex::class)->name('usage.index');
     Route::post('/internal/campaign-jobs/{generationJob}/process', [CampaignJobController::class, 'process'])
         ->middleware(['signed', 'throttle:6,1'])
         ->name('campaign-jobs.process');
