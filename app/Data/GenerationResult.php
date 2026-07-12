@@ -14,5 +14,6 @@ final readonly class GenerationResult
         public int $cachedInputTokens = 0,
         public int $outputTokens = 0,
         public ?string $providerRequestId = null,
+        public ?int $providerLatencyMs = null,
     ) {}
 }

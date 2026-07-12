@@ -24,7 +24,7 @@
                             <article class="job-ledger-row">
                                 <div><strong>{{ $job->campaignPack?->product?->name ?? 'Campaign pack' }}</strong><small>{{ $job->section ? 'Regenerate · '.str_replace('_', ' ', $job->section) : ucfirst($job->analysis_mode).' analysis' }} · {{ $job->created_at->format('M j, H:i') }}</small></div>
                                 <span @class(['ledger-status', 'failed' => $job->status === 'failed'])>{{ strtoupper($job->status) }}</span>
-                                <span>{{ number_format(($job->input_tokens + $job->output_tokens) / 1000, 1) }}K <small>tokens</small></span>
+                                <span>{{ number_format(($job->input_tokens + $job->output_tokens) / 1000, 1) }}K <small>tokens @if($job->provider_latency_ms) · {{ $job->provider_latency_ms }}ms @endif</small></span>
                                 <strong @class(['ledger-cost', 'alert' => $job->cost_alert])>${{ number_format((float) $job->estimated_cost, 3) }} @if($job->cost_alert)<i>!</i>@endif</strong>
                             </article>
                         @endforeach
