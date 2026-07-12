@@ -4,10 +4,12 @@ namespace Tests\Feature;
 
 use App\Livewire\Auth\Register;
 use App\Livewire\TeamIndex;
+use App\Mail\WorkspaceInvitationMail;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -18,6 +20,7 @@ class TeamManagementTest extends TestCase
 
     public function test_an_owner_can_create_a_hashed_seven_day_invitation(): void
     {
+        Mail::fake();
         [$owner, $workspace] = $this->workspaceUser('owner');
 
         Livewire::actingAs($owner)
@@ -33,6 +36,7 @@ class TeamManagementTest extends TestCase
         $this->assertSame('buyer@agency.com', $invitation->email);
         $this->assertSame(64, strlen($invitation->token_hash));
         $this->assertTrue($invitation->expires_at->between(now()->addDays(6), now()->addDays(8)));
+        Mail::assertSent(WorkspaceInvitationMail::class, fn (WorkspaceInvitationMail $mail): bool => $mail->hasTo('buyer@agency.com'));
     }
 
     public function test_a_member_cannot_manage_workspace_seats(): void

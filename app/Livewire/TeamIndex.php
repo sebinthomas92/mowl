@@ -3,8 +3,10 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use App\Mail\WorkspaceInvitationMail;
 use App\Models\WorkspaceInvitation;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Livewire\Component;
 
@@ -54,8 +56,9 @@ class TeamIndex extends Component
         });
 
         $this->inviteUrl = route('invitations.accept', ['token' => $token]);
+        Mail::to($invitation->email)->send(new WorkspaceInvitationMail($invitation, $this->inviteUrl));
         $this->email = '';
-        session()->flash('status', 'Invite created for '.$invitation->email.'.');
+        session()->flash('status', 'Invite emailed to '.$invitation->email.'.');
     }
 
     public function revoke(int $invitationId): void
