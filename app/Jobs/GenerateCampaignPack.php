@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Data\GenerationResult;
 use App\Exceptions\OpenAIResponseException;
 use App\Models\CampaignGenerationJob;
+use App\Models\MediaAsset;
 use App\Models\ProcessingCacheEntry;
 use App\Services\CampaignGeneratorManager;
 use App\Services\MediaProcessor;
@@ -90,6 +91,12 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             );
 
             $job->update(['phase' => 'processing_media']);
+            if (MediaAsset::query()
+                ->where('product_id', $job->campaignPack->product_id)
+                ->whereIn('status', ['uploaded', 'processing'])
+                ->exists()) {
+                throw new \RuntimeException('Media processing is still in progress.');
+            }
             $page['media_analysis'] = $mediaProcessor->processForProduct($job->campaignPack->product);
 
             $job->update(['phase' => 'generating_pack']);

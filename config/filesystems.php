@@ -60,6 +60,19 @@ return [
             'report' => false,
         ],
 
+        'marketing-owl-media' => [
+            'driver' => 's3',
+            'key' => env('MEDIA_S3_ACCESS_KEY_ID'),
+            'secret' => env('MEDIA_S3_SECRET_ACCESS_KEY'),
+            'region' => env('MEDIA_S3_REGION', 'auto'),
+            'bucket' => env('MEDIA_S3_BUCKET', 'marketing-owl-media'),
+            'endpoint' => env('MEDIA_S3_ENDPOINT'),
+            'use_path_style_endpoint' => env('MEDIA_S3_USE_PATH_STYLE_ENDPOINT', true),
+            'visibility' => 'private',
+            'throw' => false,
+            'report' => false,
+        ],
+
     ],
 
     /*

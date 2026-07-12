@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ProcessMediaAsset;
 use App\Livewire\CampaignWorkspace;
 use App\Models\Brand;
 use App\Models\CampaignPack;
@@ -75,6 +76,7 @@ class CampaignWorkspaceTest extends TestCase
 
     public function test_media_metadata_is_persisted_after_the_temporary_upload_is_stored(): void
     {
+        config(['campaigns.media.uploads_enabled' => true]);
         Storage::fake('local');
         Queue::fake();
         [$user, $workspace] = $this->workspaceUser();
@@ -95,15 +97,67 @@ class CampaignWorkspaceTest extends TestCase
         $this->assertSame('video/mp4', $asset->mime_type);
         $this->assertSame(512 * 1024, $asset->size_bytes);
         Storage::disk('local')->assertExists($asset->path);
+        Queue::assertPushed(ProcessMediaAsset::class, fn (ProcessMediaAsset $job): bool => $job->mediaAssetId === $asset->id);
     }
 
     public function test_media_upload_controls_can_be_disabled_until_production_storage_is_configured(): void
     {
-        config(['campaigns.media.uploads_enabled' => false]);
         [$user] = $this->workspaceUser();
 
         Livewire::actingAs($user)->test(CampaignWorkspace::class)
             ->assertDontSee('Product images or short videos');
+    }
+
+    public function test_media_upload_rejects_an_unapproved_extension_and_mime_type(): void
+    {
+        config(['campaigns.media.uploads_enabled' => true]);
+        [$user, $workspace] = $this->workspaceUser();
+        $product = $workspace->brands()->create(['name' => 'Media Brand'])->products()->create(['name' => 'Demo Product']);
+
+        Livewire::actingAs($user)->test(CampaignWorkspace::class)
+            ->set('productId', $product->id)
+            ->set('step', 3)
+            ->set('sourceUrl', 'https://example.com/products/demo')
+            ->set('mediaUploads', [UploadedFile::fake()->create('malicious.exe', 10, 'application/x-msdownload')])
+            ->call('generatePack')
+            ->assertHasErrors(['mediaUploads.0']);
+    }
+
+    public function test_media_upload_rejects_files_larger_than_the_worker_limit(): void
+    {
+        config(['campaigns.media.uploads_enabled' => true, 'campaigns.media.max_upload_kilobytes' => 1]);
+        [$user, $workspace] = $this->workspaceUser();
+        $product = $workspace->brands()->create(['name' => 'Media Brand'])->products()->create(['name' => 'Demo Product']);
+
+        Livewire::actingAs($user)->test(CampaignWorkspace::class)
+            ->set('productId', $product->id)
+            ->set('step', 3)
+            ->set('sourceUrl', 'https://example.com/products/demo')
+            ->set('mediaUploads', [UploadedFile::fake()->create('large.mp4', 2, 'video/mp4')])
+            ->call('generatePack')
+            ->assertHasErrors(['mediaUploads.0']);
+    }
+
+    public function test_duplicate_media_uploads_reuse_the_existing_asset_and_worker_job(): void
+    {
+        config(['campaigns.media.uploads_enabled' => true]);
+        Storage::fake('local');
+        Queue::fake();
+        [$user, $workspace] = $this->workspaceUser();
+        $product = $workspace->brands()->create(['name' => 'Media Brand'])->products()->create(['name' => 'Demo Product']);
+        $first = UploadedFile::fake()->createWithContent('demo.png', 'same media bytes');
+        $second = UploadedFile::fake()->createWithContent('duplicate.png', 'same media bytes');
+
+        Livewire::actingAs($user)->test(CampaignWorkspace::class)
+            ->set('productId', $product->id)
+            ->set('step', 3)
+            ->set('sourceUrl', 'https://example.com/products/demo')
+            ->set('mediaUploads', [$first, $second])
+            ->call('generatePack')
+            ->assertHasNoErrors();
+
+        $this->assertCount(1, $product->mediaAssets()->get());
+        Queue::assertPushed(ProcessMediaAsset::class, 1);
     }
 
     public function test_each_setup_step_validates_required_input(): void

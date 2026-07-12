@@ -17,8 +17,11 @@ return [
         'max_extracted_characters' => 60_000,
     ],
     'media' => [
-        'uploads_enabled' => env('CAMPAIGN_MEDIA_UPLOADS_ENABLED', true),
+        'uploads_enabled' => env('CAMPAIGN_MEDIA_UPLOADS_ENABLED', false),
         'disk' => env('CAMPAIGN_MEDIA_DISK', 'local'),
+        'queue' => env('CAMPAIGN_MEDIA_QUEUE', 'media'),
+        'worker_timeout_seconds' => (int) env('CAMPAIGN_MEDIA_WORKER_TIMEOUT', 150),
+        'max_upload_kilobytes' => (int) env('CAMPAIGN_MEDIA_MAX_UPLOAD_KILOBYTES', 102400),
         'ffmpeg' => env('FFMPEG_PATH', '/opt/homebrew/bin/ffmpeg'),
         'ffprobe' => env('FFPROBE_PATH', '/opt/homebrew/bin/ffprobe'),
         'max_video_seconds' => 90,

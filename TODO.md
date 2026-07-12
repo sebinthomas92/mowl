@@ -9,7 +9,7 @@ This is the execution backlog for the paid concierge beta. Work from the latest 
 - Deployed vertical slice: workspace → brand → product → source snapshot → campaign pack → version
 - Team operations: five-seat limit, secure invitations, owner controls
 - Usage operations: credit ledger, provider cost ledger, COGS alerts
-- Current verification baseline: 47 tests, 167 assertions
+- Current verification baseline: 54 tests, 194 assertions
 - Production generator: deterministic `mock`
 - Production media uploads: disabled
 
@@ -92,18 +92,18 @@ Acceptance criteria:
 Dependencies: S3-compatible credentials and selected worker platform.
 
 - [ ] Configure the existing private `marketing-owl-media` bucket through S3-compatible credentials.
-- [ ] Store originals and derivatives under workspace/product-scoped paths.
+- [x] Store originals and derivatives under workspace/product-scoped paths.
 - [ ] Add signed upload/download URLs and enforce workspace authorization.
 - [ ] Choose durable worker compute for FFmpeg; do not run long video processing in the PHP web request.
 - [ ] Connect web app → durable queue → media worker → database status updates.
-- [ ] Validate duration, MIME type, file size, extension, and content hash server-side.
-- [ ] Extract audio and scene candidates locally in the worker.
+- [x] Validate duration, MIME type, file size, extension, and content hash server-side.
+- [x] Extract audio and scene candidates locally in the worker.
 - [ ] Produce only 8–16 deduplicated 512px frames.
 - [ ] Transcribe extracted audio through the configured provider.
 - [ ] Cache originals, transcripts, frames, and analysis by content hash.
 - [ ] Add retry, timeout, stale-job recovery, and dead-letter handling.
 - [ ] Add retention/deletion behavior for originals and derivatives.
-- [ ] Add media-processing cost and duration telemetry.
+- [x] Add media-processing cost and duration telemetry.
 - [ ] Test malicious files, oversized files, duplicate uploads, failed FFmpeg, and partial retries.
 - [ ] Enable media uploads in preview and complete image/video pack QA.
 - [ ] Enable `CAMPAIGN_MEDIA_UPLOADS_ENABLED=true` in production only after worker QA passes.
@@ -114,6 +114,8 @@ Acceptance criteria:
 - Web requests do not wait for FFmpeg.
 - Duplicate media reuses cached derivatives.
 - Cross-workspace media access is impossible.
+
+> Milestone 6 implementation status (2026-07-13): uploads now default to disabled, while the existing workspace/product-scoped originals and derivatives are processed by a separate retrying `media` queue job. Generation waits for media instead of running FFmpeg inline; attempt, duration, cost, and error telemetry is persisted. A member-scoped private download route returns a five-minute S3 URL when the configured media bucket is available. Full S3 direct-upload, durable worker selection/configuration, provider transcription, retention, and hosted video acceptance remain blocked on S3-compatible and worker credentials.
 
 ---
 

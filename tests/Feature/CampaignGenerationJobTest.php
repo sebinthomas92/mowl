@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Jobs\GenerateCampaignPack;
 use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
+use App\Models\MediaAsset;
 use App\Models\Workspace;
 use App\Services\CampaignGeneratorManager;
 use App\Services\MediaProcessor;
@@ -132,6 +133,40 @@ class CampaignGenerationJobTest extends TestCase
 
         $this->assertDatabaseCount('campaign_pack_versions', 0);
         $this->assertSame(1, $job->fresh()->attempts);
+    }
+
+    public function test_a_campaign_job_waits_for_its_queued_media_worker(): void
+    {
+        [$workspace, $product, , , $job] = $this->generationFixture();
+        $asset = MediaAsset::create([
+            'workspace_id' => $workspace->id,
+            'product_id' => $product->id,
+            'type' => 'video',
+            'disk' => 'local',
+            'path' => 'campaign-media/pending.mp4',
+            'original_name' => 'pending.mp4',
+            'mime_type' => 'video/mp4',
+            'size_bytes' => 1,
+            'content_hash' => hash('sha256', 'pending-media'),
+            'status' => 'uploaded',
+        ]);
+        Http::fake(['93.184.216.34/*' => Http::response($this->productHtml(), 200, ['Content-Type' => 'text/html'])]);
+
+        try {
+            (new GenerateCampaignPack($job->id))->handle(
+                app(ProductPageFetcher::class),
+                app(MediaProcessor::class),
+                app(CampaignGeneratorManager::class),
+                app(ProviderCostCalculator::class),
+            );
+            $this->fail('Campaign generation should wait for media processing.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('Media processing is still in progress.', $exception->getMessage());
+        }
+
+        $this->assertSame('uploaded', $asset->fresh()->status);
+        $this->assertSame('retrying', $job->fresh()->status);
+        $this->assertSame('retry_wait', $job->fresh()->phase);
     }
 
     public function test_a_section_regeneration_creates_a_new_version_without_spending_an_included_credit(): void

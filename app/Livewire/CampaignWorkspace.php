@@ -10,6 +10,7 @@ use App\Models\MediaAsset;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
 use App\Services\CampaignJobDispatcher;
+use App\Services\MediaJobDispatcher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
@@ -116,19 +117,19 @@ class CampaignWorkspace extends Component
         $this->step = 3;
     }
 
-    public function generatePack(CampaignJobDispatcher $dispatcher): void
+    public function generatePack(CampaignJobDispatcher $dispatcher, MediaJobDispatcher $mediaDispatcher): void
     {
         abort_unless($this->productId, 422);
         $data = $this->validate([
             'sourceUrl' => ['required', 'url:http,https', 'max:2000'],
             'analysisMode' => ['required', 'in:standard,deep'],
             'mediaUploads' => config('campaigns.media.uploads_enabled') ? ['array', 'max:8'] : ['prohibited'],
-            'mediaUploads.*' => config('campaigns.media.uploads_enabled') ? ['file', 'mimetypes:image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm', 'max:102400'] : ['prohibited'],
+            'mediaUploads.*' => config('campaigns.media.uploads_enabled') ? ['file', 'mimes:jpg,jpeg,png,webp,mp4,mov,webm', 'mimetypes:image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm', 'max:'.config('campaigns.media.max_upload_kilobytes')] : ['prohibited'],
         ]);
         $workspace = $this->currentWorkspace();
         $creditCost = $data['analysisMode'] === 'deep' ? 3 : 1;
 
-        [$pack, $generationJob] = DB::transaction(function () use ($data, $workspace, $creditCost): array {
+        [$pack, $generationJob, $mediaAssetIds] = DB::transaction(function () use ($data, $workspace, $creditCost): array {
             $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
             if ($lockedWorkspace->creditBalance() < $creditCost) {
                 throw ValidationException::withMessages(['sourceUrl' => 'This workspace does not have enough pack credits.']);
@@ -144,6 +145,7 @@ class CampaignWorkspace extends Component
                 'status' => 'pending',
             ]);
 
+            $mediaAssetIds = [];
             foreach ($this->mediaUploads as $upload) {
                 $realPath = $upload->getRealPath();
                 $hash = hash_file('sha256', $realPath);
@@ -157,7 +159,7 @@ class CampaignWorkspace extends Component
                     "{$hash}.{$extension}",
                     $disk,
                 );
-                MediaAsset::firstOrCreate(
+                $asset = MediaAsset::firstOrCreate(
                     ['product_id' => $product->id, 'content_hash' => $hash],
                     [
                         'workspace_id' => $workspace->id,
@@ -170,6 +172,7 @@ class CampaignWorkspace extends Component
                         'size_bytes' => $size,
                     ],
                 );
+                $mediaAssetIds[] = $asset->id;
             }
 
             $pack = CampaignPack::create([
@@ -198,9 +201,12 @@ class CampaignWorkspace extends Component
                 'description' => ucfirst($data['analysisMode']).' campaign pack generation',
             ]);
 
-            return [$pack, $generationJob];
+            return [$pack, $generationJob, array_values(array_unique($mediaAssetIds))];
         });
 
+        foreach ($mediaAssetIds as $mediaAssetId) {
+            $mediaDispatcher->dispatch($mediaAssetId);
+        }
         $dispatcher->dispatch($generationJob->id);
         $this->packId = $pack->id;
         $this->step = 4;

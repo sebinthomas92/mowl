@@ -39,6 +39,9 @@ class MediaProcessorTest extends TestCase
 
         $processed = $asset->fresh();
         $this->assertSame('processed', $processed->status);
+        $this->assertSame(1, $processed->processing_attempts);
+        $this->assertNotNull($processed->processing_started_at);
+        $this->assertNotNull($processed->processing_duration_ms);
         $this->assertCount(1, $processed->derivatives['images']);
         Storage::disk('local')->assertExists($processed->derivatives['images'][0]['path']);
         @unlink($temporary);
@@ -75,6 +78,8 @@ class MediaProcessorTest extends TestCase
         $processed = $asset->fresh();
         $frames = $processed->derivatives['frames'];
         $this->assertSame('processed', $processed->status);
+        $this->assertSame(1, $processed->processing_attempts);
+        $this->assertNotNull($processed->processing_duration_ms);
         $this->assertGreaterThan(0, count($frames));
         $this->assertLessThanOrEqual(config('campaigns.media.max_frames'), count($frames));
         $this->assertSame('pending_credentials', $processed->metadata['transcription_status']);

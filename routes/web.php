@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CampaignJobController;
+use App\Http\Controllers\MediaAssetDownloadController;
 use App\Http\Controllers\WorkspaceInvitationController;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\Register;
@@ -33,6 +34,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/campaign-packs/{pack}', CampaignWorkspace::class)->name('campaign-packs.show');
     Route::get('/team', TeamIndex::class)->name('team.index');
     Route::get('/usage', UsageIndex::class)->name('usage.index');
+    Route::get('/media-assets/{mediaAsset}/download', MediaAssetDownloadController::class)->name('media-assets.download');
     Route::post('/internal/campaign-jobs/{generationJob}/process', [CampaignJobController::class, 'process'])
         ->middleware(['signed', 'throttle:6,1'])
         ->name('campaign-jobs.process');

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\MediaAsset;
 use App\Models\Product;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -19,11 +20,6 @@ class MediaProcessor
         $summary = ['frames' => [], 'images' => [], 'transcripts' => [], 'assets' => []];
 
         foreach ($product->mediaAssets()->get() as $asset) {
-            if ($asset->status !== 'processed') {
-                $this->process($asset);
-                $asset->refresh();
-            }
-
             $summary['assets'][] = [
                 'id' => $asset->id,
                 'type' => $asset->type,
@@ -53,7 +49,13 @@ class MediaProcessor
             return;
         }
 
-        $asset->update(['status' => 'processing', 'error_message' => null]);
+        $startedAt = hrtime(true);
+        $asset->update([
+            'status' => 'processing',
+            'error_message' => null,
+            'processing_attempts' => DB::raw('processing_attempts + 1'),
+            'processing_started_at' => now(),
+        ]);
         $temporaryDirectory = sys_get_temp_dir().'/marketing-owl-processing/'.Str::uuid();
         File::ensureDirectoryExists($temporaryDirectory);
         $temporarySource = null;
@@ -69,11 +71,14 @@ class MediaProcessor
                 'derivatives' => $processed['derivatives'],
                 'metadata' => $processed['metadata'],
                 'processed_at' => now(),
+                'processing_duration_ms' => (int) ((hrtime(true) - $startedAt) / 1_000_000),
+                'processing_cost' => 0,
             ]);
         } catch (Throwable $exception) {
             $asset->update([
                 'status' => 'failed',
                 'error_message' => mb_substr($exception->getMessage(), 0, 2000),
+                'processing_duration_ms' => (int) ((hrtime(true) - $startedAt) / 1_000_000),
             ]);
             throw $exception;
         } finally {
