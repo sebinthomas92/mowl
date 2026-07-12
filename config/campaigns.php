@@ -7,6 +7,7 @@ return [
     'cron_secret' => env('CRON_SECRET'),
     'monthly_credits' => (int) env('CAMPAIGN_MONTHLY_CREDITS', 50),
     'brand_limit' => (int) env('CAMPAIGN_BRAND_LIMIT', 10),
+    'seat_limit' => (int) env('CAMPAIGN_SEAT_LIMIT', 5),
     'cogs_target' => (float) env('CAMPAIGN_COGS_TARGET', 0.25),
     'cogs_alert' => (float) env('CAMPAIGN_COGS_ALERT', 0.50),
     'source' => [

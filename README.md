@@ -11,6 +11,7 @@ It supports account registration, private agency workspaces, tenant-scoped brand
 - Workspace-owner registration and session authentication
 - Authenticated routes and logout
 - Workspace membership with owner/member roles
+- Five-seat beta enforcement with hashed, seven-day invite links, owner controls, and invited-user onboarding
 - Tenant-scoped brand, product, source, and campaign-pack queries
 - Brands, Products, and Campaign Packs libraries
 - Existing-brand reuse in the pack builder

@@ -18,6 +18,7 @@
         <a href="{{ route('brands.index') }}" @class(['active' => request()->routeIs('brands.*')])><span>◇</span> Brands</a>
         <a href="{{ route('products.index') }}" @class(['active' => request()->routeIs('products.*')])><span>▱</span> Products</a>
         <a href="{{ route('campaign-packs.index') }}" @class(['active' => request()->routeIs('campaign-packs.*')])><span>▤</span> Campaign packs</a>
+        <a href="{{ route('team.index') }}" @class(['active' => request()->routeIs('team.*')])><span>◎</span> Team</a>
     </nav>
 
     <div class="nav-label"><span>Workspace</span><i></i></div>
