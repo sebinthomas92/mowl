@@ -20,12 +20,14 @@ return new class extends Migration
 
         if (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE stripe_webhook_events ENABLE ROW LEVEL SECURITY');
+            DB::unprepared("DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'marketing_owl_app') THEN CREATE POLICY marketing_owl_app_full_access ON stripe_webhook_events FOR ALL TO marketing_owl_app USING (true) WITH CHECK (true); END IF; END $$;");
         }
     }
 
     public function down(): void
     {
         if (DB::getDriverName() === 'pgsql') {
+            DB::unprepared("DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'stripe_webhook_events' AND policyname = 'marketing_owl_app_full_access') THEN DROP POLICY marketing_owl_app_full_access ON stripe_webhook_events; END IF; END $$;");
             DB::statement('ALTER TABLE stripe_webhook_events DISABLE ROW LEVEL SECURITY');
         }
 
