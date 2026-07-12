@@ -9,7 +9,7 @@ This is the execution backlog for the paid concierge beta. Work from the latest 
 - Deployed vertical slice: workspace → brand → product → source snapshot → campaign pack → version
 - Team operations: five-seat limit, secure invitations, owner controls
 - Usage operations: credit ledger, provider cost ledger, COGS alerts
-- Current verification baseline: 47 tests, 168 assertions
+- Current verification baseline: 49 tests, 172 assertions
 - Production generator: deterministic `mock`
 - Production media uploads: disabled
 
@@ -142,7 +142,7 @@ Dependency: transactional email provider credentials and verified sending domain
 
 - [ ] Configure production mail provider and `FROM` identity.
 - [x] Send workspace invitation emails using the existing secure invite tokens.
-- [ ] Add password-reset request and reset flows.
+- [x] Add password-reset request and reset flows.
 - [ ] Add email verification for new accounts.
 - [ ] Add resend verification/invitation actions with throttling.
 - [ ] Add subscription, payment-failure, credit-low, job-failed, and cost-alert emails.
