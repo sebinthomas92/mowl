@@ -26,7 +26,7 @@ return new class extends Migration
 
         if (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE workspace_invitations ENABLE ROW LEVEL SECURITY');
-            DB::statement("DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'marketing_owl_app') THEN GRANT SELECT, INSERT, UPDATE, DELETE ON workspace_invitations TO marketing_owl_app; GRANT USAGE, SELECT ON SEQUENCE workspace_invitations_id_seq TO marketing_owl_app; END IF; END $$");
+            DB::statement("DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'marketing_owl_app') THEN GRANT SELECT, INSERT, UPDATE, DELETE ON workspace_invitations TO marketing_owl_app; GRANT USAGE, SELECT ON SEQUENCE workspace_invitations_id_seq TO marketing_owl_app; EXECUTE 'CREATE POLICY marketing_owl_app_full_access ON workspace_invitations FOR ALL TO marketing_owl_app USING (true) WITH CHECK (true)'; END IF; END $$");
         }
     }
 
