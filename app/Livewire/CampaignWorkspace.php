@@ -189,6 +189,7 @@ class CampaignWorkspace extends Component
                 'source_snapshot_id' => $source->id,
                 'analysis_mode' => $data['analysisMode'],
                 'credit_cost' => $creditCost,
+                'idempotency_key' => "pack:{$pack->id}:initial",
             ]);
             $workspace->credits()->create([
                 'campaign_pack_id' => $pack->id,
@@ -229,6 +230,7 @@ class CampaignWorkspace extends Component
                 'source_snapshot_id' => $lockedPack->source_snapshot_id,
                 'analysis_mode' => $lockedPack->analysis_mode,
                 'credit_cost' => $lockedPack->credit_cost,
+                'idempotency_key' => "pack:{$lockedPack->id}:retry:".now()->format('Uu'),
             ]);
             $workspace->credits()->create([
                 'campaign_pack_id' => $lockedPack->id,
@@ -285,6 +287,7 @@ class CampaignWorkspace extends Component
                 'section' => $data['regenerationSection'],
                 'base_version' => $lockedPack->current_version,
                 'credit_cost' => $creditCost,
+                'idempotency_key' => "pack:{$lockedPack->id}:section:{$data['regenerationSection']}:version:{$lockedPack->current_version}",
             ]);
 
             if ($creditCost > 0) {

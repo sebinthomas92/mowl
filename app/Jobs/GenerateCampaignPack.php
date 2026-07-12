@@ -53,6 +53,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 'model' => $model,
                 'attempts' => DB::raw('attempts + 1'),
                 'started_at' => DB::raw('COALESCE(started_at, CURRENT_TIMESTAMP)'),
+                'heartbeat_at' => now(),
                 'error_code' => null,
                 'error_message' => null,
             ]);
@@ -62,6 +63,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
         }
 
         $job = CampaignGenerationJob::with(['campaignPack.product', 'sourceSnapshot'])->findOrFail($this->generationJobId);
+        $job->events()->create(['type' => 'claimed', 'phase' => 'fetching_source']);
         if (! $job->section) {
             $job->campaignPack->update(['status' => 'processing']);
         }
@@ -90,9 +92,11 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             );
 
             $job->update(['phase' => 'processing_media']);
+            $job->update(['heartbeat_at' => now()]);
             $page['media_analysis'] = $mediaProcessor->processForProduct($job->campaignPack->product);
 
             $job->update(['phase' => 'generating_pack']);
+            $job->update(['heartbeat_at' => now()]);
             if ($job->section) {
                 $baseContent = $job->campaignPack->versions()->where('version', $job->base_version)->value('content') ?? [];
                 $page['regeneration_section'] = $job->section;
@@ -180,6 +184,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                     'provider_latency_ms' => $result->providerLatencyMs,
                     'completed_at' => now(),
                 ]);
+                $job->events()->create(['type' => 'completed', 'phase' => 'complete', 'metadata' => ['cache_hit' => (bool) $cached]]);
             });
         } catch (Throwable $exception) {
             $job->refresh();
@@ -190,6 +195,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 'error_code' => $exception instanceof OpenAIResponseException ? $exception->errorCode : class_basename($exception),
                 'error_message' => mb_substr($exception->getMessage(), 0, 2000),
             ]);
+            $job->events()->create(['type' => 'retrying', 'phase' => 'retry_wait', 'metadata' => ['error' => class_basename($exception)]]);
             if (! $job->section && $failedPhase === 'fetching_source') {
                 $job->sourceSnapshot->update([
                     'status' => 'failed',
@@ -203,12 +209,11 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
-        $job = CampaignGenerationJob::find($this->generationJobId);
-        if (! $job) {
-            return;
-        }
-
-        DB::transaction(function () use ($job, $exception): void {
+        DB::transaction(function () use ($exception): void {
+            $job = CampaignGenerationJob::query()->lockForUpdate()->find($this->generationJobId);
+            if (! $job || $job->status === 'failed') {
+                return;
+            }
             $job->update([
                 'status' => 'failed',
                 'phase' => 'failed',
@@ -216,6 +221,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 'error_message' => $exception ? mb_substr($exception->getMessage(), 0, 2000) : $job->error_message,
                 'completed_at' => now(),
             ]);
+            $job->events()->create(['type' => 'failed', 'phase' => 'failed', 'metadata' => ['error' => $job->error_code]]);
             if (! $job->section) {
                 $job->campaignPack()->update(['status' => 'failed']);
             }

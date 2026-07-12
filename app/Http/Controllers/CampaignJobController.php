@@ -26,7 +26,7 @@ class CampaignJobController extends Controller
 
         CampaignGenerationJob::query()
             ->where('status', 'processing')
-            ->where('updated_at', '<', now()->subMinutes(10))
+            ->where(fn ($query) => $query->whereNull('heartbeat_at')->orWhere('heartbeat_at', '<', now()->subMinutes(10)))
             ->update(['status' => 'retrying', 'phase' => 'retry_wait']);
 
         $generationJob = CampaignGenerationJob::query()

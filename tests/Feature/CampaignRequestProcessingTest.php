@@ -64,6 +64,19 @@ class CampaignRequestProcessingTest extends TestCase
         $this->assertSame('completed', $job->fresh()->status);
     }
 
+    public function test_recovery_does_not_reclaim_a_job_with_a_fresh_heartbeat(): void
+    {
+        [, , $job] = $this->generationFixture();
+        config(['campaigns.cron_secret' => 'test-secret']);
+        $job->update(['status' => 'processing', 'phase' => 'generating_pack', 'heartbeat_at' => now()]);
+
+        $this->withToken('test-secret')->get(route('campaign-jobs.recover'))
+            ->assertOk()
+            ->assertJson(['status' => 'idle']);
+
+        $this->assertSame('processing', $job->fresh()->status);
+    }
+
     private function generationFixture(): array
     {
         $user = User::factory()->create();

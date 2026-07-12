@@ -4,15 +4,16 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class CampaignGenerationJob extends Model
 {
     protected $fillable = [
         'workspace_id', 'campaign_pack_id', 'source_snapshot_id', 'status', 'phase', 'provider', 'model',
-        'analysis_mode', 'section', 'base_version', 'credit_cost', 'attempts', 'cache_hit', 'input_tokens', 'cached_input_tokens',
+        'analysis_mode', 'section', 'base_version', 'idempotency_key', 'credit_cost', 'attempts', 'cache_hit', 'input_tokens', 'cached_input_tokens',
         'output_tokens', 'estimated_cost', 'cost_alert', 'provider_request_id', 'error_code', 'error_message',
         'provider_latency_ms',
-        'started_at', 'completed_at',
+        'started_at', 'heartbeat_at', 'completed_at',
     ];
 
     protected function casts(): array
@@ -22,6 +23,7 @@ class CampaignGenerationJob extends Model
             'cost_alert' => 'boolean',
             'estimated_cost' => 'decimal:6',
             'started_at' => 'datetime',
+            'heartbeat_at' => 'datetime',
             'completed_at' => 'datetime',
         ];
     }
@@ -39,5 +41,10 @@ class CampaignGenerationJob extends Model
     public function sourceSnapshot(): BelongsTo
     {
         return $this->belongsTo(SourceSnapshot::class);
+    }
+
+    public function events(): HasMany
+    {
+        return $this->hasMany(CampaignJobEvent::class);
     }
 }

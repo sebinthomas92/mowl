@@ -9,7 +9,7 @@ This is the execution backlog for the paid concierge beta. Work from the latest 
 - Deployed vertical slice: workspace → brand → product → source snapshot → campaign pack → version
 - Team operations: five-seat limit, secure invitations, owner controls
 - Usage operations: credit ledger, provider cost ledger, COGS alerts
-- Current verification baseline: 47 tests, 167 assertions
+- Current verification baseline: 48 tests, 174 assertions
 - Production generator: deterministic `mock`
 - Production media uploads: disabled
 
@@ -120,12 +120,12 @@ Acceptance criteria:
 ## Milestone 7 — Durable campaign job infrastructure (P1)
 
 - [ ] Move long OpenAI/media work from request-bound execution to a durable queue.
-- [ ] Define idempotency keys for every job and section regeneration.
-- [ ] Add exponential retry with terminal failure states.
+- [x] Define idempotency keys for every job and section regeneration.
+- [x] Add exponential retry with terminal failure states.
 - [ ] Add stale-job recovery scheduling.
-- [ ] Add dead-job visibility to the Usage/Admin surfaces.
-- [ ] Preserve atomic credit charge/refund behavior across retries.
-- [ ] Add concurrency protection for duplicate user clicks and webhook/job redelivery.
+- [x] Add dead-job visibility to the Usage/Admin surfaces.
+- [x] Preserve atomic credit charge/refund behavior across retries.
+- [x] Add concurrency protection for duplicate user clicks and webhook/job redelivery.
 - [ ] Add structured logs and alerts for elevated failure rate, latency, and cost.
 
 Acceptance criteria:
@@ -133,6 +133,8 @@ Acceptance criteria:
 - Jobs survive function restarts and provider timeouts.
 - Duplicate delivery cannot create duplicate versions or credit events.
 - Owners can see and safely retry terminal failures.
+
+> Milestone 7 implementation status (2026-07-13): generation jobs now persist lifecycle events, a heartbeat, and unique idempotency keys; queue claim, retry, completion, and terminal failure are auditable. Stale-recovery safely avoids live heartbeats, and terminal failure/refunds are idempotent. A durable hosted queue scheduler and alert destination remain unconfigured, so request-mode fallback and hosted restart recovery acceptance remain unchecked.
 
 ---
 

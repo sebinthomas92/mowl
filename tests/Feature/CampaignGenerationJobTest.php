@@ -38,6 +38,8 @@ class CampaignGenerationJobTest extends TestCase
         $this->assertSame('0.018000', $job->fresh()->estimated_cost);
         $this->assertDatabaseCount('campaign_pack_versions', 1);
         $this->assertDatabaseCount('processing_cache_entries', 2);
+        $this->assertDatabaseCount('campaign_job_events', 2);
+        $this->assertDatabaseHas('campaign_job_events', ['campaign_generation_job_id' => $job->id, 'type' => 'completed']);
         $this->assertSame(49, $workspace->creditBalance());
 
         $secondSource = $product->sourceSnapshots()->create([
@@ -86,6 +88,8 @@ class CampaignGenerationJobTest extends TestCase
             'amount' => 1,
         ]);
         $this->assertDatabaseCount('workspace_credits', 3);
+        $this->assertDatabaseCount('campaign_job_events', 1);
+        $this->assertDatabaseHas('campaign_job_events', ['campaign_generation_job_id' => $job->id, 'type' => 'failed']);
     }
 
     public function test_each_failed_retry_is_refunded_once(): void
