@@ -10,6 +10,10 @@ return [
     'seat_limit' => (int) env('CAMPAIGN_SEAT_LIMIT', 5),
     'cogs_target' => (float) env('CAMPAIGN_COGS_TARGET', 0.25),
     'cogs_alert' => (float) env('CAMPAIGN_COGS_ALERT', 0.50),
+    'concierge_emails' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', env('CAMPAIGN_CONCIERGE_EMAILS', '')),
+    ))),
     'source' => [
         'timeout_seconds' => 20,
         'max_redirects' => 3,
