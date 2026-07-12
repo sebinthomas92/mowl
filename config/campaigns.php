@@ -31,9 +31,14 @@ return [
     'openai' => [
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
         'model' => env('OPENAI_CAMPAIGN_MODEL', 'gpt-5.4-mini'),
+        'fallback_models' => array_values(array_filter(array_map('trim', explode(',', env('OPENAI_CAMPAIGN_FALLBACK_MODELS', ''))))),
         'reasoning_effort' => env('OPENAI_REASONING_EFFORT', 'low'),
+        'timeout_seconds' => (int) env('OPENAI_TIMEOUT_SECONDS', 120),
+        'retry_attempts' => (int) env('OPENAI_RETRY_ATTEMPTS', 3),
+        'retry_backoff_ms' => [250, 1000],
         'prices_per_million' => [
             'gpt-5.4-mini' => ['input' => 0.75, 'cached_input' => 0.075, 'output' => 4.50],
+            'openai/gpt-5.4-mini' => ['input' => 0.75, 'cached_input' => 0.075, 'output' => 4.50],
         ],
     ],
 ];

@@ -145,6 +145,13 @@
                 </section>
 
                 @php($activeJob = $pack->latestGenerationJob)
+                @if($processJobUrl && $activeJob && in_array($activeJob->status, ['queued', 'retrying']))
+                    <div
+                        wire:key="process-job-{{ $activeJob->id }}-{{ $activeJob->attempts }}"
+                        x-data
+                        x-init="fetch(@js($processJobUrl), { method: 'POST', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content, 'Accept': 'application/json' } }).finally(() => $wire.$refresh())"
+                    ></div>
+                @endif
                 @if($activeJob && $activeJob->section && in_array($activeJob->status, ['queued', 'processing', 'retrying']))
                     <div class="regeneration-banner"><span><i></i> Regenerating <strong>{{ str($activeJob->section)->replace('_', ' ')->title() }}</strong></span><small>{{ str($activeJob->phase)->replace('_', ' ')->title() }} · attempt {{ $activeJob->attempts }} / 3</small></div>
                 @endif

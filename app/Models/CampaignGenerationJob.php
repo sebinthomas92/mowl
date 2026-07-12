@@ -11,6 +11,7 @@ class CampaignGenerationJob extends Model
         'workspace_id', 'campaign_pack_id', 'source_snapshot_id', 'status', 'phase', 'provider', 'model',
         'analysis_mode', 'section', 'base_version', 'credit_cost', 'attempts', 'cache_hit', 'input_tokens', 'cached_input_tokens',
         'output_tokens', 'estimated_cost', 'cost_alert', 'provider_request_id', 'error_code', 'error_message',
+        'provider_latency_ms',
         'started_at', 'completed_at',
     ];
 

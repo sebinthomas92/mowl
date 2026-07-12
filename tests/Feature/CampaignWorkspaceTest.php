@@ -115,6 +115,56 @@ class CampaignWorkspaceTest extends TestCase
             ->assertHasErrors(['brandName' => 'required']);
     }
 
+    public function test_request_processing_renders_a_signed_trigger_for_section_regeneration(): void
+    {
+        config(['campaigns.processing_mode' => 'request']);
+        Queue::fake();
+        [$user, $workspace] = $this->workspaceUser();
+        $brand = $workspace->brands()->create(['name' => 'Regeneration Brand']);
+        $product = $brand->products()->create(['name' => 'Regeneration Product']);
+        $source = $product->sourceSnapshots()->create([
+            'url' => 'https://example.com/product',
+            'content_hash' => hash('sha256', 'source'),
+            'status' => 'ready',
+        ]);
+        $pack = CampaignPack::create([
+            'product_id' => $product->id,
+            'source_snapshot_id' => $source->id,
+            'name' => 'Regeneration Pack',
+            'status' => 'approved',
+            'current_version' => 1,
+            'analysis_mode' => 'standard',
+        ]);
+        $pack->versions()->create([
+            'version' => 1,
+            'content' => [
+                'product_truth' => ['name' => 'Regeneration Product', 'price' => '', 'source' => 'https://example.com/product', 'verified_facts' => []],
+                'direction' => ['title' => 'Direction', 'summary' => 'Summary'],
+                'audiences' => [],
+                'benefits' => [],
+                'meta' => ['primary_text' => 'Primary text', 'headlines' => [], 'descriptions' => []],
+                'hooks' => [],
+                'script' => [],
+                'captions' => [],
+                'shot_log' => [],
+            ],
+            'evidence' => [],
+            'compliance_flags' => [],
+            'generator' => 'mock',
+        ]);
+
+        Livewire::actingAs($user)->test(CampaignWorkspace::class, ['pack' => $pack])
+            ->call('regenerateSection')
+            ->assertSee('campaign-jobs');
+
+        $this->assertDatabaseHas('campaign_generation_jobs', [
+            'campaign_pack_id' => $pack->id,
+            'section' => 'meta',
+            'status' => 'queued',
+        ]);
+        Queue::assertNothingPushed();
+    }
+
     private function workspaceUser(): array
     {
         $user = User::factory()->create();
