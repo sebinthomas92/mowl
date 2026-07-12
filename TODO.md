@@ -9,7 +9,7 @@ This is the execution backlog for the paid concierge beta. Work from the latest 
 - Deployed vertical slice: workspace → brand → product → source snapshot → campaign pack → version
 - Team operations: five-seat limit, secure invitations, owner controls
 - Usage operations: credit ledger, provider cost ledger, COGS alerts
-- Current verification baseline: 44 tests, 159 assertions
+- Current verification baseline: 44 tests, 160 assertions
 - Production generator: deterministic `mock`
 - Production media uploads: disabled
 
@@ -21,8 +21,8 @@ This is the execution backlog for the paid concierge beta. Work from the latest 
 - [x] Add tests before or with each behavioral change.
 - [x] Run `php artisan test`, `vendor/bin/pint --test`, and `npm run build` before pushing.
 - [x] Run desktop and mobile browser QA using `/Users/sebinthomas/.agent-tools/frontend-qa/AGENT_INSTRUCTIONS.md`.
-- [ ] Use a Vercel preview and Supabase-backed end-to-end test before merging.
-- [ ] Remove all QA users/workspaces from Supabase after hosted testing.
+- [x] Use a Vercel preview and Supabase-backed end-to-end test before merging.
+- [x] Remove all QA users/workspaces from Supabase after hosted testing.
 - [ ] Keep `CAMPAIGN_GENERATOR=mock` and media uploads disabled in production until their milestone acceptance checks pass.
 
 ---
@@ -53,7 +53,7 @@ Acceptance criteria:
 - Provider usage and cost appear correctly on the Usage & Cost screen.
 - Failures are recoverable and do not consume credits permanently.
 
-> Milestone 4 implementation status (2026-07-12): Supabase schema migration for `provider_latency_ms` is applied and verified. The Vercel preview deployed and built in mock mode, but its first request returned HTTP 500 because its branch-scoped protected app/database settings are not exportable through Vercel CLI. No preview or production `OPENAI_API_KEY` exists, so real-pack acceptance and production activation remain intentionally blocked.
+> Milestone 4 implementation status (2026-07-13): Supabase schema migration for `provider_latency_ms` is applied and verified. A protected, mock-mode Vercel preview now passes desktop/mobile end-to-end QA against Supabase through a dedicated preview login that inherits the application RLS role; QA data was deleted afterward. No preview or production `OPENAI_API_KEY` exists, so real-pack acceptance and production activation remain intentionally blocked.
 
 ---
 
