@@ -87,7 +87,9 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             return null;
         }
 
-        return config('services.ai_gateway.api_key') ?: config('services.ai_gateway.oidc_token');
+        return config('services.ai_gateway.api_key')
+            ?: config('services.ai_gateway.oidc_token')
+            ?: request()->header('x-vercel-oidc-token');
     }
 
     private function payload(string $model, array $userContent): array
