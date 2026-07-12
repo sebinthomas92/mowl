@@ -6,6 +6,11 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
     ],
 
+    'ai_gateway' => [
+        'api_key' => env('AI_GATEWAY_API_KEY'),
+        'oidc_token' => env('VERCEL_OIDC_TOKEN'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

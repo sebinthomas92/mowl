@@ -73,6 +73,19 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
         Http::assertSent(fn (Request $request) => $request['text']['format']['strict'] === true);
     }
 
+    public function test_it_uses_vercel_oidc_only_for_the_ai_gateway(): void
+    {
+        config()->set('services.openai.api_key', null);
+        config()->set('services.ai_gateway.api_key', null);
+        config()->set('services.ai_gateway.oidc_token', 'gateway-oidc-token');
+        config()->set('campaigns.openai.base_url', 'https://ai-gateway.vercel.sh/v1');
+        config()->set('campaigns.openai.retry_attempts', 1);
+        Http::fake(['ai-gateway.vercel.sh/v1/responses' => Http::response($this->responsePayload($this->campaignOutput()))]);
+
+        $this->assertSame('openai', $this->generate()->provider);
+        Http::assertSent(fn (Request $request) => $request->hasHeader('Authorization', 'Bearer gateway-oidc-token') && $request->url() === 'https://ai-gateway.vercel.sh/v1/responses');
+    }
+
     public function test_it_uses_a_configured_model_fallback_after_a_provider_error(): void
     {
         $this->configureGenerator();

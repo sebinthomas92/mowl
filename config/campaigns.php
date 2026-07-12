@@ -38,6 +38,7 @@ return [
         'retry_backoff_ms' => [250, 1000],
         'prices_per_million' => [
             'gpt-5.4-mini' => ['input' => 0.75, 'cached_input' => 0.075, 'output' => 4.50],
+            'openai/gpt-5.4-mini' => ['input' => 0.75, 'cached_input' => 0.075, 'output' => 4.50],
         ],
     ],
 ];

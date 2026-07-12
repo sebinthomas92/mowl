@@ -18,9 +18,9 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
 {
     public function generate(Product $product, SourceSnapshot $source, array $page): GenerationResult
     {
-        $apiKey = config('services.openai.api_key');
+        $apiKey = $this->apiKey();
         if (! $apiKey) {
-            throw new RuntimeException('OPENAI_API_KEY is not configured.');
+            throw new RuntimeException('OPENAI_API_KEY is not configured. Set an OpenAI key or use Vercel AI Gateway with deployment OIDC.');
         }
 
         $userContent = [[
@@ -75,6 +75,19 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
         }
 
         return [$response, (int) round((hrtime(true) - $startedAt) / 1_000_000)];
+    }
+
+    private function apiKey(): ?string
+    {
+        if ($apiKey = config('services.openai.api_key')) {
+            return $apiKey;
+        }
+
+        if (! str_starts_with(rtrim(config('campaigns.openai.base_url'), '/'), 'https://ai-gateway.vercel.sh')) {
+            return null;
+        }
+
+        return config('services.ai_gateway.api_key') ?: config('services.ai_gateway.oidc_token');
     }
 
     private function payload(string $model, array $userContent): array
