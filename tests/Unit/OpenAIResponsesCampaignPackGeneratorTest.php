@@ -106,6 +106,7 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
     public function test_it_rejects_a_refusal_without_retrying(): void
     {
         $this->configureGenerator();
+        config()->set('campaigns.openai.fallback_models', ['gpt-5.4-mini-fallback']);
         Http::fake([
             'api.openai.com/v1/responses' => Http::response([
                 'output' => [[
@@ -115,9 +116,13 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
             ]),
         ]);
 
-        $this->expectException(OpenAIResponseException::class);
-        $this->expectExceptionMessage('declined');
-        $this->generate();
+        try {
+            $this->generate();
+            $this->fail('Expected the provider refusal to be surfaced.');
+        } catch (OpenAIResponseException $exception) {
+            $this->assertSame('openai_refusal', $exception->errorCode);
+            $this->assertStringContainsString('declined', $exception->getMessage());
+        }
 
         Http::assertSentCount(1);
     }

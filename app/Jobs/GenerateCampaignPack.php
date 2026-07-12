@@ -212,7 +212,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             $job->update([
                 'status' => 'failed',
                 'phase' => 'failed',
-                'error_code' => $exception ? class_basename($exception) : $job->error_code,
+                'error_code' => $exception instanceof OpenAIResponseException ? $exception->errorCode : ($exception ? class_basename($exception) : $job->error_code),
                 'error_message' => $exception ? mb_substr($exception->getMessage(), 0, 2000) : $job->error_message,
                 'completed_at' => now(),
             ]);

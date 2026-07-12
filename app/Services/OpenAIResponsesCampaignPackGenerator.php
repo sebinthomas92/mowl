@@ -41,7 +41,11 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
                 } catch (OpenAIResponseException $exception) {
                     $lastException = $exception;
 
-                    if (! $exception->retryable || $attempt === config('campaigns.openai.retry_attempts')) {
+                    if (! $exception->retryable) {
+                        throw $exception;
+                    }
+
+                    if ($attempt === config('campaigns.openai.retry_attempts')) {
                         break;
                     }
 
