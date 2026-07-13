@@ -8,11 +8,25 @@
         <div><strong>Marketing</strong><strong>Owl</strong></div>
     </a>
 
-    <div class="workspace-switcher">
-        <span class="workspace-monogram">{{ strtoupper(substr($workspace->name, 0, 2)) }}</span>
-        <span><strong>{{ $workspace->name }}</strong><small>{{ ucfirst(auth()->user()->workspaces()->whereKey($workspace->id)->first()->pivot->role) }} workspace</small></span>
-        <span class="chevron">⌄</span>
-    </div>
+    @php($userWorkspaces = auth()->user()->workspaces)
+    @php($membership = $userWorkspaces->firstWhere('id', $workspace->id))
+    <details class="workspace-switcher" @if($userWorkspaces->count() < 2) data-single-workspace @endif>
+        <summary aria-label="Select workspace">
+            <span class="workspace-monogram">{{ strtoupper(substr($workspace->name, 0, 2)) }}</span>
+            <span><strong>{{ $workspace->name }}</strong><small>{{ ucfirst($membership->pivot->role) }} workspace</small></span>
+            @if($userWorkspaces->count() > 1)<span class="chevron" aria-hidden="true">⌄</span>@endif
+        </summary>
+        @if($userWorkspaces->count() > 1)
+            <div class="workspace-options">
+                @foreach($userWorkspaces as $option)
+                    <form method="POST" action="{{ route('workspaces.select', $option) }}">
+                        @csrf
+                        <button type="submit" @class(['active' => $option->id === $workspace->id])>{{ $option->name }}</button>
+                    </form>
+                @endforeach
+            </div>
+        @endif
+    </details>
 
     <nav class="primary-nav" aria-label="Workspace sections">
         <a href="{{ route('brands.index') }}" @class(['active' => request()->routeIs('brands.*')])><span>◇</span> Brands</a>
@@ -20,6 +34,10 @@
         <a href="{{ route('campaign-packs.index') }}" @class(['active' => request()->routeIs('campaign-packs.*')])><span>▤</span> Campaign packs</a>
         <a href="{{ route('team.index') }}" @class(['active' => request()->routeIs('team.*')])><span>◎</span> Team</a>
         <a href="{{ route('usage.index') }}" @class(['active' => request()->routeIs('usage.*')])><span>⌁</span> Usage & cost</a>
+        <a href="{{ route('workspace.settings') }}" @class(['active' => request()->routeIs('workspace.settings')])><span>◌</span> Settings</a>
+        @if(in_array(strtolower(auth()->user()->email), array_map('strtolower', config('campaigns.concierge_emails')), true))
+            <a href="{{ route('concierge.index') }}" @class(['active' => request()->routeIs('concierge.*')])><span>◈</span> Concierge</a>
+        @endif
     </nav>
 
     <div class="nav-label"><span>Workspace</span><i></i></div>

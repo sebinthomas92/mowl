@@ -2,12 +2,22 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\GenerateCampaignPack;
 use App\Livewire\Auth\Register;
+use App\Livewire\ConciergeIndex;
 use App\Livewire\TeamIndex;
+use App\Livewire\WorkspaceSettings;
+use App\Models\Brand;
+use App\Models\CampaignGenerationJob;
+use App\Models\CampaignPack;
+use App\Models\Product;
+use App\Models\SourceSnapshot;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Models\WorkspaceCredit;
 use App\Models\WorkspaceInvitation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -115,6 +125,123 @@ class TeamManagementTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_a_member_can_switch_between_their_workspaces(): void
+    {
+        [$user, $firstWorkspace] = $this->workspaceUser('owner');
+        $secondWorkspace = Workspace::create(['name' => 'Second Agency']);
+        $secondWorkspace->users()->attach($user, ['role' => 'owner']);
+
+        $this->actingAs($user)
+            ->from(route('team.index'))
+            ->post(route('workspaces.select', $secondWorkspace))
+            ->assertRedirect(route('team.index'))
+            ->assertSessionHas('current_workspace_id', $secondWorkspace->id);
+
+        $this->assertNotSame($firstWorkspace->id, session('current_workspace_id'));
+    }
+
+    public function test_a_user_cannot_select_an_unrelated_workspace(): void
+    {
+        [$user] = $this->workspaceUser('owner');
+        $otherWorkspace = Workspace::create(['name' => 'Other Agency']);
+
+        $this->actingAs($user)
+            ->post(route('workspaces.select', $otherWorkspace))
+            ->assertNotFound();
+    }
+
+    public function test_an_owner_can_rename_a_workspace_with_an_audit_event(): void
+    {
+        [$owner, $workspace] = $this->workspaceUser('owner');
+
+        Livewire::actingAs($owner)
+            ->test(WorkspaceSettings::class)
+            ->set('name', 'Northstar Performance')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('workspaces', ['id' => $workspace->id, 'name' => 'Northstar Performance']);
+        $this->assertDatabaseHas('workspace_audit_events', [
+            'workspace_id' => $workspace->id,
+            'actor_user_id' => $owner->id,
+            'event' => 'workspace_renamed',
+        ]);
+    }
+
+    public function test_a_member_cannot_change_workspace_settings(): void
+    {
+        [$member] = $this->workspaceUser('member');
+
+        Livewire::actingAs($member)
+            ->test(WorkspaceSettings::class)
+            ->set('name', 'Nope')
+            ->call('save')
+            ->assertForbidden();
+    }
+
+    public function test_an_allow_listed_concierge_can_make_an_idempotent_credit_adjustment_with_a_reason(): void
+    {
+        $concierge = User::factory()->create(['email' => 'support@marketingowl.ai']);
+        $workspace = Workspace::create(['name' => 'Customer Workspace']);
+        $workspace->users()->attach($concierge, ['role' => 'owner']);
+        config()->set('campaigns.concierge_emails', [$concierge->email]);
+        $key = (string) Str::uuid();
+
+        $component = Livewire::actingAs($concierge)
+            ->test(ConciergeIndex::class)
+            ->set('workspaceId', $workspace->id)
+            ->set('adjustmentAmount', 4)
+            ->set('adjustmentReason', 'Restore credits after provider failure.')
+            ->set('adjustmentKey', $key)
+            ->call('adjustCredits')
+            ->assertHasNoErrors();
+
+        $component
+            ->set('adjustmentAmount', 4)
+            ->set('adjustmentReason', 'Restore credits after provider failure.')
+            ->set('adjustmentKey', $key)
+            ->call('adjustCredits');
+
+        $this->assertSame(1, WorkspaceCredit::query()->where('idempotency_key', $key)->count());
+        $this->assertDatabaseHas('workspace_audit_events', [
+            'workspace_id' => $workspace->id,
+            'actor_user_id' => $concierge->id,
+            'event' => 'credits_adjusted',
+        ]);
+    }
+
+    public function test_concierge_access_is_hidden_without_an_explicit_allow_list_entry(): void
+    {
+        [$user] = $this->workspaceUser('owner');
+        config()->set('campaigns.concierge_emails', []);
+
+        Livewire::actingAs($user)
+            ->test(ConciergeIndex::class)
+            ->assertNotFound();
+    }
+
+    public function test_an_allow_listed_concierge_can_retry_failed_jobs_and_cancel_queued_jobs(): void
+    {
+        Queue::fake();
+        $concierge = User::factory()->create(['email' => 'support@marketingowl.ai']);
+        $workspace = Workspace::create(['name' => 'Customer Workspace']);
+        config()->set('campaigns.concierge_emails', [$concierge->email]);
+        $failedJob = $this->generationJob($workspace, 'failed');
+        $queuedJob = $this->generationJob($workspace, 'queued');
+
+        Livewire::actingAs($concierge)
+            ->test(ConciergeIndex::class)
+            ->set('workspaceId', $workspace->id)
+            ->call('retryJob', $failedJob->id)
+            ->call('cancelJob', $queuedJob->id);
+
+        $this->assertDatabaseHas('campaign_generation_jobs', ['id' => $failedJob->id, 'status' => 'queued']);
+        $this->assertDatabaseHas('campaign_generation_jobs', ['id' => $queuedJob->id, 'status' => 'cancelled']);
+        $this->assertDatabaseHas('workspace_audit_events', ['workspace_id' => $workspace->id, 'event' => 'job_retry_requested']);
+        $this->assertDatabaseHas('workspace_audit_events', ['workspace_id' => $workspace->id, 'event' => 'job_cancelled']);
+        Queue::assertPushed(GenerateCampaignPack::class, fn (GenerateCampaignPack $job): bool => $job->generationJobId === $failedJob->id);
+    }
+
     private function workspaceUser(string $role): array
     {
         $user = User::factory()->create();
@@ -135,5 +262,30 @@ class TeamManagementTest extends TestCase
         ]);
 
         return [$token, $invitation];
+    }
+
+    private function generationJob(Workspace $workspace, string $status): CampaignGenerationJob
+    {
+        $brand = Brand::create(['workspace_id' => $workspace->id, 'name' => 'Test Brand']);
+        $product = Product::create(['brand_id' => $brand->id, 'name' => 'Test Product']);
+        $source = SourceSnapshot::create([
+            'product_id' => $product->id,
+            'url' => 'https://example.com/product',
+            'content_hash' => Str::random(64),
+        ]);
+        $pack = CampaignPack::create([
+            'product_id' => $product->id,
+            'source_snapshot_id' => $source->id,
+            'name' => 'Test pack',
+            'status' => $status,
+        ]);
+
+        return CampaignGenerationJob::create([
+            'workspace_id' => $workspace->id,
+            'campaign_pack_id' => $pack->id,
+            'source_snapshot_id' => $source->id,
+            'status' => $status,
+            'phase' => $status === 'failed' ? 'failed' : 'waiting',
+        ]);
     }
 }

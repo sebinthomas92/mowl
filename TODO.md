@@ -159,15 +159,15 @@ Acceptance criteria:
 
 ## Milestone 9 — Workspace and concierge administration (P1)
 
-- [ ] Make the sidebar workspace selector interactive for multi-workspace users.
-- [ ] Add workspace settings: name, owner, members, limits, billing summary.
-- [ ] Build a protected internal concierge admin area.
-- [ ] Add account lookup, job inspection, credit adjustments, and customer notes.
-- [ ] Require an adjustment reason and write an immutable audit event.
-- [ ] Add safe job retry/cancel controls.
-- [ ] Add cost-alert and failed-job queues for support.
-- [ ] Add beta onboarding state and concierge checklist.
-- [ ] Protect admin access with explicit allow-list/role checks and audit logging.
+- [x] Make the sidebar workspace selector interactive for multi-workspace users.
+- [x] Add workspace settings: name, owner, members, limits, billing summary.
+- [x] Build a protected internal concierge admin area.
+- [x] Add account lookup, job inspection, credit adjustments, and customer notes.
+- [x] Require an adjustment reason and write an immutable audit event.
+- [x] Add safe job retry/cancel controls.
+- [x] Add cost-alert and failed-job queues for support.
+- [x] Add beta onboarding state and concierge checklist.
+- [x] Protect admin access with explicit allow-list/role checks and audit logging.
 
 Acceptance criteria:
 
