@@ -159,9 +159,10 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                     'evidence' => $result->evidence,
                     'compliance_flags' => $result->complianceFlags,
                     'generator' => $result->provider,
+                    'review_status' => 'draft',
                 ]);
                 $pack->update([
-                    'status' => 'approved',
+                    'status' => 'draft',
                     'current_version' => $nextVersion,
                     'estimated_cost' => $cost,
                 ]);

@@ -178,14 +178,14 @@ Acceptance criteria:
 
 ## Milestone 10 — Human approval and collaboration (P2)
 
-- [ ] Replace automatic approval with draft → review → approved/rejected states.
-- [ ] Add section-level comments and review notes.
-- [ ] Record approver identity and timestamp.
-- [ ] Lock approved versions; changes create a new version.
-- [ ] Add source-truth approval and refresh history.
-- [ ] Add client-ready share links with revocation and expiry.
-- [ ] Add downloadable PDF/CSV/text campaign-pack exports.
-- [ ] Add an audit trail for approvals, exports, regeneration, and sharing.
+- [x] Replace automatic approval with draft → review → approved/rejected states.
+- [x] Add section-level comments and review notes.
+- [x] Record approver identity and timestamp.
+- [x] Lock approved versions; changes create a new version.
+- [x] Add source-truth approval and refresh history.
+- [x] Add client-ready share links with revocation and expiry.
+- [x] Add downloadable PDF/CSV/text campaign-pack exports.
+- [x] Add an audit trail for approvals, exports, regeneration, and sharing.
 
 Acceptance criteria:
 
