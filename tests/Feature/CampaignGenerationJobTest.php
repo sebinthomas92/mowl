@@ -31,7 +31,8 @@ class CampaignGenerationJobTest extends TestCase
             app(ProviderCostCalculator::class),
         );
 
-        $this->assertSame('approved', $pack->fresh()->status);
+        $this->assertSame('draft', $pack->fresh()->status);
+        $this->assertSame('draft', $pack->fresh()->versions()->firstOrFail()->review_status);
         $this->assertSame(1, $pack->fresh()->current_version);
         $this->assertSame('ready', $source->fresh()->status);
         $this->assertSame('completed', $job->fresh()->status);

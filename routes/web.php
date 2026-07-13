@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CampaignJobController;
+use App\Http\Controllers\CampaignPackDeliveryController;
 use App\Http\Controllers\WorkspaceInvitationController;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\Register;
@@ -27,6 +28,7 @@ Route::middleware('guest')->group(function (): void {
 Route::get('/invitations/{token}', [WorkspaceInvitationController::class, 'accept'])
     ->middleware('throttle:12,1')
     ->name('invitations.accept');
+Route::get('/shared/campaign-packs/{token}', [CampaignPackDeliveryController::class, 'share'])->name('campaign-packs.share');
 
 Route::middleware('auth')->group(function (): void {
     Route::post('/workspaces/{workspace}/select', function (Workspace $workspace, Request $request) {
@@ -40,6 +42,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/campaign-packs', CampaignPackIndex::class)->name('campaign-packs.index');
     Route::get('/campaign-packs/create', CampaignWorkspace::class)->name('campaign-packs.create');
     Route::get('/campaign-packs/{pack}', CampaignWorkspace::class)->name('campaign-packs.show');
+    Route::get('/campaign-packs/{pack}/versions/{version}/export/{format}', [CampaignPackDeliveryController::class, 'export'])->name('campaign-packs.export');
     Route::get('/team', TeamIndex::class)->name('team.index');
     Route::get('/usage', UsageIndex::class)->name('usage.index');
     Route::get('/settings', WorkspaceSettings::class)->name('workspace.settings');

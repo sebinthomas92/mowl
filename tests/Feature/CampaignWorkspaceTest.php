@@ -60,6 +60,7 @@ class CampaignWorkspaceTest extends TestCase
         $this->assertSame(hash('sha256', '<html><head><title>Book-Shaped Kindle Stand</title><meta name="description" content="A stable wooden stand for e-readers."></head><body>Hands-free reading at a comfortable angle.</body></html>'), SourceSnapshot::firstOrFail()->content_hash);
         $this->assertSame('Plush Republic', Brand::firstOrFail()->name);
         $this->assertSame('Book-Shaped Kindle Stand', Product::firstOrFail()->name);
+        $this->assertNull(SourceSnapshot::firstOrFail()->refreshed_from_snapshot_id);
     }
 
     public function test_an_existing_workspace_brand_can_be_reused(): void

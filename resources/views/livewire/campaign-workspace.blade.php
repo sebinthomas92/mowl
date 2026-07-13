@@ -129,19 +129,20 @@
                 </section>
             @else
             @php($content = $version->content)
+            @php($isOwner = $workspace->users()->whereKey(auth()->id())->wherePivot('role', 'owner')->exists())
             <div class="pack-page" id="packs" wire:poll.5s>
                 <header class="pack-toolbar">
                     <div class="breadcrumbs"><span>{{ $pack->product->brand->name }}</span><b>›</b><span>{{ $pack->product->name }}</span><b>›</b><strong>Campaign Pack v{{ $version->version }}</strong></div>
                     <div class="toolbar-actions">
                         <span class="verified-chip">✓ Claims source-linked</span>
                         <button type="button" class="secondary-button" wire:click="startAnother">＋ New pack</button>
-                        <button type="button" class="copy-pack" @click="navigator.clipboard.writeText(@js(json_encode($content, JSON_PRETTY_PRINT))); copied = 'pack'; setTimeout(() => copied = '', 1600)"><span x-text="copied === 'pack' ? '✓ Copied' : '▣ Copy approved pack'"></span></button>
+                        <button type="button" class="copy-pack" @click="navigator.clipboard.writeText(@js(json_encode($content, JSON_PRETTY_PRINT))); copied = 'pack'; setTimeout(() => copied = '', 1600)"><span x-text="copied === 'pack' ? '✓ Copied' : '▣ Copy pack'"></span></button>
                     </div>
                 </header>
 
                 <section class="product-hero">
                     <div class="product-art" aria-hidden="true"><div class="art-card"><span>CAMPAIGN</span><b>{{ strtoupper(substr($pack->product->name, 0, 2)) }}</b><i></i></div></div>
-                    <div><p class="pack-number">PACK / {{ str_pad($pack->id, 4, '0', STR_PAD_LEFT) }}</p><h1>{{ $pack->product->name }}</h1><p>{{ $pack->product->brand->name }} <i>•</i> {{ $pack->product->price ?: 'Price not supplied' }} <i>•</i> Campaign Pack v{{ $version->version }}</p><div class="approval-line"><span>✓</span><strong>Approved</strong><i></i><small>Generated {{ $pack->updated_at->format('M j, Y') }}</small><i></i><small>${{ number_format($pack->estimated_cost, 3) }} tracked cost</small></div></div>
+                    <div><p class="pack-number">PACK / {{ str_pad($pack->id, 4, '0', STR_PAD_LEFT) }}</p><h1>{{ $pack->product->name }}</h1><p>{{ $pack->product->brand->name }} <i>•</i> {{ $pack->product->price ?: 'Price not supplied' }} <i>•</i> Campaign Pack v{{ $version->version }}</p><div class="approval-line"><span>{{ $version->review_status === 'approved' ? '✓' : '•' }}</span><strong>{{ str($version->review_status)->title() }}</strong><i></i><small>{{ $version->reviewed_at ? 'Reviewed '.$version->reviewed_at->format('M j, Y') : 'Generated '.$version->created_at->format('M j, Y') }}</small><i></i><small>${{ number_format($pack->estimated_cost, 3) }} tracked cost</small></div></div>
                 </section>
 
                 @php($activeJob = $pack->latestGenerationJob)
@@ -167,6 +168,30 @@
                     <small>{{ $includedRegenerationsRemaining }} included {{ Str::plural('regeneration', $includedRegenerationsRemaining) }} left · expires {{ $pack->created_at->addDay()->diffForHumans() }}</small>
                     @error('regenerationSection')<span class="error">{{ $message }}</span>@enderror
                 </section>
+
+                <section class="review-panel">
+                    <div><p class="section-label">HUMAN REVIEW</p><h3>{{ $version->review_status === 'approved' ? 'This version is locked.' : 'Review before media buyers use this version.' }}</h3><p>{{ $version->review_note ?: 'Draft changes remain separate from approved versions.' }}</p></div>
+                    <div class="review-actions">
+                        @if($version->review_status === 'draft')<button type="button" class="secondary-button" wire:click="requestReview">Send to review</button>@endif
+                        @if($isOwner && in_array($version->review_status, ['draft', 'review']))
+                            <input wire:model="reviewNote" aria-label="Approval or rejection note" placeholder="Review note (required to reject)">
+                            <button type="button" class="secondary-button" wire:click="rejectVersion">Reject</button><button type="button" class="copy-pack" wire:click="approveVersion">Approve & lock</button>
+                        @endif
+                        @if($isOwner && $version->review_status === 'approved')<button type="button" class="secondary-button" wire:click="createShare">Create 7-day share link</button>@endif
+                    </div>
+                    @if($shareUrl)<p class="share-result">Share link: <a href="{{ $shareUrl }}" target="_blank" rel="noopener">{{ $shareUrl }}</a></p>@endif
+                </section>
+
+                <section class="review-panel compact-review">
+                    <div><p class="section-label">SOURCE TRUTH</p><h3>{{ $pack->sourceSnapshot->approved_at ? 'Source approved '.$pack->sourceSnapshot->approved_at->format('M j, Y') : 'Source needs an owner approval' }}</h3><p>{{ $pack->sourceSnapshot->url }} · {{ $pack->product->sourceSnapshots()->count() }} source snapshots retained</p></div>
+                    @if($isOwner && ! $pack->sourceSnapshot->approved_at)<button type="button" class="secondary-button" wire:click="approveSource">Approve source truth</button>@endif
+                </section>
+
+                @if($version->review_status === 'approved')
+                    <section class="export-panel"><span>EXPORT APPROVED VERSION</span><a href="{{ route('campaign-packs.export', [$pack, $version, 'text']) }}">Text</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'csv']) }}">CSV</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'pdf']) }}">PDF</a>@foreach($shares->whereNull('revoked_at') as $share)<button type="button" wire:click="revokeShare({{ $share->id }})">Revoke share</button>@endforeach</section>
+                @endif
+
+                <section class="comments-panel"><div><p class="section-label">REVIEW NOTES</p><h3>{{ $version->comments->count() }} comments on this version</h3></div><form wire:submit="addComment"><input wire:model="commentSection" placeholder="Section (optional)"><textarea wire:model="commentBody" placeholder="Leave a precise review note"></textarea><button type="submit">Add note</button></form>@foreach($version->comments as $comment)<article><strong>{{ $comment->user->name }}</strong>@if($comment->section)<span>{{ $comment->section }}</span>@endif<p>{{ $comment->body }}</p></article>@endforeach</section>
 
                 <div class="pack-layout">
                     <aside class="chapters" aria-label="Pack chapters">

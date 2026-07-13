@@ -31,6 +31,11 @@ class CampaignPack extends Model
         return $this->hasMany(CampaignGenerationJob::class);
     }
 
+    public function shares(): HasMany
+    {
+        return $this->hasMany(CampaignPackShare::class);
+    }
+
     public function latestGenerationJob(): HasOne
     {
         return $this->hasOne(CampaignGenerationJob::class)->latestOfMany();
