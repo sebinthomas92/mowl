@@ -33,11 +33,11 @@ class CampaignWorkspaceTest extends TestCase
             ->set('brandWebsite', 'https://example.com')
             ->call('saveBrand')
             ->assertSet('step', 2)
-            ->set('productName', 'Book-Shaped Kindle Stand')
-            ->set('productPrice', '₹899')
+            ->set('productUrl', 'https://93.184.216.34/products/kindle-stand')
+            ->call('loadProductFromUrl')
             ->call('saveProduct')
             ->assertSet('step', 3)
-            ->set('sourceUrl', 'https://93.184.216.34/products/kindle-stand')
+            ->assertSet('sourceUrl', 'https://93.184.216.34/products/kindle-stand')
             ->call('generatePack')
             ->assertRedirect(route('campaign-packs.show', CampaignPack::firstOrFail()));
 
@@ -72,6 +72,56 @@ class CampaignWorkspaceTest extends TestCase
             ->set('brandId', $brand->id)
             ->call('useBrand')
             ->assertSet('step', 2);
+    }
+
+    public function test_product_details_are_loaded_from_a_product_page_before_saving(): void
+    {
+        [$user, $workspace] = $this->workspaceUser();
+        $brand = $workspace->brands()->create(['name' => 'Imported Brand']);
+        Http::fake([
+            '93.184.216.34/*' => Http::response(<<<'HTML'
+                <html><head><title>Fallback page title</title><link rel="canonical" href="/products/canvas-tote"><script type="application/ld+json">{"@type":"Product","name":"Canvas Tote","description":"A roomy everyday carry tote.","offers":{"price":"89","priceCurrency":"USD"}}</script></head><body>Product details</body></html>
+                HTML, 200, ['Content-Type' => 'text/html']),
+        ]);
+
+        Livewire::actingAs($user)->test(CampaignWorkspace::class)
+            ->set('brandId', $brand->id)
+            ->set('step', 2)
+            ->set('productUrl', 'https://93.184.216.34/store/canvas-tote')
+            ->call('loadProductFromUrl')
+            ->assertHasNoErrors()
+            ->assertSet('productDetailsLoaded', true)
+            ->assertSet('productName', 'Canvas Tote')
+            ->assertSet('productPrice', 'USD 89')
+            ->assertSet('productSummary', 'A roomy everyday carry tote.')
+            ->assertSet('productUrl', 'https://93.184.216.34/products/canvas-tote')
+            ->call('saveProduct')
+            ->assertHasNoErrors()
+            ->assertSet('step', 3)
+            ->assertSet('sourceUrl', 'https://93.184.216.34/products/canvas-tote');
+
+        $this->assertDatabaseHas('products', [
+            'brand_id' => $brand->id,
+            'name' => 'Canvas Tote',
+            'price' => 'USD 89',
+            'summary' => 'A roomy everyday carry tote.',
+        ]);
+    }
+
+    public function test_product_cannot_be_saved_without_analyzing_its_url(): void
+    {
+        [$user, $workspace] = $this->workspaceUser();
+        $brand = $workspace->brands()->create(['name' => 'Imported Brand']);
+
+        Livewire::actingAs($user)->test(CampaignWorkspace::class)
+            ->set('brandId', $brand->id)
+            ->set('step', 2)
+            ->set('productUrl', 'https://example.com/products/manual')
+            ->set('productName', 'Manually entered product')
+            ->call('saveProduct')
+            ->assertHasErrors(['productUrl']);
+
+        $this->assertDatabaseCount('products', 0);
     }
 
     public function test_media_metadata_is_persisted_after_the_temporary_upload_is_stored(): void

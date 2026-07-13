@@ -13,12 +13,14 @@ use App\Models\MediaAsset;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
 use App\Services\CampaignJobDispatcher;
+use App\Services\ProductPageFetcher;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 use Livewire\WithFileUploads;
+use Throwable;
 
 class CampaignWorkspace extends Component
 {
@@ -36,6 +38,12 @@ class CampaignWorkspace extends Component
     public string $productPrice = '';
 
     public string $productSummary = '';
+
+    public string $productUrl = '';
+
+    public string $loadedProductUrl = '';
+
+    public bool $productDetailsLoaded = false;
 
     public string $sourceUrl = '';
 
@@ -104,14 +112,59 @@ class CampaignWorkspace extends Component
         $this->step = 2;
     }
 
+    public function loadProductFromUrl(ProductPageFetcher $fetcher): void
+    {
+        $data = $this->validate([
+            'productUrl' => ['required', 'url:http,https', 'max:2000'],
+        ]);
+
+        try {
+            $page = $fetcher->fetch($data['productUrl']);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            throw ValidationException::withMessages([
+                'productUrl' => 'We could not read product details from that URL. Check that the page is public and try again.',
+            ]);
+        }
+
+        $truth = $page['product_truth'] ?? [];
+        $name = trim((string) ($truth['name'] ?? $page['title'] ?? ''));
+        if ($name === '') {
+            throw ValidationException::withMessages([
+                'productUrl' => 'We could not find a product name on that page.',
+            ]);
+        }
+
+        $resolvedUrl = (string) ($page['canonical_url'] ?? $page['url'] ?? $data['productUrl']);
+        $price = trim(implode(' ', array_filter([
+            $truth['currency'] ?? null,
+            $truth['price'] ?? null,
+        ], fn ($value) => $value !== null && $value !== '')));
+
+        $this->productName = mb_substr($name, 0, 160);
+        $this->productPrice = mb_substr($price, 0, 40);
+        $this->productSummary = mb_substr(trim((string) ($truth['description'] ?? $page['description'] ?? '')), 0, 1000);
+        $this->productUrl = $resolvedUrl;
+        $this->loadedProductUrl = $resolvedUrl;
+        $this->sourceUrl = $resolvedUrl;
+        $this->productDetailsLoaded = true;
+    }
+
     public function saveProduct(): void
     {
         abort_unless($this->brandId, 422);
         $data = $this->validate([
+            'productUrl' => ['required', 'url:http,https', 'max:2000'],
             'productName' => ['required', 'string', 'max:160'],
             'productPrice' => ['nullable', 'string', 'max:40'],
             'productSummary' => ['nullable', 'string', 'max:1000'],
         ]);
+        if ($this->loadedProductUrl === '' || ! hash_equals($this->loadedProductUrl, $data['productUrl'])) {
+            throw ValidationException::withMessages([
+                'productUrl' => 'Analyze this product page before continuing.',
+            ]);
+        }
 
         $brand = Brand::query()
             ->where('workspace_id', $this->currentWorkspace()->id)
@@ -125,6 +178,7 @@ class CampaignWorkspace extends Component
         ]);
 
         $this->productId = $product->id;
+        $this->sourceUrl = $data['productUrl'];
         $this->step = 3;
     }
 

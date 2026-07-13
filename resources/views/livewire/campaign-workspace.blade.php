@@ -63,13 +63,22 @@
                             </form>
                         @elseif($step === 2)
                             <form wire:submit="saveProduct">
-                                <div class="form-heading"><span>02 / 03</span><h2>Add the product</h2><p>Give the pack a clear commercial focus.</p></div>
-                                <label>Product name<input wire:model="productName" type="text" placeholder="e.g. Book-Shaped Kindle Stand" autofocus>@error('productName')<small class="error">{{ $message }}</small>@enderror</label>
-                                <div class="field-row">
-                                    <label>Price <small>Optional</small><input wire:model="productPrice" type="text" placeholder="₹899"></label>
-                                    <label>Short context <small>Optional</small><input wire:model="productSummary" type="text" placeholder="What makes it useful?"></label>
-                                </div>
-                                <button class="primary-button" type="submit">Save product <span>→</span></button>
+                                <div class="form-heading"><span>02 / 03</span><h2>Add the product page</h2><p>Paste a public product URL. We’ll pull the product details for you.</p></div>
+                                <label>Product page URL<input wire:model="productUrl" type="url" placeholder="https://yourbrand.com/products/your-product" autofocus>@error('productUrl')<small class="error">{{ $message }}</small>@enderror</label>
+                                <button class="source-fetch-button" type="button" wire:click="loadProductFromUrl" wire:loading.attr="disabled" wire:target="loadProductFromUrl">
+                                    <span wire:loading.remove wire:target="loadProductFromUrl">{{ $productDetailsLoaded ? 'Refresh product details' : 'Get product details' }}</span>
+                                    <span wire:loading wire:target="loadProductFromUrl">Reading product page…</span>
+                                    <b aria-hidden="true">↗</b>
+                                </button>
+                                @if($productDetailsLoaded)
+                                    <section class="product-import-preview" aria-live="polite">
+                                        <span>PRODUCT FOUND</span>
+                                        <h3>{{ $productName }}</h3>
+                                        <div><strong>{{ $productPrice ?: 'Price not listed' }}</strong><small>{{ parse_url($productUrl, PHP_URL_HOST) }}</small></div>
+                                        <p>{{ $productSummary ?: 'No product description was available on the page.' }}</p>
+                                    </section>
+                                    <button class="primary-button" type="submit" wire:loading.attr="disabled" wire:target="saveProduct">Use this product <span>→</span></button>
+                                @endif
                             </form>
                         @else
                             <form wire:submit="generatePack">
