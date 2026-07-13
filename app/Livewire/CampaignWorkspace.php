@@ -14,6 +14,7 @@ use App\Models\Product;
 use App\Models\SourceSnapshot;
 use App\Services\CampaignJobDispatcher;
 use App\Services\ProductPageFetcher;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
@@ -512,6 +513,16 @@ class CampaignWorkspace extends Component
             && Schema::hasTable('campaign_pack_shares')
             && Schema::hasColumn('campaign_pack_versions', 'review_status')
             && Schema::hasColumn('source_snapshots', 'approved_at');
+        if ($reviewFeaturesAvailable && DB::connection()->getDriverName() === 'pgsql') {
+            try {
+                $reviewFeaturesAvailable = (bool) DB::scalar(
+                    "select has_table_privilege(current_user, 'campaign_pack_version_comments', 'SELECT')
+                        and has_table_privilege(current_user, 'campaign_pack_shares', 'SELECT')"
+                );
+            } catch (QueryException) {
+                $reviewFeaturesAvailable = false;
+            }
+        }
         $pack = $this->packId
             ? CampaignPack::query()
                 ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
