@@ -14,9 +14,11 @@ use Throwable;
 
 class MediaProcessor
 {
+    public function __construct(private GoogleVertexAIClient $vertex) {}
+
     public function processForProduct(Product $product): array
     {
-        $summary = ['frames' => [], 'images' => [], 'transcripts' => [], 'assets' => []];
+        $summary = ['frames' => [], 'images' => [], 'videos' => [], 'transcripts' => [], 'assets' => []];
 
         foreach ($product->mediaAssets()->get() as $asset) {
             if ($asset->status !== 'processed') {
@@ -37,6 +39,9 @@ class MediaProcessor
             foreach ($asset->derivatives['images'] ?? [] as $image) {
                 $summary['images'][] = $image + ['asset_id' => $asset->id];
             }
+            foreach ($asset->derivatives['videos'] ?? [] as $video) {
+                $summary['videos'][] = $video + ['asset_id' => $asset->id];
+            }
             if ($transcript = data_get($asset->metadata, 'transcript')) {
                 $summary['transcripts'][] = ['asset_id' => $asset->id, 'text' => $transcript];
             }
@@ -54,6 +59,13 @@ class MediaProcessor
         }
 
         $asset->update(['status' => 'processing', 'error_message' => null]);
+
+        if (config('campaigns.generator') === 'google' && $asset->disk === 'gcs') {
+            $this->prepareForDirectVertexAnalysis($asset);
+
+            return;
+        }
+
         $temporaryDirectory = sys_get_temp_dir().'/marketing-owl-processing/'.Str::uuid();
         File::ensureDirectoryExists($temporaryDirectory);
         $temporarySource = null;
@@ -178,8 +190,31 @@ class MediaProcessor
         ];
     }
 
+    private function prepareForDirectVertexAnalysis(MediaAsset $asset): void
+    {
+        $collection = $asset->type === 'video' ? 'videos' : 'images';
+        $asset->update([
+            'status' => 'processed',
+            'derivatives' => [$collection => [[
+                'disk' => $asset->disk,
+                'path' => $asset->path,
+                'mime_type' => $asset->mime_type,
+                'content_hash' => $asset->content_hash,
+            ]]],
+            'metadata' => [
+                'analysis_mode' => 'vertex_direct',
+                'transcription_status' => $asset->type === 'video' ? 'handled_by_vertex' : 'not_applicable',
+            ],
+            'processed_at' => now(),
+        ]);
+    }
+
     private function transcribeIfConfigured(string $audioFile): array
     {
+        if (config('campaigns.generator') === 'google') {
+            return [$this->vertex->transcribeAudio($audioFile), 'completed'];
+        }
+
         $apiKey = config('services.openai.api_key');
         if (! $apiKey) {
             return [null, 'pending_credentials'];

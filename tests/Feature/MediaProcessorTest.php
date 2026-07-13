@@ -86,6 +86,33 @@ class MediaProcessorTest extends TestCase
         @unlink($temporary);
     }
 
+    public function test_google_processing_keeps_private_gcs_media_for_direct_vertex_analysis(): void
+    {
+        config()->set('campaigns.generator', 'google');
+        Storage::fake('gcs');
+        [$workspace, $product] = $this->productFixture();
+        Storage::disk('gcs')->put('originals/video.mp4', 'video bytes');
+        $asset = MediaAsset::create([
+            'workspace_id' => $workspace->id,
+            'product_id' => $product->id,
+            'type' => 'video',
+            'disk' => 'gcs',
+            'path' => 'originals/video.mp4',
+            'original_name' => 'video.mp4',
+            'mime_type' => 'video/mp4',
+            'size_bytes' => 11,
+            'content_hash' => hash('sha256', 'video bytes'),
+        ]);
+
+        $summary = app(MediaProcessor::class)->processForProduct($product);
+
+        $this->assertSame('processed', $asset->fresh()->status);
+        $this->assertSame('vertex_direct', $asset->fresh()->metadata['analysis_mode']);
+        $this->assertSame('originals/video.mp4', $summary['videos'][0]['path']);
+        $this->assertSame('video/mp4', $summary['videos'][0]['mime_type']);
+        Storage::disk('gcs')->assertExists('originals/video.mp4');
+    }
+
     private function productFixture(): array
     {
         $workspace = Workspace::create(['name' => 'Media Agency']);

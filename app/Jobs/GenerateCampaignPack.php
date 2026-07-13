@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Data\GenerationResult;
 use App\Exceptions\OpenAIResponseException;
+use App\Exceptions\VertexAIResponseException;
 use App\Models\CampaignGenerationJob;
 use App\Models\ProcessingCacheEntry;
 use App\Services\CampaignGeneratorManager;
@@ -192,7 +193,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             $job->update([
                 'status' => 'retrying',
                 'phase' => 'retry_wait',
-                'error_code' => $exception instanceof OpenAIResponseException ? $exception->errorCode : class_basename($exception),
+                'error_code' => $this->providerErrorCode($exception),
                 'error_message' => mb_substr($exception->getMessage(), 0, 2000),
             ]);
             if (! $job->section && $failedPhase === 'fetching_source') {
@@ -217,7 +218,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             $job->update([
                 'status' => 'failed',
                 'phase' => 'failed',
-                'error_code' => $exception instanceof OpenAIResponseException ? $exception->errorCode : ($exception ? class_basename($exception) : $job->error_code),
+                'error_code' => $exception ? $this->providerErrorCode($exception) : $job->error_code,
                 'error_message' => $exception ? mb_substr($exception->getMessage(), 0, 2000) : $job->error_message,
                 'completed_at' => now(),
             ]);
@@ -249,5 +250,12 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
         }
 
         return $current;
+    }
+
+    private function providerErrorCode(Throwable $exception): string
+    {
+        return $exception instanceof OpenAIResponseException || $exception instanceof VertexAIResponseException
+            ? $exception->errorCode
+            : class_basename($exception);
     }
 }

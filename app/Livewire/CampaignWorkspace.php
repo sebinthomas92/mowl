@@ -215,8 +215,11 @@ class CampaignWorkspace extends Component
             ]);
 
             foreach ($this->mediaUploads as $upload) {
-                $realPath = $upload->getRealPath();
-                $hash = hash_file('sha256', $realPath);
+                $stream = $upload->readStream();
+                $hashContext = hash_init('sha256');
+                hash_update_stream($hashContext, $stream);
+                fclose($stream);
+                $hash = hash_final($hashContext);
                 $extension = strtolower($upload->getClientOriginalExtension() ?: $upload->extension() ?: 'bin');
                 $mimeType = $upload->getMimeType();
                 $originalName = $upload->getClientOriginalName();

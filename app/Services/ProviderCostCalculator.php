@@ -6,7 +6,9 @@ class ProviderCostCalculator
 {
     public function calculate(string $model, int $inputTokens, int $cachedInputTokens, int $outputTokens): float
     {
-        $prices = config('campaigns.openai.prices_per_million')[$model] ?? null;
+        $prices = config('campaigns.openai.prices_per_million')[$model]
+            ?? config('campaigns.google.prices_per_million')[$model]
+            ?? null;
 
         if (! $prices) {
             return 0.0;

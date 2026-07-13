@@ -45,4 +45,23 @@ return [
             'openai/gpt-5.4-mini' => ['input' => 0.75, 'cached_input' => 0.075, 'output' => 4.50],
         ],
     ],
+    'google' => [
+        'project' => env('GOOGLE_CLOUD_PROJECT'),
+        'project_number' => env('GOOGLE_CLOUD_PROJECT_NUMBER'),
+        'location' => env('GOOGLE_CLOUD_LOCATION', 'global'),
+        'model' => env('GOOGLE_GEMINI_MODEL', 'gemini-3.5-flash'),
+        'service_account_email' => env('GOOGLE_SERVICE_ACCOUNT_EMAIL'),
+        'vercel_audience' => env('GCP_AUDIENCE'),
+        'vercel_token_exchange_url' => env('VERCEL_OIDC_TOKEN_EXCHANGE_URL', 'https://oidc.vercel.com/~token'),
+        'base_url' => env('GOOGLE_VERTEX_BASE_URL', 'https://aiplatform.googleapis.com/v1'),
+        'sts_audience' => env('GOOGLE_STS_AUDIENCE'),
+        'sts_token_url' => env('GOOGLE_STS_TOKEN_URL', 'https://sts.googleapis.com/v1/token'),
+        'service_account_impersonation_url' => env('GOOGLE_SERVICE_ACCOUNT_IMPERSONATION_URL'),
+        'timeout_seconds' => (int) env('GOOGLE_VERTEX_TIMEOUT_SECONDS', 120),
+        'retry_attempts' => (int) env('GOOGLE_VERTEX_RETRY_ATTEMPTS', 3),
+        'retry_backoff_ms' => [250, 1000],
+        'prices_per_million' => [
+            'gemini-3.5-flash' => ['input' => 2.70, 'cached_input' => 0.27, 'output' => 16.20],
+        ],
+    ],
 ];

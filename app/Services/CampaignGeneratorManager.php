@@ -12,6 +12,7 @@ class CampaignGeneratorManager
         return match ($name ?? config('campaigns.generator')) {
             'mock' => app(MockCampaignPackGenerator::class),
             'openai' => app(OpenAIResponsesCampaignPackGenerator::class),
+            'google' => app(GoogleVertexAICampaignPackGenerator::class),
             default => throw new InvalidArgumentException('Unsupported campaign generator.'),
         };
     }
@@ -23,6 +24,10 @@ class CampaignGeneratorManager
 
     public function model(?string $name = null): ?string
     {
-        return $this->providerName($name) === 'openai' ? config('campaigns.openai.model') : null;
+        return match ($this->providerName($name)) {
+            'openai' => config('campaigns.openai.model'),
+            'google' => config('campaigns.google.model'),
+            default => null,
+        };
     }
 }

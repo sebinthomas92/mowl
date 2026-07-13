@@ -11,6 +11,10 @@ return [
         'oidc_token' => env('VERCEL_OIDC_TOKEN'),
     ],
 
+    'vercel' => [
+        'oidc_token' => env('VERCEL_OIDC_TOKEN'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services
