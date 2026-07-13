@@ -15,6 +15,7 @@ use App\Models\SourceSnapshot;
 use App\Services\CampaignJobDispatcher;
 use App\Services\ProductPageFetcher;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -507,10 +508,19 @@ class CampaignWorkspace extends Component
     public function render()
     {
         $workspace = $this->currentWorkspace();
+        $reviewFeaturesAvailable = Schema::hasTable('campaign_pack_version_comments')
+            && Schema::hasTable('campaign_pack_shares')
+            && Schema::hasColumn('campaign_pack_versions', 'review_status')
+            && Schema::hasColumn('source_snapshots', 'approved_at');
         $pack = $this->packId
             ? CampaignPack::query()
                 ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-                ->with(['product.brand', 'sourceSnapshot', 'versions.comments.user', 'latestGenerationJob'])
+                ->with([
+                    'product.brand',
+                    'sourceSnapshot',
+                    $reviewFeaturesAvailable ? 'versions.comments.user' : 'versions',
+                    'latestGenerationJob',
+                ])
                 ->findOrFail($this->packId)
             : null;
 
@@ -533,7 +543,10 @@ class CampaignWorkspace extends Component
             'includedRegenerationsRemaining' => $pack
                 ? max(0, 3 - $pack->generationJobs()->whereNotNull('section')->where('status', 'completed')->where('created_at', '<=', $pack->created_at->copy()->addDay())->count())
                 : 3,
-            'shares' => $pack ? CampaignPackShare::query()->where('campaign_pack_id', $pack->id)->latest()->get() : collect(),
+            'reviewFeaturesAvailable' => $reviewFeaturesAvailable,
+            'shares' => $pack && $reviewFeaturesAvailable
+                ? CampaignPackShare::query()->where('campaign_pack_id', $pack->id)->latest()->get()
+                : collect(),
         ])
             ->layout('components.layouts.app');
     }

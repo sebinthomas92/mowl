@@ -2,15 +2,19 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\CampaignWorkspace;
 use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\CampaignJobDispatcher;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class CampaignRequestProcessingTest extends TestCase
@@ -25,6 +29,36 @@ class CampaignRequestProcessingTest extends TestCase
         app(CampaignJobDispatcher::class)->dispatch(123);
 
         Queue::assertNothingPushed();
+    }
+
+    public function test_a_new_pack_renders_its_processing_page_when_review_tables_are_not_migrated(): void
+    {
+        config(['campaigns.processing_mode' => 'request']);
+        [$user, , $job] = $this->generationFixture();
+        Schema::dropIfExists('campaign_pack_shares');
+        Schema::dropIfExists('campaign_pack_version_comments');
+
+        Livewire::actingAs($user)
+            ->test(CampaignWorkspace::class, ['pack' => $job->campaignPack])
+            ->assertOk()
+            ->assertSee('Building the campaign pack.')
+            ->assertSee('CAMPAIGN JOB');
+    }
+
+    public function test_a_job_can_finish_when_the_review_status_column_is_not_migrated(): void
+    {
+        [$user, , $job] = $this->generationFixture();
+        Schema::table('campaign_pack_versions', function (Blueprint $table): void {
+            $table->dropColumn('review_status');
+        });
+        Http::fake(['93.184.216.34/*' => Http::response($this->productHtml(), 200, ['Content-Type' => 'text/html'])]);
+        $url = URL::temporarySignedRoute('campaign-jobs.process', now()->addMinute(), ['generationJob' => $job]);
+
+        $this->actingAs($user)->post($url)
+            ->assertOk()
+            ->assertJson(['status' => 'completed']);
+
+        $this->assertDatabaseCount('campaign_pack_versions', 1);
     }
 
     public function test_a_workspace_member_can_process_a_job_through_a_signed_route(): void

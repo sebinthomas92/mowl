@@ -178,6 +178,7 @@
                     @error('regenerationSection')<span class="error">{{ $message }}</span>@enderror
                 </section>
 
+                @if($reviewFeaturesAvailable)
                 <section class="review-panel">
                     <div><p class="section-label">HUMAN REVIEW</p><h3>{{ $version->review_status === 'approved' ? 'This version is locked.' : 'Review before media buyers use this version.' }}</h3><p>{{ $version->review_note ?: 'Draft changes remain separate from approved versions.' }}</p></div>
                     <div class="review-actions">
@@ -201,6 +202,7 @@
                 @endif
 
                 <section class="comments-panel"><div><p class="section-label">REVIEW NOTES</p><h3>{{ $version->comments->count() }} comments on this version</h3></div><form wire:submit="addComment"><input wire:model="commentSection" placeholder="Section (optional)"><textarea wire:model="commentBody" placeholder="Leave a precise review note"></textarea><button type="submit">Add note</button></form>@foreach($version->comments as $comment)<article><strong>{{ $comment->user->name }}</strong>@if($comment->section)<span>{{ $comment->section }}</span>@endif<p>{{ $comment->body }}</p></article>@endforeach</section>
+                @endif
 
                 <div class="pack-layout">
                     <aside class="chapters" aria-label="Pack chapters">

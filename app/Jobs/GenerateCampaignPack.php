@@ -14,6 +14,7 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Throwable;
 
 class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
@@ -153,14 +154,17 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                         $job->section,
                     )
                     : $result->content;
-                $pack->versions()->create([
+                $versionAttributes = [
                     'version' => $nextVersion,
                     'content' => $content,
                     'evidence' => $result->evidence,
                     'compliance_flags' => $result->complianceFlags,
                     'generator' => $result->provider,
-                    'review_status' => 'draft',
-                ]);
+                ];
+                if (Schema::hasColumn('campaign_pack_versions', 'review_status')) {
+                    $versionAttributes['review_status'] = 'draft';
+                }
+                $pack->versions()->create($versionAttributes);
                 $pack->update([
                     'status' => 'draft',
                     'current_version' => $nextVersion,
