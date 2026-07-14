@@ -19,6 +19,9 @@ jobs:
     name: quality
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      FFMPEG_PATH: /usr/bin/ffmpeg
+      FFPROBE_PATH: /usr/bin/ffprobe
 
     steps:
       - name: Check out repository
@@ -37,6 +40,11 @@ jobs:
         with:
           node-version: 24
           cache: npm
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ffmpeg
 
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
