@@ -15,7 +15,7 @@ class ProductIndex extends Component
         $workspace = $this->currentWorkspace();
         $products = Product::query()
             ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-            ->with(['brand'])
+            ->with(['brand', 'campaignPacks', 'sourceSnapshots'])
             ->withCount('campaignPacks')
             ->latest()
             ->get();

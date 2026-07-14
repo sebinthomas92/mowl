@@ -36,6 +36,11 @@ class Workspace extends Model
         return $this->hasMany(CampaignGenerationJob::class);
     }
 
+    public function bannerGenerationBatches(): HasMany
+    {
+        return $this->hasMany(BannerGenerationBatch::class);
+    }
+
     public function auditEvents(): HasMany
     {
         return $this->hasMany(WorkspaceAuditEvent::class);

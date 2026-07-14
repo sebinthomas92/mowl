@@ -7,7 +7,6 @@ use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
 use App\Models\Workspace;
 use App\Services\CampaignGeneratorManager;
-use App\Services\MediaProcessor;
 use App\Services\ProductPageFetcher;
 use App\Services\ProviderCostCalculator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -26,7 +25,6 @@ class CampaignGenerationJobTest extends TestCase
 
         (new GenerateCampaignPack($job->id))->handle(
             app(ProductPageFetcher::class),
-            app(MediaProcessor::class),
             app(CampaignGeneratorManager::class),
             app(ProviderCostCalculator::class),
         );
@@ -60,7 +58,6 @@ class CampaignGenerationJobTest extends TestCase
         ]);
         (new GenerateCampaignPack($secondJob->id))->handle(
             app(ProductPageFetcher::class),
-            app(MediaProcessor::class),
             app(CampaignGeneratorManager::class),
             app(ProviderCostCalculator::class),
         );
@@ -126,7 +123,6 @@ class CampaignGenerationJobTest extends TestCase
 
         (new GenerateCampaignPack($job->id))->handle(
             app(ProductPageFetcher::class),
-            app(MediaProcessor::class),
             app(CampaignGeneratorManager::class),
             app(ProviderCostCalculator::class),
         );
@@ -140,27 +136,26 @@ class CampaignGenerationJobTest extends TestCase
         [$workspace, , , $pack, $job] = $this->generationFixture();
         Http::fake(['93.184.216.34/*' => Http::response($this->productHtml(), 200, ['Content-Type' => 'text/html'])]);
         $initial = new GenerateCampaignPack($job->id);
-        $initial->handle(app(ProductPageFetcher::class), app(MediaProcessor::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
-        $originalTitle = $pack->fresh()->versions()->where('version', 1)->value('content')['direction']['title'];
+        $initial->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
+        $originalTitle = $pack->fresh()->versions()->where('version', 1)->value('content')['ranked_angles'][0]['title'];
 
         $regeneration = CampaignGenerationJob::create([
             'workspace_id' => $workspace->id,
             'campaign_pack_id' => $pack->id,
             'source_snapshot_id' => $pack->source_snapshot_id,
-            'section' => 'direction',
+            'section' => 'ranked_angles',
             'base_version' => 1,
             'credit_cost' => 0,
         ]);
         (new GenerateCampaignPack($regeneration->id))->handle(
             app(ProductPageFetcher::class),
-            app(MediaProcessor::class),
             app(CampaignGeneratorManager::class),
             app(ProviderCostCalculator::class),
         );
 
         $updated = $pack->fresh();
         $this->assertSame(2, $updated->current_version);
-        $this->assertNotSame($originalTitle, $updated->versions()->where('version', 2)->value('content')['direction']['title']);
+        $this->assertNotSame($originalTitle, $updated->versions()->where('version', 2)->value('content')['ranked_angles'][0]['title']);
         $this->assertSame(49, $workspace->creditBalance());
         $this->assertSame('completed', $regeneration->fresh()->status);
     }

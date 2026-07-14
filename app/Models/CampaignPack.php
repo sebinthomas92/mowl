@@ -36,6 +36,16 @@ class CampaignPack extends Model
         return $this->hasMany(CampaignPackShare::class);
     }
 
+    public function bannerGenerationBatches(): HasMany
+    {
+        return $this->hasMany(BannerGenerationBatch::class);
+    }
+
+    public function bannerCreatives(): HasMany
+    {
+        return $this->hasMany(BannerCreative::class);
+    }
+
     public function latestGenerationJob(): HasOne
     {
         return $this->hasOne(CampaignGenerationJob::class)->latestOfMany();

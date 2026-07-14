@@ -21,4 +21,15 @@ class ProviderCostCalculator
             6,
         );
     }
+
+    public function calculateBanner(int $inputTokens, int $outputTextTokens, int $outputImageTokens): float
+    {
+        $prices = config('campaigns.banners.prices_per_million');
+
+        return round((
+            ($inputTokens * $prices['input'])
+            + ($outputTextTokens * $prices['output_text'])
+            + ($outputImageTokens * $prices['output_image'])
+        ) / 1_000_000, 6);
+    }
 }

@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\BannerDeliveryController;
+use App\Http\Controllers\BannerGenerationController;
 use App\Http\Controllers\CampaignJobController;
 use App\Http\Controllers\CampaignPackDeliveryController;
 use App\Http\Controllers\WorkspaceInvitationController;
@@ -43,6 +45,8 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/campaign-packs/create', CampaignWorkspace::class)->name('campaign-packs.create');
     Route::get('/campaign-packs/{pack}', CampaignWorkspace::class)->name('campaign-packs.show');
     Route::get('/campaign-packs/{pack}/versions/{version}/export/{format}', [CampaignPackDeliveryController::class, 'export'])->name('campaign-packs.export');
+    Route::get('/campaign-packs/{pack}/banners/{bannerCreative}/image', [BannerDeliveryController::class, 'image'])->name('campaign-banners.image');
+    Route::get('/campaign-packs/{pack}/banners/{bannerCreative}/download', [BannerDeliveryController::class, 'download'])->name('campaign-banners.download');
     Route::get('/team', TeamIndex::class)->name('team.index');
     Route::get('/usage', UsageIndex::class)->name('usage.index');
     Route::get('/settings', WorkspaceSettings::class)->name('workspace.settings');
@@ -50,6 +54,9 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/internal/campaign-jobs/{generationJob}/process', [CampaignJobController::class, 'process'])
         ->middleware(['signed', 'throttle:6,1'])
         ->name('campaign-jobs.process');
+    Route::post('/internal/banner-creatives/{bannerCreative}/process', [BannerGenerationController::class, 'process'])
+        ->middleware(['signed', 'throttle:12,1'])
+        ->name('banner-creatives.process');
 
     Route::post('/logout', function (Request $request) {
         Auth::logout();
@@ -63,3 +70,6 @@ Route::middleware('auth')->group(function (): void {
 Route::get('/internal/campaign-jobs/recover', [CampaignJobController::class, 'recover'])
     ->middleware('throttle:6,1')
     ->name('campaign-jobs.recover');
+Route::get('/internal/banner-creatives/recover', [BannerGenerationController::class, 'recover'])
+    ->middleware('throttle:6,1')
+    ->name('banner-creatives.recover');

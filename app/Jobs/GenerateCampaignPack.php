@@ -8,7 +8,7 @@ use App\Exceptions\VertexAIResponseException;
 use App\Models\CampaignGenerationJob;
 use App\Models\ProcessingCacheEntry;
 use App\Services\CampaignGeneratorManager;
-use App\Services\MediaProcessor;
+use App\Services\ProductImageImporter;
 use App\Services\ProductPageFetcher;
 use App\Services\ProviderCostCalculator;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -41,7 +41,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
         return [10, 60, 300];
     }
 
-    public function handle(ProductPageFetcher $fetcher, MediaProcessor $mediaProcessor, CampaignGeneratorManager $generators, ProviderCostCalculator $costs): void
+    public function handle(ProductPageFetcher $fetcher, CampaignGeneratorManager $generators, ProviderCostCalculator $costs): void
     {
         $provider = $generators->providerName();
         $model = $generators->model();
@@ -81,6 +81,11 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 'error_message' => null,
                 'fetched_at' => now(),
             ]);
+            app(ProductImageImporter::class)->importFirst(
+                $job->campaignPack->product,
+                $job->sourceSnapshot,
+                $page['images'] ?? [],
+            );
 
             ProcessingCacheEntry::updateOrCreate(
                 ['cache_key' => hash('sha256', 'source-extraction:v1:'.$page['content_hash'])],
@@ -90,9 +95,6 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                     'payload' => $page,
                 ],
             );
-
-            $job->update(['phase' => 'processing_media']);
-            $page['media_analysis'] = $mediaProcessor->processForProduct($job->campaignPack->product);
 
             $job->update(['phase' => 'generating_pack']);
             if ($job->section) {
@@ -105,7 +107,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                     $job->campaignPack->product->name,
                     $job->campaignPack->product->price,
                     $job->campaignPack->product->summary,
-                ])), hash('sha256', json_encode(collect($page['media_analysis']['assets'] ?? [])->pluck('content_hash')->all())),
+                ])),
                 $provider, $model ?: 'none', $job->analysis_mode, $job->section ?: 'full', $job->base_version ?: 0,
             ]));
             $cached = ProcessingCacheEntry::where('cache_key', $cacheKey)
@@ -242,11 +244,8 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
 
     private function replaceSection(array $current, array $generated, string $section): array
     {
-        $keys = $section === 'positioning' ? ['audiences', 'benefits'] : [$section];
-        foreach ($keys as $key) {
-            if (array_key_exists($key, $generated)) {
-                $current[$key] = $generated[$key];
-            }
+        if (array_key_exists($section, $generated)) {
+            $current[$section] = $generated[$section];
         }
 
         return $current;

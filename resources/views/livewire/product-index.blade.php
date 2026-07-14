@@ -8,7 +8,22 @@
             @if($products->isEmpty())
                 <div class="library-empty"><span>▱</span><h2>No products yet</h2><p>Add a product and source page through the campaign pack builder.</p><a href="{{ route('campaign-packs.create') }}">Add first product →</a></div>
             @else
-                <div class="data-table" role="table" aria-label="Products"><div class="data-row data-heading" role="row"><span>PRODUCT</span><span>BRAND</span><span>PACKS</span><span>STATUS</span></div>@foreach($products as $product)<div class="data-row" role="row"><div><strong>{{ $product->name }}</strong><small>{{ $product->price ?: 'Price not supplied' }}</small></div><span>{{ $product->brand->name }}</span><span>{{ $product->campaign_packs_count }}</span><span class="status-dot">● Source ready</span></div>@endforeach</div>
+                <div class="data-table" role="table" aria-label="Products">
+                    <div class="data-row data-heading" role="row"><span>PRODUCT</span><span>BRAND</span><span>PACKS</span><span>STATUS</span></div>
+                    @foreach($products as $product)
+                        @php($latestPack = $product->campaignPacks->sortByDesc('updated_at')->first())
+                        @php($sourceReady = $product->sourceSnapshots->sortByDesc('fetched_at')->first()?->status === 'ready')
+                        <div class="data-row" role="row">
+                            <div>
+                                @if($latestPack)<a href="{{ route('campaign-packs.show', $latestPack) }}"><strong>{{ $product->name }}</strong></a>@else<strong>{{ $product->name }}</strong>@endif
+                                <small>{{ $product->price ?: 'Price not supplied' }}</small>
+                            </div>
+                            <span>{{ $product->brand->name }}</span>
+                            <span>{{ $product->campaign_packs_count }}</span>
+                            <span class="status-dot">● {{ $sourceReady ? 'Product Truth ready' : 'Source review needed' }}</span>
+                        </div>
+                    @endforeach
+                </div>
             @endif
         </section>
     </main>

@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\Exceptions\OpenAIResponseException;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
+use App\Services\MockCampaignPackGenerator;
 use App\Services\OpenAIResponsesCampaignPackGenerator;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
@@ -44,7 +45,7 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
         $this->assertSame('gpt-5.4-mini', $result->model);
         $this->assertSame(1200, $result->inputTokens);
         $this->assertSame(200, $result->cachedInputTokens);
-        $this->assertSame('A practical tote.', $result->content['direction']['title']);
+        $this->assertStringContainsString('Canvas Tote', $result->content['overview']['summary']);
         $this->assertCount(1, $result->evidence);
         $this->assertSame('req_test_123', $result->providerRequestId);
         $this->assertNotNull($result->providerLatencyMs);
@@ -119,14 +120,14 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
     {
         $this->configureGenerator();
         $invalid = $this->campaignOutput();
-        unset($invalid['meta']);
+        unset($invalid['overview']);
         Http::fakeSequence()
             ->push($this->responsePayload($invalid))
             ->push($this->responsePayload($this->campaignOutput()));
 
         $result = $this->generate();
 
-        $this->assertSame('A practical tote.', $result->content['direction']['title']);
+        $this->assertStringContainsString('Canvas Tote', $result->content['overview']['summary']);
         Http::assertSentCount(2);
     }
 
@@ -174,11 +175,11 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
     {
         $this->configureGenerator();
         $output = $this->campaignOutput();
-        $output['evidence'][] = ['claim' => 'Waterproof', 'source' => '', 'excerpt' => '', 'status' => 'unsupported'];
+        $output['evidence'][] = ['id' => 'claim-unsafe', 'claim' => 'Waterproof', 'source' => '', 'excerpt' => '', 'status' => 'unsupported'];
         Http::fake(['api.openai.com/v1/responses' => Http::response($this->responsePayload($output))]);
 
         $this->expectException(OpenAIResponseException::class);
-        $this->expectExceptionMessage('unsupported claim without a compliance flag');
+        $this->expectExceptionMessage('unsafe claim without a compliance flag');
         $this->generate();
     }
 
@@ -219,18 +220,12 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
 
     private function campaignOutput(): array
     {
-        return [
-            'product_truth' => ['name' => 'Canvas Tote', 'price' => '$89', 'source' => 'https://example.com/tote', 'verified_facts' => ['Roomy canvas tote']],
-            'direction' => ['title' => 'A practical tote.', 'summary' => 'An everyday carry direction.'],
-            'audiences' => ['Everyday commuters'],
-            'benefits' => ['Roomy carry'],
-            'meta' => ['primary_text' => 'Carry the everyday.', 'headlines' => ['A practical tote'], 'descriptions' => ['Explore the tote.']],
-            'hooks' => ['Meet your everyday carry.'],
-            'script' => [['time' => '0:00–0:03', 'line' => 'Meet the tote.']],
-            'captions' => ['Everyday carry.'],
-            'shot_log' => ['0–3s: Product reveal'],
-            'evidence' => [['claim' => 'Roomy canvas tote', 'source' => 'https://example.com/tote', 'excerpt' => 'A roomy canvas tote.', 'status' => 'source-linked']],
-            'compliance_flags' => [],
-        ];
+        $result = app(MockCampaignPackGenerator::class)->generate(
+            new Product(['name' => 'Canvas Tote', 'price' => '$89']),
+            new SourceSnapshot(['url' => 'https://example.com/tote']),
+            ['description' => 'Everyday tote', 'content' => 'A roomy canvas tote.', 'product_truth' => ['name' => 'Canvas Tote']],
+        );
+
+        return $result->content + ['evidence' => $result->evidence, 'compliance_flags' => $result->complianceFlags];
     }
 }
