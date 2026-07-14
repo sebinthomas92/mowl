@@ -262,7 +262,7 @@
                         @push('campaign-banner-studio')
                         @php
                             $currentPackVersion = $pack->versions->firstWhere('version', $pack->current_version);
-                            $bannerBatches = $pack->bannerGenerationBatches->sortBy('created_at');
+                            $bannerBatches = $bannerStudioAvailable ? $pack->bannerGenerationBatches->sortBy('created_at') : collect();
                             $includedBannerBatch = $bannerBatches->firstWhere('kind', 'included');
                             $bannerCreatives = $bannerBatches->flatMap->creatives->sortBy('created_at');
                             $bannerActive = $bannerCreatives->contains(fn($creative) => in_array($creative->status, ['queued', 'processing', 'retrying']));

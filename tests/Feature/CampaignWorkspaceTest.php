@@ -9,9 +9,11 @@ use App\Models\Product;
 use App\Models\SourceSnapshot;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\MockCampaignPackGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -146,6 +148,47 @@ class CampaignWorkspaceTest extends TestCase
         Livewire::actingAs($user)->test(CampaignWorkspace::class)
             ->assertDontSee('Product images or short videos')
             ->assertDontSee('Upload video');
+    }
+
+    public function test_existing_campaign_packs_render_while_banner_tables_are_pending(): void
+    {
+        [$user, $workspace] = $this->workspaceUser();
+        $brand = $workspace->brands()->create(['name' => 'Migration Safe Brand']);
+        $product = $brand->products()->create(['name' => 'Migration Safe Product']);
+        $source = $product->sourceSnapshots()->create([
+            'url' => 'https://example.com/migration-safe-product',
+            'content_hash' => hash('sha256', 'migration-safe-product'),
+            'status' => 'ready',
+        ]);
+        $pack = CampaignPack::create([
+            'product_id' => $product->id,
+            'source_snapshot_id' => $source->id,
+            'name' => 'Migration Safe Pack',
+            'status' => 'draft',
+            'current_version' => 1,
+            'analysis_mode' => 'standard',
+        ]);
+        $result = app(MockCampaignPackGenerator::class)->generate($product, $source);
+        $pack->versions()->create([
+            'version' => 1,
+            'generator' => 'mock',
+            'content' => $result->content,
+            'evidence' => $result->evidence,
+            'compliance_flags' => $result->complianceFlags,
+        ]);
+
+        Schema::rename('banner_creatives', 'pending_banner_creatives');
+        Schema::rename('banner_generation_batches', 'pending_banner_generation_batches');
+
+        try {
+            $this->actingAs($user)
+                ->get(route('campaign-packs.show', $pack))
+                ->assertOk()
+                ->assertSee('Banner Studio is not enabled');
+        } finally {
+            Schema::rename('pending_banner_generation_batches', 'banner_generation_batches');
+            Schema::rename('pending_banner_creatives', 'banner_creatives');
+        }
     }
 
     public function test_each_setup_step_validates_required_input(): void

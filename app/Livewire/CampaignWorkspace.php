@@ -595,16 +595,32 @@ class CampaignWorkspace extends Component
                 $reviewFeaturesAvailable = false;
             }
         }
+        $bannerStudioAvailable = Schema::hasTable('banner_generation_batches')
+            && Schema::hasTable('banner_creatives')
+            && config('campaigns.banners.enabled');
+        if ($bannerStudioAvailable && DB::connection()->getDriverName() === 'pgsql') {
+            try {
+                $bannerStudioAvailable = (bool) DB::scalar(
+                    "select has_table_privilege(current_user, 'banner_generation_batches', 'SELECT')
+                        and has_table_privilege(current_user, 'banner_creatives', 'SELECT')"
+                );
+            } catch (QueryException) {
+                $bannerStudioAvailable = false;
+            }
+        }
+        $packRelations = [
+            'product.brand',
+            'sourceSnapshot',
+            $reviewFeaturesAvailable ? 'versions.comments.user' : 'versions',
+            'latestGenerationJob',
+        ];
+        if ($bannerStudioAvailable) {
+            $packRelations[] = 'bannerGenerationBatches.creatives.campaignPackVersion';
+        }
         $pack = $this->packId
             ? CampaignPack::query()
                 ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-                ->with([
-                    'product.brand',
-                    'sourceSnapshot',
-                    $reviewFeaturesAvailable ? 'versions.comments.user' : 'versions',
-                    'latestGenerationJob',
-                    'bannerGenerationBatches.creatives.campaignPackVersion',
-                ])
+                ->with($packRelations)
                 ->findOrFail($this->packId)
             : null;
 
@@ -617,7 +633,7 @@ class CampaignWorkspace extends Component
             $pack->load('latestGenerationJob');
         }
 
-        if ($pack && Schema::hasTable('banner_creatives')) {
+        if ($pack && $bannerStudioAvailable) {
             BannerCreative::query()
                 ->where('campaign_pack_id', $pack->id)
                 ->where('status', 'processing')
@@ -626,7 +642,7 @@ class CampaignWorkspace extends Component
             $pack->load('bannerGenerationBatches.creatives.campaignPackVersion');
         }
 
-        $nextBannerCreative = $pack && Schema::hasTable('banner_creatives')
+        $nextBannerCreative = $pack && $bannerStudioAvailable
             ? $pack->bannerCreatives()->whereIn('status', ['queued', 'retrying'])->oldest()->first()
             : null;
         $selectedPackVersion = $pack
@@ -655,7 +671,7 @@ class CampaignWorkspace extends Component
                 ? max(0, 3 - $pack->generationJobs()->whereNotNull('section')->where('status', 'completed')->where('created_at', '<=', $pack->created_at->copy()->addDay())->count())
                 : 3,
             'reviewFeaturesAvailable' => $reviewFeaturesAvailable,
-            'bannerStudioAvailable' => Schema::hasTable('banner_generation_batches') && config('campaigns.banners.enabled'),
+            'bannerStudioAvailable' => $bannerStudioAvailable,
             'bannerProductImage' => $pack?->product?->mediaAssets()
                 ->where('type', 'image')
                 ->where('metadata->origin', 'product_page')
