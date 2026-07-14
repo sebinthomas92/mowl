@@ -49,11 +49,11 @@ jobs:
           cp .env.example .env
           php artisan key:generate
 
+      - name: Build production assets
+        run: npm run build
+
       - name: Check PHP formatting
         run: vendor/bin/pint --test
 
       - name: Run PHP tests
         run: php artisan test
-
-      - name: Build production assets
-        run: npm run build
