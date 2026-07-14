@@ -6,9 +6,9 @@ use App\Models\Product;
 use App\Models\SourceSnapshot;
 use App\Services\GoogleVertexAICampaignPackGenerator;
 use App\Services\GoogleVertexAIClient;
+use App\Services\MockCampaignPackGenerator;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class GoogleVertexAICampaignPackGeneratorTest extends TestCase
@@ -16,8 +16,6 @@ class GoogleVertexAICampaignPackGeneratorTest extends TestCase
     public function test_it_generates_a_structured_campaign_pack_with_vertex_ai(): void
     {
         $this->configureGoogle();
-        Storage::fake('gcs');
-        Storage::disk('gcs')->put('campaign-media/product-video.mp4', 'video bytes');
         request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
         Http::fake([
             'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
@@ -44,11 +42,6 @@ class GoogleVertexAICampaignPackGeneratorTest extends TestCase
                 'description' => 'Everyday tote',
                 'content' => 'A roomy canvas tote.',
                 'product_truth' => ['name' => 'Canvas Tote'],
-                'media_analysis' => ['videos' => [[
-                    'disk' => 'gcs',
-                    'path' => 'campaign-media/product-video.mp4',
-                    'mime_type' => 'video/mp4',
-                ]]],
             ],
         );
 
@@ -57,7 +50,7 @@ class GoogleVertexAICampaignPackGeneratorTest extends TestCase
         $this->assertSame(1200, $result->inputTokens);
         $this->assertSame(200, $result->cachedInputTokens);
         $this->assertSame(500, $result->outputTokens);
-        $this->assertSame('A practical tote.', $result->content['direction']['title']);
+        $this->assertStringContainsString('Canvas Tote', $result->content['overview']['summary']);
         $this->assertSame('vertex-request-123', $result->providerRequestId);
 
         Http::assertSent(function (Request $request): bool {
@@ -69,7 +62,8 @@ class GoogleVertexAICampaignPackGeneratorTest extends TestCase
                 && str_contains($request->url(), '/models/gemini-3.5-flash:generateContent')
                 && $request['generationConfig']['responseMimeType'] === 'application/json'
                 && $request['generationConfig']['responseSchema']['additionalProperties'] === false
-                && $request['contents'][0]['parts'][1]['fileData']['fileUri'] === 'gs://marketing-owl-test-bucket/campaign-media/product-video.mp4';
+                && count($request['contents'][0]['parts']) === 1
+                && ! str_contains($request['contents'][0]['parts'][0]['text'], 'MEDIA ANALYSIS');
         });
     }
 
@@ -118,18 +112,12 @@ class GoogleVertexAICampaignPackGeneratorTest extends TestCase
 
     private function campaignOutput(): array
     {
-        return [
-            'product_truth' => ['name' => 'Canvas Tote', 'price' => '$89', 'source' => 'https://example.com/tote', 'verified_facts' => ['Roomy canvas tote']],
-            'direction' => ['title' => 'A practical tote.', 'summary' => 'An everyday carry direction.'],
-            'audiences' => ['Everyday commuters'],
-            'benefits' => ['Roomy carry'],
-            'meta' => ['primary_text' => 'Carry the everyday.', 'headlines' => ['A practical tote'], 'descriptions' => ['Explore the tote.']],
-            'hooks' => ['Meet your everyday carry.'],
-            'script' => [['time' => '0:00–0:03', 'line' => 'Meet the tote.']],
-            'captions' => ['Everyday carry.'],
-            'shot_log' => ['0–3s: Product reveal'],
-            'evidence' => [['claim' => 'Roomy canvas tote', 'source' => 'https://example.com/tote', 'excerpt' => 'A roomy canvas tote.', 'status' => 'source-linked']],
-            'compliance_flags' => [],
-        ];
+        $result = app(MockCampaignPackGenerator::class)->generate(
+            new Product(['name' => 'Canvas Tote', 'price' => '$89']),
+            new SourceSnapshot(['url' => 'https://example.com/tote']),
+            ['description' => 'Everyday tote', 'content' => 'A roomy canvas tote.', 'product_truth' => ['name' => 'Canvas Tote']],
+        );
+
+        return $result->content + ['evidence' => $result->evidence, 'compliance_flags' => $result->complianceFlags];
     }
 }

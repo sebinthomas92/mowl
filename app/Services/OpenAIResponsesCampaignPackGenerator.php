@@ -10,7 +10,6 @@ use App\Models\SourceSnapshot;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Storage;
 use JsonException;
 use RuntimeException;
 
@@ -27,9 +26,6 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             'type' => 'input_text',
             'text' => $this->sourcePrompt($product, $source, $page),
         ]];
-        foreach ($this->visualInputs($page) as $visual) {
-            $userContent[] = $visual;
-        }
         $lastException = null;
 
         foreach ($this->models() as $model) {
@@ -211,24 +207,25 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
                 throw new OpenAIResponseException('openai_invalid_evidence', 'OpenAI returned evidence without a claim.', true);
             }
 
-            if ($status === 'unsupported') {
+            if (in_array($status, ['too_specific_for_evidence', 'unsupported', 'contradicted_by_source'], true)) {
                 if (! $flaggedClaims->contains($claim)) {
-                    throw new OpenAIResponseException('openai_unflagged_claim', 'OpenAI returned an unsupported claim without a compliance flag.', true);
+                    throw new OpenAIResponseException('openai_unflagged_claim', 'OpenAI returned an unsafe claim without a compliance flag.', true);
                 }
 
                 continue;
             }
 
             $excerpt = $this->normalize((string) ($reference['excerpt'] ?? ''));
-            if ($status !== 'source-linked' || ! in_array($reference['source'] ?? null, $allowedSources, true) || $excerpt === '' || ! str_contains($sourceText, $excerpt)) {
+            if (! in_array($status, ['directly_supported', 'supported_paraphrased'], true) || ! in_array($reference['source'] ?? null, $allowedSources, true) || $excerpt === '' || ! str_contains($sourceText, $excerpt)) {
                 throw new OpenAIResponseException('openai_invalid_evidence', 'OpenAI returned evidence that is not traceable to the supplied source.', true);
             }
 
-            $linkedClaims[] = $claim;
+            $linkedClaims[(string) ($reference['id'] ?? '')] = $claim;
         }
 
         foreach ($generated['product_truth']['verified_facts'] ?? [] as $fact) {
-            if (! in_array($this->normalize((string) $fact), $linkedClaims, true)) {
+            $claimId = (string) ($fact['claim_id'] ?? '');
+            if ($claimId === '' || ($linkedClaims[$claimId] ?? null) !== $this->normalize((string) ($fact['statement'] ?? ''))) {
                 throw new OpenAIResponseException('openai_unlinked_fact', 'OpenAI returned a verified fact without a source-linked evidence claim.', true);
             }
         }
@@ -236,16 +233,8 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
 
     private function validateShape(array $generated): void
     {
-        $requiredSections = ['product_truth', 'direction', 'audiences', 'benefits', 'meta', 'hooks', 'script', 'captions', 'shot_log', 'evidence', 'compliance_flags'];
-
-        foreach ($requiredSections as $section) {
-            if (! array_key_exists($section, $generated)) {
-                throw new OpenAIResponseException('openai_invalid_schema', "OpenAI structured output is missing {$section}.", true);
-            }
-        }
-
-        if (! is_array($generated['product_truth']) || ! is_array($generated['product_truth']['verified_facts'] ?? null) || ! is_array($generated['evidence']) || ! is_array($generated['compliance_flags'])) {
-            throw new OpenAIResponseException('openai_invalid_schema', 'OpenAI structured output has invalid campaign-pack section types.', true);
+        if ($error = CampaignPackBlueprint::shapeError($generated)) {
+            throw new OpenAIResponseException('openai_invalid_schema', 'OpenAI '.$error, true);
         }
     }
 
@@ -256,9 +245,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
 
     private function instructions(): string
     {
-        return <<<'PROMPT'
-You create campaign intelligence for ecommerce performance agencies. Use only facts supported by the supplied product-page source. Do not invent materials, certifications, performance outcomes, health claims, guarantees, scarcity, discounts, reviews, or customer results. Every entry in product_truth.verified_facts must have a source-linked evidence record whose claim is exactly the same text and whose excerpt is copied from the supplied source. Every unsupported claim must have an evidence record with status unsupported and a matching compliance_flags entry; do not present it as a fact. Write copy that is useful to media buyers, concrete, concise, and ready to paste into campaign tools.
-PROMPT;
+        return CampaignPackBlueprint::instructions();
     }
 
     private function sourcePrompt(Product $product, SourceSnapshot $source, array $page): string
@@ -271,12 +258,6 @@ PROMPT;
             'EXTRACTED STRUCTURED TRUTH'."\n".json_encode($page['product_truth'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
             "SOURCE DESCRIPTION\n".($page['description'] ?? ''),
             "NORMALIZED SOURCE CONTENT\n".mb_substr($page['content'] ?? '', 0, 50_000),
-            'MEDIA ANALYSIS'."\n".json_encode([
-                'assets' => $page['media_analysis']['assets'] ?? [],
-                'transcripts' => $page['media_analysis']['transcripts'] ?? [],
-                'frame_count' => count($page['media_analysis']['frames'] ?? []),
-                'image_count' => count($page['media_analysis']['images'] ?? []),
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
         ];
 
         if ($section = $page['regeneration_section'] ?? null) {
@@ -287,88 +268,8 @@ PROMPT;
         return implode("\n\n", $parts);
     }
 
-    private function visualInputs(array $page): array
-    {
-        $frames = array_slice($page['media_analysis']['frames'] ?? [], 0, config('campaigns.media.max_frames'));
-        $images = array_slice($page['media_analysis']['images'] ?? [], 0, 4);
-
-        return collect(array_merge($images, $frames))
-            ->filter(fn (array $item) => isset($item['disk'], $item['path']) && Storage::disk($item['disk'])->exists($item['path']))
-            ->map(function (array $item): array {
-                $disk = Storage::disk($item['disk']);
-                $bytes = $disk->get($item['path']);
-                $mimeType = $disk->mimeType($item['path']) ?: 'image/jpeg';
-
-                return [
-                    'type' => 'input_image',
-                    'image_url' => "data:{$mimeType};base64,".base64_encode($bytes),
-                ];
-            })
-            ->values()
-            ->all();
-    }
-
     private function schema(): array
     {
-        $stringArray = ['type' => 'array', 'items' => ['type' => 'string']];
-
-        return [
-            'type' => 'object',
-            'additionalProperties' => false,
-            'required' => ['product_truth', 'direction', 'audiences', 'benefits', 'meta', 'hooks', 'script', 'captions', 'shot_log', 'evidence', 'compliance_flags'],
-            'properties' => [
-                'product_truth' => $this->objectSchema([
-                    'name' => ['type' => 'string'],
-                    'price' => ['type' => 'string'],
-                    'source' => ['type' => 'string'],
-                    'verified_facts' => $stringArray,
-                ]),
-                'direction' => $this->objectSchema([
-                    'title' => ['type' => 'string'],
-                    'summary' => ['type' => 'string'],
-                ]),
-                'audiences' => $stringArray,
-                'benefits' => $stringArray,
-                'meta' => $this->objectSchema([
-                    'primary_text' => ['type' => 'string'],
-                    'headlines' => $stringArray,
-                    'descriptions' => $stringArray,
-                ]),
-                'hooks' => $stringArray,
-                'script' => [
-                    'type' => 'array',
-                    'items' => $this->objectSchema(['time' => ['type' => 'string'], 'line' => ['type' => 'string']]),
-                ],
-                'captions' => $stringArray,
-                'shot_log' => $stringArray,
-                'evidence' => [
-                    'type' => 'array',
-                    'items' => $this->objectSchema([
-                        'claim' => ['type' => 'string'],
-                        'source' => ['type' => 'string'],
-                        'excerpt' => ['type' => 'string'],
-                        'status' => ['type' => 'string', 'enum' => ['source-linked', 'unsupported']],
-                    ]),
-                ],
-                'compliance_flags' => [
-                    'type' => 'array',
-                    'items' => $this->objectSchema([
-                        'severity' => ['type' => 'string', 'enum' => ['info', 'warning', 'blocked']],
-                        'claim' => ['type' => 'string'],
-                        'reason' => ['type' => 'string'],
-                    ]),
-                ],
-            ],
-        ];
-    }
-
-    private function objectSchema(array $properties): array
-    {
-        return [
-            'type' => 'object',
-            'additionalProperties' => false,
-            'required' => array_keys($properties),
-            'properties' => $properties,
-        ];
+        return CampaignPackBlueprint::schema();
     }
 }

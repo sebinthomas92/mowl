@@ -10,7 +10,6 @@ use App\Models\SourceSnapshot;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -44,8 +43,9 @@ class CampaignWorkspaceTest extends TestCase
         $this->actingAs($user)
             ->get(route('campaign-packs.show', CampaignPack::firstOrFail()))
             ->assertOk()
-            ->assertSee('Ready for Ads Manager')
-            ->assertSee('A smarter everyday upgrade');
+            ->assertSee('Several routes explored. The strongest three lead.')
+            ->assertSee('The everyday upgrade')
+            ->assertSee('QA blocked');
 
         $this->assertDatabaseCount('brands', 1);
         $this->assertDatabaseCount('products', 1);
@@ -61,6 +61,7 @@ class CampaignWorkspaceTest extends TestCase
         $this->assertSame('Plush Republic', Brand::firstOrFail()->name);
         $this->assertSame('Book-Shaped Kindle Stand', Product::firstOrFail()->name);
         $this->assertNull(SourceSnapshot::firstOrFail()->refreshed_from_snapshot_id);
+        $this->assertSame('ready', SourceSnapshot::firstOrFail()->status);
     }
 
     public function test_an_existing_workspace_brand_can_be_reused(): void
@@ -78,9 +79,12 @@ class CampaignWorkspaceTest extends TestCase
     {
         [$user, $workspace] = $this->workspaceUser();
         $brand = $workspace->brands()->create(['name' => 'Imported Brand']);
+        Storage::fake('local');
+        $image = $this->imageBytes();
         Http::fake([
+            '93.184.216.34/media/canvas-tote.png' => Http::response($image, 200, ['Content-Type' => 'image/png']),
             '93.184.216.34/*' => Http::response(<<<'HTML'
-                <html><head><title>Fallback page title</title><link rel="canonical" href="/products/canvas-tote"><script type="application/ld+json">{"@type":"Product","name":"Canvas Tote","description":"A roomy everyday carry tote.","offers":{"price":"89","priceCurrency":"USD"}}</script></head><body>Product details</body></html>
+                <html><head><title>Fallback page title</title><meta property="og:image" content="/media/canvas-tote.png"><link rel="canonical" href="/products/canvas-tote"><script type="application/ld+json">{"@type":"Product","name":"Canvas Tote","description":"A roomy everyday carry tote.","image":"/media/second-choice.png","offers":{"price":"89","priceCurrency":"USD"}}</script></head><body>Product details</body></html>
                 HTML, 200, ['Content-Type' => 'text/html']),
         ]);
 
@@ -106,6 +110,17 @@ class CampaignWorkspaceTest extends TestCase
             'price' => 'USD 89',
             'summary' => 'A roomy everyday carry tote.',
         ]);
+        $this->assertDatabaseHas('source_snapshots', [
+            'product_id' => Product::firstOrFail()->id,
+            'url' => 'https://93.184.216.34/products/canvas-tote',
+            'status' => 'ready',
+        ]);
+        $asset = Product::firstOrFail()->mediaAssets()->firstOrFail();
+        $this->assertSame('product_page', $asset->metadata['origin']);
+        $this->assertSame('https://93.184.216.34/media/canvas-tote.png', $asset->metadata['source_url']);
+        $this->assertSame(1, $asset->metadata['candidate_rank']);
+        $this->assertSame(1, Product::firstOrFail()->mediaAssets()->count());
+        Storage::disk('local')->assertExists($asset->path);
     }
 
     public function test_product_cannot_be_saved_without_analyzing_its_url(): void
@@ -124,37 +139,13 @@ class CampaignWorkspaceTest extends TestCase
         $this->assertDatabaseCount('products', 0);
     }
 
-    public function test_media_metadata_is_persisted_after_the_temporary_upload_is_stored(): void
+    public function test_campaign_setup_does_not_request_media_before_product_truth_is_complete(): void
     {
-        Storage::fake('local');
-        Queue::fake();
-        [$user, $workspace] = $this->workspaceUser();
-        $brand = $workspace->brands()->create(['name' => 'Media Brand']);
-        $product = $brand->products()->create(['name' => 'Demo Product']);
-        $upload = UploadedFile::fake()->create('demo.mp4', 512, 'video/mp4');
-
-        Livewire::actingAs($user)->test(CampaignWorkspace::class)
-            ->set('productId', $product->id)
-            ->set('step', 3)
-            ->set('sourceUrl', 'https://example.com/products/demo')
-            ->set('mediaUploads', [$upload])
-            ->call('generatePack')
-            ->assertHasNoErrors();
-
-        $asset = $product->mediaAssets()->firstOrFail();
-        $this->assertSame('demo.mp4', $asset->original_name);
-        $this->assertSame('video/mp4', $asset->mime_type);
-        $this->assertSame(512 * 1024, $asset->size_bytes);
-        Storage::disk('local')->assertExists($asset->path);
-    }
-
-    public function test_media_upload_controls_can_be_disabled_until_production_storage_is_configured(): void
-    {
-        config(['campaigns.media.uploads_enabled' => false]);
         [$user] = $this->workspaceUser();
 
         Livewire::actingAs($user)->test(CampaignWorkspace::class)
-            ->assertDontSee('Product images or short videos');
+            ->assertDontSee('Product images or short videos')
+            ->assertDontSee('Upload video');
     }
 
     public function test_each_setup_step_validates_required_input(): void
@@ -210,7 +201,7 @@ class CampaignWorkspaceTest extends TestCase
 
         $this->assertDatabaseHas('campaign_generation_jobs', [
             'campaign_pack_id' => $pack->id,
-            'section' => 'meta',
+            'section' => 'ranked_angles',
             'status' => 'queued',
         ]);
         Queue::assertNothingPushed();
@@ -228,5 +219,17 @@ class CampaignWorkspaceTest extends TestCase
         ]);
 
         return [$user, $workspace];
+    }
+
+    private function imageBytes(): string
+    {
+        $image = imagecreatetruecolor(600, 800);
+        imagefill($image, 0, 0, imagecolorallocate($image, 218, 173, 115));
+        ob_start();
+        imagepng($image);
+        $bytes = ob_get_clean();
+        imagedestroy($image);
+
+        return $bytes;
     }
 }

@@ -8,7 +8,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Brand extends Model
 {
-    protected $fillable = ['workspace_id', 'name', 'website', 'status'];
+    protected $fillable = [
+        'workspace_id', 'name', 'website', 'status', 'banner_logo_disk', 'banner_logo_path',
+        'banner_logo_mime_type', 'primary_color',
+    ];
 
     public function workspace(): BelongsTo
     {

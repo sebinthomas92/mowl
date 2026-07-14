@@ -25,4 +25,11 @@ class ProviderCostCalculatorTest extends TestCase
 
         $this->assertSame(0.04968, $cost);
     }
+
+    public function test_it_tracks_banner_text_and_image_output_costs(): void
+    {
+        $cost = app(ProviderCostCalculator::class)->calculateBanner(10_000, 2_000, 3_000);
+
+        $this->assertSame(0.191, $cost);
+    }
 }

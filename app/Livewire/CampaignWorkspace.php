@@ -3,20 +3,26 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use App\Models\BannerCreative;
 use App\Models\Brand;
 use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
 use App\Models\CampaignPackShare;
 use App\Models\CampaignPackVersion;
 use App\Models\CampaignPackVersionComment;
-use App\Models\MediaAsset;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
+use App\Services\BannerBatchCreator;
+use App\Services\BannerJobDispatcher;
 use App\Services\CampaignJobDispatcher;
+use App\Services\CampaignPackContentNormalizer;
+use App\Services\CampaignPackSafetyValidator;
+use App\Services\ProductImageImporter;
 use App\Services\ProductPageFetcher;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -51,11 +57,13 @@ class CampaignWorkspace extends Component
 
     public string $analysisMode = 'standard';
 
-    public string $regenerationSection = 'meta';
+    public string $regenerationSection = 'ranked_angles';
 
     public ?int $selectedVersion = null;
 
-    public array $mediaUploads = [];
+    public $bannerLogo = null;
+
+    public string $bannerPrimaryColor = '#F4B942';
 
     public ?int $brandId = null;
 
@@ -81,6 +89,7 @@ class CampaignWorkspace extends Component
         $this->packId = $pack->id;
         $this->productId = $pack->product_id;
         $this->brandId = $pack->product->brand_id;
+        $this->bannerPrimaryColor = $pack->product->brand->primary_color ?: '#F4B942';
         $this->step = 4;
     }
 
@@ -153,7 +162,7 @@ class CampaignWorkspace extends Component
         $this->productDetailsLoaded = true;
     }
 
-    public function saveProduct(): void
+    public function saveProduct(ProductPageFetcher $fetcher, ProductImageImporter $imageImporter): void
     {
         abort_unless($this->brandId, 422);
         $data = $this->validate([
@@ -172,15 +181,48 @@ class CampaignWorkspace extends Component
             ->where('workspace_id', $this->currentWorkspace()->id)
             ->findOrFail($this->brandId);
 
-        $product = Product::create([
-            'brand_id' => $brand->id,
-            'name' => $data['productName'],
-            'price' => $data['productPrice'] ?: null,
-            'summary' => $data['productSummary'] ?: null,
-        ]);
+        try {
+            $page = $fetcher->fetch($data['productUrl']);
+        } catch (Throwable $exception) {
+            report($exception);
+
+            throw ValidationException::withMessages([
+                'productUrl' => 'We could not capture Product Truth from that URL. Check that the page is public and try again.',
+            ]);
+        }
+
+        [$product, $source] = DB::transaction(function () use ($brand, $data, $page): array {
+            $product = Product::create([
+                'brand_id' => $brand->id,
+                'name' => $data['productName'],
+                'price' => $data['productPrice'] ?: null,
+                'summary' => $data['productSummary'] ?: null,
+            ]);
+            $source = SourceSnapshot::create([
+                'product_id' => $product->id,
+                'url' => $page['url'],
+                'title' => $page['title'],
+                'canonical_url' => $page['canonical_url'],
+                'content_hash' => $page['content_hash'],
+                'status' => 'ready',
+                'extracted_content' => $page['content'],
+                'extracted_truth' => $page['product_truth'],
+                'fetched_at' => now(),
+            ]);
+
+            return [$product, $source];
+        });
+
+        $image = $imageImporter->importFirst($product, $source, $page['images'] ?? []);
+        if ($image) {
+            $this->audit('product_image_auto_imported', $image, null, [
+                'product_id' => $product->id,
+                'source_url' => data_get($image->metadata, 'source_url'),
+            ]);
+        }
 
         $this->productId = $product->id;
-        $this->sourceUrl = $data['productUrl'];
+        $this->sourceUrl = $page['canonical_url'];
         $this->step = 3;
     }
 
@@ -190,8 +232,6 @@ class CampaignWorkspace extends Component
         $data = $this->validate([
             'sourceUrl' => ['required', 'url:http,https', 'max:2000'],
             'analysisMode' => ['required', 'in:standard,deep'],
-            'mediaUploads' => config('campaigns.media.uploads_enabled') ? ['array', 'max:8'] : ['prohibited'],
-            'mediaUploads.*' => config('campaigns.media.uploads_enabled') ? ['file', 'mimetypes:image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm', 'max:102400'] : ['prohibited'],
         ]);
         $workspace = $this->currentWorkspace();
         $creditCost = $data['analysisMode'] === 'deep' ? 3 : 1;
@@ -205,44 +245,15 @@ class CampaignWorkspace extends Component
             $product = Product::query()
                 ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
                 ->findOrFail($this->productId);
-            $previousSourceId = $product->sourceSnapshots()->latest()->value('id');
-            $source = SourceSnapshot::create([
-                'product_id' => $product->id,
-                'url' => $data['sourceUrl'],
-                'content_hash' => hash('sha256', $data['sourceUrl']),
-                'status' => 'pending',
-                'refreshed_from_snapshot_id' => $previousSourceId,
-            ]);
-
-            foreach ($this->mediaUploads as $upload) {
-                $stream = $upload->readStream();
-                $hashContext = hash_init('sha256');
-                hash_update_stream($hashContext, $stream);
-                fclose($stream);
-                $hash = hash_final($hashContext);
-                $extension = strtolower($upload->getClientOriginalExtension() ?: $upload->extension() ?: 'bin');
-                $mimeType = $upload->getMimeType();
-                $originalName = $upload->getClientOriginalName();
-                $size = $upload->getSize();
-                $disk = config('campaigns.media.disk');
-                $path = $upload->storeAs(
-                    "campaign-media/{$workspace->id}/{$product->id}/originals",
-                    "{$hash}.{$extension}",
-                    $disk,
-                );
-                MediaAsset::firstOrCreate(
-                    ['product_id' => $product->id, 'content_hash' => $hash],
-                    [
-                        'workspace_id' => $workspace->id,
-                        'source_snapshot_id' => $source->id,
-                        'type' => str_starts_with($mimeType, 'video/') ? 'video' : 'image',
-                        'disk' => $disk,
-                        'path' => $path,
-                        'original_name' => $originalName,
-                        'mime_type' => $mimeType,
-                        'size_bytes' => $size,
-                    ],
-                );
+            $source = $product->sourceSnapshots()->latest()->first();
+            if (! $source || ! in_array($data['sourceUrl'], [$source->url, $source->canonical_url], true)) {
+                $source = SourceSnapshot::create([
+                    'product_id' => $product->id,
+                    'url' => $data['sourceUrl'],
+                    'content_hash' => hash('sha256', $data['sourceUrl']),
+                    'status' => 'pending',
+                    'refreshed_from_snapshot_id' => $source?->id,
+                ]);
             }
 
             $pack = CampaignPack::create([
@@ -321,7 +332,7 @@ class CampaignWorkspace extends Component
     public function regenerateSection(CampaignJobDispatcher $dispatcher): void
     {
         $data = $this->validate([
-            'regenerationSection' => ['required', 'in:direction,positioning,meta,hooks,script,captions,shot_log'],
+            'regenerationSection' => ['required', 'in:positioning,ranked_angles,creative_routes,offers'],
         ]);
         $workspace = $this->currentWorkspace();
         $pack = CampaignPack::query()
@@ -403,6 +414,7 @@ class CampaignWorkspace extends Component
         $this->ensureOwner();
         $version = $this->selectedPackVersion();
         abort_unless(in_array($version->review_status, ['draft', 'review']), 422);
+        app(CampaignPackSafetyValidator::class)->assertApprovable($version, $version->campaignPack->sourceSnapshot);
         $version->update([
             'review_status' => 'approved',
             'reviewed_by_user_id' => auth()->id(),
@@ -475,6 +487,63 @@ class CampaignWorkspace extends Component
         $this->audit('campaign_pack_share_revoked', $share);
     }
 
+    public function saveBannerBranding(): void
+    {
+        $data = $this->validate([
+            'bannerPrimaryColor' => ['nullable', 'regex:/^#[0-9A-Fa-f]{6}$/'],
+            'bannerLogo' => ['nullable', 'file', 'mimetypes:image/png,image/webp', 'max:5120'],
+        ]);
+        $pack = $this->workspacePack();
+        $brand = $pack->product->brand;
+        $attributes = ['primary_color' => $data['bannerPrimaryColor'] ?: null];
+
+        if ($this->bannerLogo) {
+            $disk = config('campaigns.banners.disk');
+            $extension = strtolower($this->bannerLogo->extension() ?: 'png');
+            $path = $this->bannerLogo->storeAs(
+                "brand-assets/{$this->currentWorkspace()->id}/{$brand->id}",
+                'banner-logo.'.$extension,
+                $disk,
+            );
+            if ($brand->banner_logo_path && ($brand->banner_logo_path !== $path || $brand->banner_logo_disk !== $disk)) {
+                Storage::disk($brand->banner_logo_disk)->delete($brand->banner_logo_path);
+            }
+            $attributes += [
+                'banner_logo_disk' => $disk,
+                'banner_logo_path' => $path,
+                'banner_logo_mime_type' => $this->bannerLogo->getMimeType(),
+            ];
+        }
+
+        $brand->update($attributes);
+        $this->bannerLogo = null;
+        $this->audit('banner_branding_updated', $brand, null, ['primary_color' => $attributes['primary_color'], 'has_logo' => (bool) $brand->fresh()->banner_logo_path]);
+    }
+
+    public function generateIncludedBanners(BannerBatchCreator $creator, BannerJobDispatcher $dispatcher): void
+    {
+        $pack = $this->workspacePack();
+        $batch = $creator->createIncluded($this->currentWorkspace(), $pack, auth()->user());
+        $dispatcher->dispatch($batch);
+        $this->audit('banner_batch_requested', $batch, null, ['kind' => 'included', 'count' => $batch->requested_count]);
+    }
+
+    public function generateAdditionalBanner(BannerBatchCreator $creator, BannerJobDispatcher $dispatcher): void
+    {
+        $pack = $this->workspacePack();
+        $batch = $creator->createAdditional($this->currentWorkspace(), $pack, auth()->user());
+        $dispatcher->dispatch($batch);
+        $this->audit('banner_batch_requested', $batch, null, ['kind' => 'additional', 'count' => 1, 'credit_cost' => $batch->credit_cost]);
+    }
+
+    public function retryIncludedBanners(BannerBatchCreator $creator, BannerJobDispatcher $dispatcher): void
+    {
+        $pack = $this->workspacePack();
+        $batch = $creator->retryIncluded($this->currentWorkspace(), $pack);
+        $dispatcher->dispatch($batch);
+        $this->audit('banner_included_slots_retried', $batch);
+    }
+
     private function workspacePack(): CampaignPack
     {
         return CampaignPack::query()
@@ -534,6 +603,7 @@ class CampaignWorkspace extends Component
                     'sourceSnapshot',
                     $reviewFeaturesAvailable ? 'versions.comments.user' : 'versions',
                     'latestGenerationJob',
+                    'bannerGenerationBatches.creatives.campaignPackVersion',
                 ])
                 ->findOrFail($this->packId)
             : null;
@@ -547,6 +617,33 @@ class CampaignWorkspace extends Component
             $pack->load('latestGenerationJob');
         }
 
+        if ($pack && Schema::hasTable('banner_creatives')) {
+            BannerCreative::query()
+                ->where('campaign_pack_id', $pack->id)
+                ->where('status', 'processing')
+                ->where('updated_at', '<', now()->subMinutes(10))
+                ->update(['status' => 'retrying']);
+            $pack->load('bannerGenerationBatches.creatives.campaignPackVersion');
+        }
+
+        $nextBannerCreative = $pack && Schema::hasTable('banner_creatives')
+            ? $pack->bannerCreatives()->whereIn('status', ['queued', 'retrying'])->oldest()->first()
+            : null;
+        $selectedPackVersion = $pack
+            ? ($this->selectedVersion ? $pack->versions->firstWhere('version', $this->selectedVersion) : $pack->versions->sortByDesc('version')->first())
+            : null;
+        $displayContent = $selectedPackVersion
+            ? app(CampaignPackContentNormalizer::class)->normalize($selectedPackVersion->content ?? [], $pack->product, $pack->sourceSnapshot)
+            : [];
+        $qaIssues = $selectedPackVersion
+            ? app(CampaignPackSafetyValidator::class)->issues(
+                $displayContent,
+                $selectedPackVersion->evidence ?? [],
+                $selectedPackVersion->compliance_flags ?? [],
+                $pack->sourceSnapshot,
+            )
+            : [];
+
         return view('livewire.campaign-workspace', [
             'workspace' => $workspace,
             'brands' => $workspace->brands()->orderBy('name')->get(),
@@ -558,6 +655,19 @@ class CampaignWorkspace extends Component
                 ? max(0, 3 - $pack->generationJobs()->whereNotNull('section')->where('status', 'completed')->where('created_at', '<=', $pack->created_at->copy()->addDay())->count())
                 : 3,
             'reviewFeaturesAvailable' => $reviewFeaturesAvailable,
+            'bannerStudioAvailable' => Schema::hasTable('banner_generation_batches') && config('campaigns.banners.enabled'),
+            'bannerProductImage' => $pack?->product?->mediaAssets()
+                ->where('type', 'image')
+                ->where('metadata->origin', 'product_page')
+                ->oldest()
+                ->first(),
+            'bannerCreditBalance' => $workspace->creditBalance(),
+            'bannerProcessUrl' => $nextBannerCreative && config('campaigns.processing_mode') === 'request'
+                ? URL::temporarySignedRoute('banner-creatives.process', now()->addMinutes(30), ['bannerCreative' => $nextBannerCreative])
+                : null,
+            'nextBannerCreative' => $nextBannerCreative,
+            'displayContent' => $displayContent,
+            'qaIssues' => $qaIssues,
             'shares' => $pack && $reviewFeaturesAvailable
                 ? CampaignPackShare::query()->where('campaign_pack_id', $pack->id)->latest()->get()
                 : collect(),
