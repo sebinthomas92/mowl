@@ -15,7 +15,7 @@
                         @php($sourceReady = $product->sourceSnapshots->sortByDesc('fetched_at')->first()?->status === 'ready')
                         <div class="data-row" role="row">
                             <div>
-                                @if($latestPack)<a href="{{ route('campaign-packs.show', $latestPack) }}"><strong>{{ $product->name }}</strong></a>@else<strong>{{ $product->name }}</strong>@endif
+                                <a href="{{ route('products.show', $product) }}"><strong>{{ $product->name }}</strong></a>
                                 <small>{{ $product->price ?: 'Price not supplied' }}</small>
                             </div>
                             <span>{{ $product->brand->name }}</span>

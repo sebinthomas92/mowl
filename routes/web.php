@@ -4,6 +4,7 @@ use App\Http\Controllers\BannerDeliveryController;
 use App\Http\Controllers\BannerGenerationController;
 use App\Http\Controllers\CampaignJobController;
 use App\Http\Controllers\CampaignPackDeliveryController;
+use App\Http\Controllers\ProductHubDeliveryController;
 use App\Http\Controllers\WorkspaceInvitationController;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\Register;
@@ -11,6 +12,7 @@ use App\Livewire\BrandIndex;
 use App\Livewire\CampaignPackIndex;
 use App\Livewire\CampaignWorkspace;
 use App\Livewire\ConciergeIndex;
+use App\Livewire\ProductHub;
 use App\Livewire\ProductIndex;
 use App\Livewire\TeamIndex;
 use App\Livewire\UsageIndex;
@@ -31,6 +33,10 @@ Route::get('/invitations/{token}', [WorkspaceInvitationController::class, 'accep
     ->middleware('throttle:12,1')
     ->name('invitations.accept');
 Route::get('/shared/campaign-packs/{token}', [CampaignPackDeliveryController::class, 'share'])->name('campaign-packs.share');
+Route::get('/shared/products/{token}', [ProductHubDeliveryController::class, 'share'])->name('product-hubs.share');
+Route::get('/shared/products/{token}/google-ads/{campaignType}.csv', [ProductHubDeliveryController::class, 'sharedExport'])->name('product-hubs.shared-export');
+Route::get('/shared/products/{token}/media/{mediaAsset}', [ProductHubDeliveryController::class, 'sharedMedia'])->name('product-hubs.shared-media');
+Route::get('/shared/products/{token}/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'sharedCreative'])->name('product-hubs.shared-creative');
 
 Route::middleware('auth')->group(function (): void {
     Route::post('/workspaces/{workspace}/select', function (Workspace $workspace, Request $request) {
@@ -41,6 +47,10 @@ Route::middleware('auth')->group(function (): void {
     })->name('workspaces.select');
     Route::get('/brands', BrandIndex::class)->name('brands.index');
     Route::get('/products', ProductIndex::class)->name('products.index');
+    Route::get('/products/{product}', ProductHub::class)->name('products.show');
+    Route::get('/products/{product}/google-ads/{campaignType}.csv', [ProductHubDeliveryController::class, 'export'])->name('products.hub-export');
+    Route::get('/products/{product}/media/{mediaAsset}', [ProductHubDeliveryController::class, 'media'])->name('products.hub-media');
+    Route::get('/products/{product}/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'creative'])->name('products.hub-creative');
     Route::get('/campaign-packs', CampaignPackIndex::class)->name('campaign-packs.index');
     Route::get('/campaign-packs/create', CampaignWorkspace::class)->name('campaign-packs.create');
     Route::get('/campaign-packs/{pack}', CampaignWorkspace::class)->name('campaign-packs.show');

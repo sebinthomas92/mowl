@@ -16,12 +16,14 @@ Return five meaningfully different ranked_angles and mark exactly the strongest 
 Voiceover segments must use exact non-overlapping start_seconds and end_seconds, accurate word_count and pace_wpm, and must fit naturally within total_duration_seconds at no more than 170 words per minute. Captions must fit their assigned time and complement rather than repeat the voiceover.
 
 Every factual statement must have an evidence record classified as directly_supported, supported_paraphrased, too_specific_for_evidence, unsupported, or contradicted_by_source. Every verified fact must point to a safe evidence id. Unsafe claims must remain visible in evidence and compliance_flags but must not be presented as approved copy. Prefer value framing over invented discounts.
+
+Also return a marketing_hub handoff containing product details, key messaging, Meta Ads, Google Ads (Search, Performance Max, and Display), email and SMS, and organic social. Google Ads fields must respect common field-length constraints, use the source product URL as final_url, and never invent sitelinks or promotions.
 PROMPT;
     }
 
     public static function shapeError(array $generated): ?string
     {
-        foreach (['overview', 'product_truth', 'positioning', 'ranked_angles', 'creative_routes', 'offers', 'qa', 'evidence', 'compliance_flags'] as $section) {
+        foreach (['overview', 'product_truth', 'positioning', 'marketing_hub', 'ranked_angles', 'creative_routes', 'offers', 'qa', 'evidence', 'compliance_flags'] as $section) {
             if (! array_key_exists($section, $generated)) {
                 return "Structured output is missing {$section}.";
             }
@@ -86,6 +88,14 @@ PROMPT;
             'cta' => ['type' => 'string'],
             'frames' => $strings,
         ]);
+        $googleCampaign = self::object([
+            'headlines' => $strings,
+            'long_headlines' => $strings,
+            'descriptions' => $strings,
+            'final_url' => ['type' => 'string'],
+            'sitelinks' => $strings,
+            'promotion' => ['type' => 'string'],
+        ]);
 
         return self::object([
             'overview' => self::object([
@@ -116,6 +126,49 @@ PROMPT;
                     'buyer_moment' => ['type' => 'string'],
                     'why_relevant' => ['type' => 'string'],
                 ])),
+            ]),
+            'marketing_hub' => self::object([
+                'overview' => self::object([
+                    'summary' => ['type' => 'string'],
+                    'updated_at' => ['type' => 'string'],
+                ]),
+                'product_details' => self::object([
+                    'name' => ['type' => 'string'],
+                    'price' => ['type' => 'string'],
+                    'summary' => ['type' => 'string'],
+                    'source_url' => ['type' => 'string'],
+                    'facts' => $strings,
+                ]),
+                'key_messaging' => self::object([
+                    'value_proposition' => ['type' => 'string'],
+                    'audiences' => $strings,
+                    'proof_points' => $strings,
+                    'tone' => ['type' => 'string'],
+                ]),
+                'channels' => self::object([
+                    'meta_ads' => self::object([
+                        'primary_texts' => $strings,
+                        'headlines' => $strings,
+                        'descriptions' => $strings,
+                        'ctas' => $strings,
+                    ]),
+                    'google_ads' => self::object([
+                        'search' => $googleCampaign,
+                        'performance_max' => $googleCampaign,
+                        'display' => $googleCampaign,
+                    ]),
+                    'email_sms' => self::object([
+                        'subject_lines' => $strings,
+                        'preview_texts' => $strings,
+                        'email_bodies' => $strings,
+                        'sms_messages' => $strings,
+                    ]),
+                    'organic_social' => self::object([
+                        'captions' => $strings,
+                        'hooks' => $strings,
+                        'hashtags' => $strings,
+                    ]),
+                ]),
             ]),
             'ranked_angles' => self::arrayOf(self::object([
                 'rank' => ['type' => 'integer'],

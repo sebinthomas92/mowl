@@ -53,6 +53,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
                     ['name' => 'Careful researchers', 'need' => 'Visible, verifiable details', 'buyer_moment' => 'Checking whether the product fits', 'why_relevant' => 'They respond to proof rather than broad claims.'],
                 ],
             ],
+            'marketing_hub' => $this->marketingHub($product, $source, $fact),
             'ranked_angles' => $angles,
             'creative_routes' => [
                 $this->route('route-1', 'Everyday upgrade', 1, $name, 'Routine-led shoppers', 'Setting up a familiar part of the day', 'Warm and practical'),
@@ -204,6 +205,52 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
         };
 
         return $content;
+    }
+
+    private function marketingHub(Product $product, SourceSnapshot $source, string $fact): array
+    {
+        $name = $product->name;
+        $headlines = ["Meet {$name}", 'See the useful details', 'A clearer everyday choice', 'Built for the real moment', 'Explore the product'];
+        $descriptions = ["Explore {$name} through clear, source-linked product details.", 'See whether this product fits the moment you are shopping for.'];
+        $campaign = [
+            'headlines' => $headlines,
+            'long_headlines' => ["A clear, practical look at {$name} and the details that matter"],
+            'descriptions' => $descriptions,
+            'final_url' => $source->url,
+            'sitelinks' => [],
+            'promotion' => '',
+        ];
+
+        return [
+            'overview' => ['summary' => "Approved marketing guidance for {$name}.", 'updated_at' => now()->toDateString()],
+            'product_details' => ['name' => $name, 'price' => $product->price ?: 'Price not supplied', 'summary' => $product->summary ?: $fact, 'source_url' => $source->url, 'facts' => [$fact]],
+            'key_messaging' => [
+                'value_proposition' => "Make {$name} easy to understand through a useful, source-grounded product story.",
+                'audiences' => ['Intent-led shoppers', 'Careful researchers'],
+                'proof_points' => [$fact],
+                'tone' => 'Clear, considered, and practical',
+            ],
+            'channels' => [
+                'meta_ads' => [
+                    'primary_texts' => ["A clear look at {$name}, built around a real buyer moment."],
+                    'headlines' => array_slice($headlines, 0, 3),
+                    'descriptions' => $descriptions,
+                    'ctas' => ['Learn more'],
+                ],
+                'google_ads' => ['search' => $campaign, 'performance_max' => $campaign, 'display' => $campaign],
+                'email_sms' => [
+                    'subject_lines' => ["A closer look at {$name}", "See where {$name} fits"],
+                    'preview_texts' => ['The useful product details, in one place.'],
+                    'email_bodies' => ["Explore {$name} through a clear, product-first story grounded in the supplied page."],
+                    'sms_messages' => ["See where {$name} fits. Explore the product details: {$source->url}"],
+                ],
+                'organic_social' => [
+                    'captions' => ["A clearer look at {$name} and the details that matter."],
+                    'hooks' => ['Start with the buyer moment.', 'Let the useful details lead.'],
+                    'hashtags' => [],
+                ],
+            ],
+        ];
     }
 
     private function wordCount(string $value): int

@@ -29,4 +29,14 @@ class Product extends Model
     {
         return $this->hasMany(MediaAsset::class);
     }
+
+    public function resourceLinks(): HasMany
+    {
+        return $this->hasMany(ProductResourceLink::class);
+    }
+
+    public function hubShares(): HasMany
+    {
+        return $this->hasMany(ProductHubShare::class);
+    }
 }
