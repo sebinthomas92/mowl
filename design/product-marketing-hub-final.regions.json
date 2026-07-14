@@ -1,0 +1,19 @@
+{
+  "_meta": {
+    "sourceImage": "product-marketing-hub-final.png",
+    "sourceHash": "24788cda965581b1b447a0c225cba86689e713d163c01d202bcc62faec861462",
+    "generatedAt": "2026-07-14T12:00:47.427Z"
+  },
+  "global-sidebar-surface": { "x": 0.02, "y": 0.70, "w": 0.035, "h": 0.05 },
+  "global-sidebar-footer-surface": { "x": 0.02, "y": 0.82, "w": 0.035, "h": 0.04 },
+  "breadcrumb-surface": { "x": 0.55, "y": 0.015, "w": 0.04, "h": 0.02 },
+  "global-sidebar-account-surface": { "x": 0.05, "y": 0.82, "w": 0.025, "h": 0.02 },
+  "product-intro-copy-surface": { "x": 0.62, "y": 0.11, "w": 0.03, "h": 0.03 },
+  "product-intro-tools-surface": { "x": 0.91, "y": 0.11, "w": 0.025, "h": 0.025 },
+  "google-ads-nav": { "x": 0.17, "y": 0.34, "w": 0.11, "h": 0.04 },
+  "ad-preview-surface": { "x": 0.78, "y": 0.33, "w": 0.025, "h": 0.025 },
+  "ad-preview-footer-surface": { "x": 0.78, "y": 0.61, "w": 0.025, "h": 0.02 },
+  "linked-assets-surface": { "x": 0.95, "y": 0.84, "w": 0.01, "h": 0.01 },
+  "handoff-final-url-surface": { "x": 0.78, "y": 0.93, "w": 0.025, "h": 0.025 },
+  "handoff-promotion-surface": { "x": 0.92, "y": 0.93, "w": 0.025, "h": 0.025 }
+}

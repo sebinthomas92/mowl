@@ -59,6 +59,20 @@ class CampaignPackSafetyValidator
             $issues[] = $this->issue('claim', 'No claim has a safe source-linked evidence record.');
         }
 
+        if (isset($content['marketing_hub'])) {
+            foreach (['meta_ads', 'google_ads', 'email_sms', 'organic_social'] as $channel) {
+                if (! is_array(data_get($content, "marketing_hub.channels.{$channel}"))) {
+                    $issues[] = $this->issue('structure', "The marketing hub is missing the {$channel} deliverable.");
+                }
+            }
+            foreach (['search', 'performance_max', 'display'] as $type) {
+                $finalUrl = data_get($content, "marketing_hub.channels.google_ads.{$type}.final_url");
+                if (! is_string($finalUrl) || ! filter_var($finalUrl, FILTER_VALIDATE_URL)) {
+                    $issues[] = $this->issue('structure', "The {$type} Google Ads handoff is missing a valid final URL.");
+                }
+            }
+        }
+
         foreach ($evidence as $reference) {
             $status = $reference['status'] ?? '';
             $claim = trim((string) ($reference['claim'] ?? 'Unnamed claim'));
@@ -227,6 +241,7 @@ class CampaignPackSafetyValidator
             data_get($content, 'product_truth.supported_benefits', []),
             data_get($content, 'product_truth.offers_and_trust_signals', []),
             collect(data_get($content, 'offers', []))->pluck('wording')->all(),
+            data_get($content, 'marketing_hub', []),
         ];
 
         foreach ($content['creative_routes'] ?? [] as $route) {
