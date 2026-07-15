@@ -47,6 +47,9 @@ class CampaignWorkspaceTest extends TestCase
             ->assertOk()
             ->assertSee('Several routes explored. The strongest three lead.')
             ->assertSee('The everyday upgrade')
+            ->assertSee('marketing-owl.sidebar-pinned')
+            ->assertSee('Pin navigation')
+            ->assertSee('aria-label="Brands"', false)
             ->assertSee('QA blocked');
 
         $this->assertDatabaseCount('brands', 1);

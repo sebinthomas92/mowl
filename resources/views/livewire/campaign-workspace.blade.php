@@ -1,4 +1,4 @@
-<div class="app-shell" x-data="{ mobileNav: false, copied: '', bannerConfirm: false, activeRoute: 0 }">
+<div class="app-shell campaign-workspace-shell" x-data="{ mobileNav: false, copied: '', bannerConfirm: false, activeRoute: 0 }">
     <a class="skip-link" href="#main-content">Skip to campaign workspace</a>
     @include('partials.workspace-sidebar')
 

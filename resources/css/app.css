@@ -120,3 +120,94 @@ button { cursor:pointer; }
 .product-hub-shell{--hub-orange:#ad3d0d}.product-rail-heading>p,.product-rail-heading>span{color:#536167}.intro-tools .disabled{color:#526066}.field-stack>h2 small{color:#59666b}.hub-title>p,.hub-title>div>p{color:#ad3d0d}
 .creative-thumbnails{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:13px}.creative-thumbnails img{display:block;width:100%;aspect-ratio:1.25;object-fit:cover;border:1px solid #d7dcda}
 @media(min-width:1181px){.product-hub-shell>.sidebar{width:238px}.product-rail{left:238px;width:193px}.product-hub-main{margin-left:431px}.product-hub-shell.public .product-rail{left:0;width:193px}.product-hub-shell.public .product-hub-main{margin-left:193px}}
+
+/* Collapsible authenticated navigation */
+.sidebar .owl-mark{object-fit:cover;object-position:left}
+@media(min-width:761px){
+    .app-shell{grid-template-columns:64px minmax(0,1fr)}
+    .app-shell:has(>.sidebar.is-pinned){grid-template-columns:276px minmax(0,1fr)}
+    .sidebar{width:64px;padding:25px 10px;overflow:hidden}
+    .sidebar.is-expanded{width:276px;padding:25px 24px}
+    .sidebar-pin{display:grid;place-items:center;position:absolute;right:14px;top:17px;width:32px;height:32px;border:1px solid rgba(255,255,255,.14);border-radius:50%;background:rgba(255,255,255,.06);color:#dce3e6;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s ease,background .15s ease}
+    .sidebar-pin:hover{background:rgba(255,255,255,.13);color:#fff}
+    .sidebar-pin:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+    .sidebar.is-expanded .sidebar-pin{opacity:1;visibility:visible;pointer-events:auto}
+    .sidebar.is-pinned .sidebar-pin{background:rgba(249,141,42,.18);border-color:rgba(249,141,42,.45);color:#ffad64}
+    .sidebar-copy{min-width:0;white-space:nowrap;transition:opacity .12s ease}
+    .sidebar:not(.is-expanded) .sidebar-copy{width:0;max-width:0;opacity:0;visibility:hidden;overflow:hidden;pointer-events:none}
+    .sidebar:not(.is-expanded) .brand-lockup{justify-content:center;gap:0}
+    .sidebar:not(.is-expanded) .owl-mark{width:44px;height:44px}
+    .sidebar:not(.is-expanded) .workspace-switcher{width:44px;margin-left:0;margin-right:0}
+    .sidebar:not(.is-expanded) .workspace-switcher summary{grid-template-columns:34px;justify-content:center;gap:0;padding:5px}
+    .sidebar:not(.is-expanded) .workspace-options{display:none}
+    .sidebar:not(.is-expanded) .primary-nav{margin-left:0;margin-right:0}
+    .sidebar:not(.is-expanded) .primary-nav a{width:44px;justify-content:center;gap:0;padding:10px 0}
+    .sidebar:not(.is-expanded) .primary-nav a .nav-icon{width:auto;margin:0;text-align:center}
+    .sidebar:not(.is-expanded) .nav-label,.sidebar:not(.is-expanded) .workspace-usage{display:none}
+    .sidebar:not(.is-expanded) .sidebar-footer{padding-top:13px}
+    .sidebar:not(.is-expanded) .signed-in-user{display:flex;justify-content:center;margin-bottom:8px}
+    .sidebar:not(.is-expanded) .sidebar-footer form button{display:flex;align-items:center;justify-content:center;width:44px;padding:8px 0}
+    .sidebar:not(.is-expanded) .sidebar-footer form button .nav-icon{margin:0}
+    .product-hub-shell>.sidebar{display:flex;width:64px;padding-left:10px;padding-right:10px}
+    .product-hub-shell>.sidebar.is-expanded{width:276px;padding-left:24px;padding-right:24px}
+}
+
+@media(min-width:821px) and (max-width:1180px){
+    .product-hub-shell>.sidebar{display:flex}
+    .product-rail{left:64px}
+    .product-hub-main{margin-left:244px}
+    .product-hub-shell:has(>.sidebar.is-pinned) .product-rail{left:276px}
+    .product-hub-shell:has(>.sidebar.is-pinned) .product-hub-main{margin-left:456px}
+}
+
+@media(min-width:1181px){
+    .product-rail{left:64px}
+    .product-hub-main{margin-left:257px}
+    .product-hub-shell:has(>.sidebar.is-pinned) .product-rail{left:276px}
+    .product-hub-shell:has(>.sidebar.is-pinned) .product-hub-main{margin-left:469px}
+}
+
+@media(max-width:820px){.product-hub-shell>.sidebar{display:none}}
+
+@media(max-width:760px){
+    .sidebar{width:275px;padding:22px 18px;overflow:visible}
+    .sidebar .sidebar-copy{width:auto;max-width:none;opacity:1;visibility:visible;overflow:visible;pointer-events:auto;white-space:normal}
+    .sidebar-pin{display:none}
+    .sidebar .brand-lockup{justify-content:flex-start;gap:11px}
+    .sidebar .workspace-switcher{width:100%;margin-left:0;margin-right:0}
+    .sidebar .workspace-switcher summary{grid-template-columns:34px minmax(0,1fr) 16px;justify-content:stretch;gap:10px;padding:9px}
+    .sidebar .primary-nav{margin-left:-8px;margin-right:-8px}
+    .sidebar .primary-nav a{width:auto;justify-content:flex-start;gap:12px;padding:10px 9px}
+    .sidebar .nav-label{display:flex}
+    .sidebar .workspace-usage{display:block}
+    .sidebar .signed-in-user{display:grid;justify-content:stretch}
+    .sidebar .sidebar-footer form button{display:block;width:100%;padding:8px 7px}
+}
+
+/* Campaign workspace readability */
+@media(min-width:761px){
+    .campaign-workspace-shell .pack-page{padding-left:clamp(20px,2.5vw,40px);padding-right:clamp(20px,2.5vw,40px)}
+    .campaign-workspace-shell .pack-layout{max-width:1480px;grid-template-columns:220px minmax(0,1fr)}
+    .campaign-workspace-shell .pack-content{padding-left:32px}
+    .campaign-workspace-shell .chapters a{font-size:14px;line-height:1.35;padding-top:11px;padding-bottom:11px}
+    .campaign-workspace-shell .chapters p,.campaign-workspace-shell .section-label{font-size:10px}
+    .campaign-workspace-shell .pack-number,.campaign-workspace-shell .count-badge,.campaign-workspace-shell .field-label{font-size:10px}
+    .campaign-workspace-shell .pack-content small{font-size:10px}
+    .campaign-workspace-shell .section-header h3{font-size:17px}
+    .campaign-workspace-shell .truth-grid small,.campaign-workspace-shell .truth-detail-grid .field-label,.campaign-workspace-shell .source-links span,.campaign-workspace-shell .audience-heading span,.campaign-workspace-shell .angle-heading span,.campaign-workspace-shell .creative-route>header span,.campaign-workspace-shell .route-brief small,.campaign-workspace-shell .platform-grid article>small,.campaign-workspace-shell .shot-plan-table article small,.campaign-workspace-shell .subsection-heading>div>span,.campaign-workspace-shell .subsection-heading .field-label,.campaign-workspace-shell .route-hooks>.field-label,.campaign-workspace-shell .timed-table p small,.campaign-workspace-shell .timed-table>div>span,.campaign-workspace-shell .offer-list article small,.campaign-workspace-shell .version-list span,.campaign-workspace-shell .version-list small{font-size:10px;line-height:1.4}
+    .campaign-workspace-shell .truth-grid strong,.campaign-workspace-shell .truth-detail-grid li,.campaign-workspace-shell .audience-row strong,.campaign-workspace-shell .audience-row span,.campaign-workspace-shell .angle-row p,.campaign-workspace-shell .angle-row>span,.campaign-workspace-shell .creative-route>header p,.campaign-workspace-shell .route-brief strong,.campaign-workspace-shell .timed-table p,.campaign-workspace-shell .shot-core strong,.campaign-workspace-shell .shot-plan-table p,.campaign-workspace-shell .platform-grid article p,.campaign-workspace-shell .offer-list article p,.campaign-workspace-shell .qa-issues p{font-size:12px;line-height:1.55}
+    .campaign-workspace-shell .angle-row strong{font-size:13px;line-height:1.5}
+    .campaign-workspace-shell .source-links a,.campaign-workspace-shell .timed-table time,.campaign-workspace-shell .platform-grid article li,.campaign-workspace-shell .workspace-exports span{font-size:11px;line-height:1.45}
+    .campaign-workspace-shell .angle-status,.campaign-workspace-shell .shot-priority,.campaign-workspace-shell .qa-status,.campaign-workspace-shell .qa-issues span,.campaign-workspace-shell .version-list em{font-size:10px}
+    .campaign-workspace-shell .section-copy,.campaign-workspace-shell .subsection-heading button,.campaign-workspace-shell .creative-route>header>button,.campaign-workspace-shell .route-tabs button,.campaign-workspace-shell .workspace-exports a,.campaign-workspace-shell .workspace-exports button{min-height:36px;font-size:12px}
+    .campaign-workspace-shell .angle-row{padding:16px 14px;gap:16px}
+    .campaign-workspace-shell .audience-row{padding:14px;gap:16px}
+    .campaign-workspace-shell .route-brief>div,.campaign-workspace-shell .platform-grid article{padding:16px}
+    .campaign-workspace-shell .timed-table>div{padding:11px}
+    .campaign-workspace-shell .shot-plan-table article,.campaign-workspace-shell .offer-list article{padding:16px}
+}
+
+@media(min-width:761px) and (max-width:1100px){
+    .campaign-workspace-shell .pack-layout{grid-template-columns:180px minmax(0,1fr)}
+    .campaign-workspace-shell .pack-content{padding-left:24px}
+}
