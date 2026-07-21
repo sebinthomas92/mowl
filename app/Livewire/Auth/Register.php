@@ -7,7 +7,9 @@ use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\Rules\Password;
+use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 
 class Register extends Component
@@ -40,6 +42,17 @@ class Register extends Component
 
     public function register(): void
     {
+        $throttleKey = 'register:'.hash('sha256', (string) request()->ip());
+
+        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+
+            throw ValidationException::withMessages([
+                'email' => "Too many registration attempts. Please try again in {$seconds} seconds.",
+            ]);
+        }
+
+        RateLimiter::hit($throttleKey, 60);
         $invitation = $this->invitationToken !== ''
             ? WorkspaceInvitation::findOpenToken($this->invitationToken)
             : null;

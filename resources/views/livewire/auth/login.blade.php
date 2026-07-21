@@ -11,6 +11,7 @@
             <label>Password<input wire:model="password" type="password" autocomplete="current-password">@error('password')<small class="error">{{ $message }}</small>@enderror</label>
             <label class="remember-row"><input wire:model="remember" type="checkbox"> Keep me signed in</label>
             <button class="primary-button" type="submit">Sign in <span>→</span></button>
+            <p class="auth-switch"><a href="{{ route('password.request') }}">Forgot your password?</a></p>
             <p class="auth-switch">New to Marketing Owl? <a href="{{ route('register') }}">Create your workspace</a></p>
         </form>
     </section>

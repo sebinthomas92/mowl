@@ -119,6 +119,8 @@ Acceptance criteria:
 
 ## Milestone 7 — Durable campaign job infrastructure (P1)
 
+> Platform decision (2026-07-19): use Upstash QStash for durable text-generation delivery. It fits the existing PHP-on-Vercel request boundary without an always-on worker and provides signed HTTP delivery, retries, deduplication, flow control, and a DLQ. The service is selected but not provisioned; production flags stay unchanged until owner approval, credentials, and hosted interruption/redelivery QA. See `docs/durable-text-jobs.md`.
+
 - [ ] Move long OpenAI/media work from request-bound execution to a durable queue.
 - [ ] Define idempotency keys for every job and section regeneration.
 - [ ] Add exponential retry with terminal failure states.
@@ -142,13 +144,13 @@ Dependency: transactional email provider credentials and verified sending domain
 
 - [ ] Configure production mail provider and `FROM` identity.
 - [ ] Send workspace invitation emails using the existing secure invite tokens.
-- [ ] Add password-reset request and reset flows.
+- [x] Add password-reset request and reset flows.
 - [ ] Add email verification for new accounts.
 - [ ] Add resend verification/invitation actions with throttling.
 - [ ] Add subscription, payment-failure, credit-low, job-failed, and cost-alert emails.
 - [ ] Ensure email links use `https://app.marketingowl.ai`.
 - [ ] Add notification preference storage for non-critical messages.
-- [ ] Test expired, reused, tampered, and wrong-email links.
+- [x] Test expired, reused, tampered, and wrong-email links.
 
 Acceptance criteria:
 
@@ -196,8 +198,9 @@ Acceptance criteria:
 
 ## Milestone 11 — Security and production hardening (P2)
 
-- [ ] Add authentication throttling and bot protection to login/register/reset routes.
-- [ ] Add security headers and a reviewed Content Security Policy.
+- [x] Add authentication throttling to login/register/reset actions.
+- [ ] Add bot protection to login/register/reset routes.
+- [x] Add security headers and a reviewed Content Security Policy.
 - [ ] Verify SSRF protection for redirects, IPv4/IPv6, DNS rebinding, and non-standard ports.
 - [ ] Add file malware/content validation before media processing.
 - [ ] Add workspace audit logs and data-retention controls.
