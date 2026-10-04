@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @livewireStyles
 </head>
 <body>
     @php($isPublic = true)
@@ -20,5 +21,6 @@
         <a class="skip-link" href="#product-hub-content">Skip to product hub</a>
         @include('product-hubs.surface')
     </div>
+    @livewireScripts
 </body>
 </html>
