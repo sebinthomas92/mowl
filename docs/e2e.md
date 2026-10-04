@@ -58,8 +58,32 @@ Without that variable, the report includes the exact skipped prerequisite. The p
 - Real product-image discovery requires a selected accessible product URL with usable JPEG/PNG/WebP images. Banner tests use a declared local product-image fixture.
 - Cron recovery success requires a configured `CRON_SECRET` and scheduler. Only rejection is checked here; existing PHP tests cover request-mode signatures, queue failure/retry and recovery contracts.
 - Real email delivery is not an application invitation action: the current UI creates a shareable invite link. Browser tests use that real link and log mail configuration.
-- `npm audit` reports inherited high-severity transitive issues in the pinned development runner dependency tree. They are not added production application libraries; upgrades/overrides require compatibility testing with a newer runner release.
+- Dependency advisories are checked against the installed lockfile; see the dependency triage below. An npm finding alone does not establish a reachable deployed PHP application vulnerability.
 
 The first browser run reproduced campaign evidence-row overflow at 768px. Evidence now stacks within the available tablet column; the five-width regression checks that behavior.
 
 Guest-browser coverage also reproduced an inert public product hub: the standalone share view did not load the existing Livewire/Alpine runtime. The share view now includes those existing assets, and the regression switches public channel sections while logged out.
+
+## Dependency advisory triage
+
+A fresh audit on October 5, 2026 reported 11 high-severity package entries in the initial lockfile. Every listed vulnerable version was also present in `origin/main` before the e2e runner was added. The earlier attribution to the e2e runner was incorrect: these paths come through existing icon tooling, Vite and concurrently.
+
+| Package | Previous → patched resolution | Exact dependency/call path |
+| --- | --- | --- |
+| `@xmldom/xmldom` | 0.9.10 → 0.9.12 | icons-webfont → svgtofont → svg2ttf → XML font parsing |
+| `brace-expansion` | 5.0.7 → 5.0.12; 2.1.2 → 2.1.7 | icons-webfont → svgtofont → svgicons2svgfont → glob → minimatch; also native-install cache → glob → minimatch |
+| `concurrently` | 9.2.3 → 9.2.4 | Composer's existing development command orchestration; advisory propagated from shell-quote |
+| `http-cache-semantics` | 4.2.0 → 4.3.0 | icons-webfont → svgtofont → ttf2woff2 → node-gyp → make-fetch-happen → cache policy |
+| `ip-address` | 10.2.0 → 10.7.3 | Same native-install path → make-fetch-happen → @npmcli/agent → socks-proxy-agent → socks → address parsing |
+| `nanoid` | 3.3.15 → 3.3.19 | Vite → PostCSS input ID generation; its caller uses a fixed positive size of six |
+| `postcss` | 8.5.16 → 8.5.28 | Vite production/dev CSS transformation → previous-map source-map loading |
+| `shell-quote` | 1.8.4 → 1.9.0 | concurrently argument expansion; compatible concurrently patch updates its pinned child |
+| `svgo` | 3.3.4 → 3.3.5 | icons-webfont → svgtofont → generate.js SVG optimization |
+| `tar` | 7.5.20 → 7.5.22 | svgtofont → ttf2woff2 → node-gyp archive handling; also make-fetch-happen → cacache |
+| `undici` | 6.27.0 → 6.29.0 | icons-webfont → svgtofont → cheerio → public fromURL/stream fetching |
+
+The application imports prebuilt Tabler CSS/fonts in `resources/css/app.css`; it does not invoke the upstream font generator. Vite transforms repository CSS, and Composer's dev command supplies fixed repository command strings to concurrently. These observations bound the confirmed call paths; they are not a proof that every vulnerable library API is exploitable in production. The safe compatible updates still remove the vulnerable installed resolutions.
+
+Targeted `npm update` changed only `package-lock.json`: no new package declarations, major upgrades or overrides; the pinned e2e and browser-engine versions remain unchanged. A clean `npm ci` followed by `npm audit` reported zero vulnerabilities. Production build, PHP tests, Pint and all 16 opted-in browser journeys were rerun after the updates.
+
+Primary advisory examples: [PostCSS source-map loading](https://github.com/advisories/GHSA-fxqj-rqcc-2cmp), [cache policy handling](https://github.com/advisories/GHSA-ch52-4w7c-c8xp), and [Undici retry interceptor](https://github.com/advisories/GHSA-r53p-7pc4-xj5r). The live npm audit covers the full installed graph; future newly disclosed advisories may require further updates.
