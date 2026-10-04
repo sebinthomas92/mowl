@@ -62,10 +62,10 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/settings', WorkspaceSettings::class)->name('workspace.settings');
     Route::get('/concierge', ConciergeIndex::class)->name('concierge.index');
     Route::post('/internal/campaign-jobs/{generationJob}/process', [CampaignJobController::class, 'process'])
-        ->middleware(['signed', 'throttle:6,1'])
+        ->middleware(['signed', 'throttle:6,1,campaign-job-process:'])
         ->name('campaign-jobs.process');
     Route::post('/internal/banner-creatives/{bannerCreative}/process', [BannerGenerationController::class, 'process'])
-        ->middleware(['signed', 'throttle:12,1'])
+        ->middleware(['signed', 'throttle:12,1,banner-creative-process:'])
         ->name('banner-creatives.process');
 
     Route::post('/logout', function (Request $request) {
@@ -78,8 +78,8 @@ Route::middleware('auth')->group(function (): void {
 });
 
 Route::get('/internal/campaign-jobs/recover', [CampaignJobController::class, 'recover'])
-    ->middleware('throttle:6,1')
+    ->middleware('throttle:6,1,campaign-job-recover:')
     ->name('campaign-jobs.recover');
 Route::get('/internal/banner-creatives/recover', [BannerGenerationController::class, 'recover'])
-    ->middleware('throttle:6,1')
+    ->middleware('throttle:6,1,banner-creative-recover:')
     ->name('banner-creatives.recover');

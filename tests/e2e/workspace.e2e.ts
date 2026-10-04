@@ -1,9 +1,10 @@
 import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 import { readFileSync } from 'node:fs';
-import { signIn, fixtures, http, downloadText, downloadPath } from './helpers.ts';
+import { signIn, fixtures, http, downloadText, downloadPath, persisted } from './helpers.ts';
 
 test.beforeEach(async ({ browser }) => {
+  expect(fixtures().processingMode).toBe(process.env.E2E_PROCESSING_MODE === 'request' ? 'request' : 'queue');
   await browser.addInitScript(() => {
     const record = message => {
       const errors = JSON.parse(sessionStorage.getItem('e2e-errors') || '[]');
@@ -323,7 +324,16 @@ test('mock banner generation saves real PNGs and charges only confirmed addition
   const media = await http(browser, `/products/${fixture.product}/media/${fixture.media}`);
   expect(media.status).toBe(200);
   expect(media.type).toBe('image/png');
+  await screen.getByLabel(/^Logo/).setInputFiles(fixture.imageFile);
+  await screen.getByLabel('Primary color').fill('#234567');
   await screen.getByRole('button', 'Save branding').click();
+  await expect(screen.getByText('Logo saved', { exact: true })).toBeVisible();
+  await browser.reload();
+  await expect(screen.getByText('Logo saved', { exact: true })).toBeVisible();
+  await expect(screen.getByLabel('Primary color')).toHaveValue('#234567');
+  const branding = persisted('SELECT banner_logo_path, primary_color FROM brands WHERE id = (SELECT brand_id FROM products WHERE id = ?)', [fixture.product])[0];
+  expect(branding.primary_color).toBe('#234567');
+  expect(branding.banner_logo_path.length).toBeGreaterThan(0);
   await screen.getByRole('button', /Generate 3 banners/).click();
   await expect(browser.locator('.banner-gallery img')).toHaveCount(3, { timeout: 30000 });
   const download = await browser.waitForDownload(() => browser.locator('.banner-gallery a').first().click());
@@ -345,6 +355,71 @@ test('mock banner generation saves real PNGs and charges only confirmed addition
   await browser.reload();
   await expect(browser.locator('.banner-gallery img')).toHaveCount(4);
   expect(Number(await browser.locator('.workspace-usage strong').textContent())).toBe(Number(before) - 1);
+});
+
+test('authenticated scheduler recovers stale banners and failed included slots retry free', async context => {
+  const { app, screen, browser } = context;
+  await app.open('/login');
+  const stale = fixtures().bannerStale;
+  expect(persisted('SELECT status, attempts FROM banner_creatives WHERE banner_generation_batch_id = ?', [stale.batch])).toEqual(Array(3).fill({ status: 'processing', attempts: 1 }));
+  expect((await http(browser, '/internal/banner-creatives/recover', { Authorization: 'Bearer incorrect-fixture-token' })).status).toBe(401);
+  for (let index = 0; index < 3; index++) {
+    const result = await http(browser, '/internal/banner-creatives/recover', { Authorization: 'Bearer e2e-fixture-cron-token' });
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toEqual({ status: 'completed' });
+  }
+  const idle = await http(browser, '/internal/banner-creatives/recover', { Authorization: 'Bearer e2e-fixture-cron-token' });
+  expect(idle.status).toBe(200);
+  expect(JSON.parse(idle.body)).toEqual({ status: 'idle' });
+  expect(persisted('SELECT status, attempts FROM banner_creatives WHERE banner_generation_batch_id = ?', [stale.batch])).toEqual(Array(3).fill({ status: 'completed', attempts: 2 }));
+  await signIn(context);
+  await app.open(`/campaign-packs/${stale.pack}`);
+  await expect(browser.locator('.banner-gallery img')).toHaveCount(3);
+  const staleImage = await http(browser, await browser.locator('.banner-gallery img').first().getAttribute('src'));
+  expect(staleImage.status).toBe(200);
+  expect(staleImage.type).toBe('image/png');
+
+  const failed = fixtures().bannerRetry;
+  await app.open(`/campaign-packs/${failed.pack}`);
+  await expect(browser.locator('.banner-failed')).toHaveCount(3);
+  const before = await browser.locator('.workspace-usage strong').textContent();
+  await screen.getByRole('button', 'Retry 3 included slots — free').click();
+  await expect(browser.locator('.banner-gallery img')).toHaveCount(3, { timeout: 30000 });
+  await browser.reload();
+  await expect(browser.locator('.banner-gallery img')).toHaveCount(3);
+  await expect(browser.locator('.workspace-usage strong')).toHaveText(before!);
+  expect(persisted('SELECT status, attempts FROM banner_creatives WHERE banner_generation_batch_id = ?', [failed.batch])).toEqual(Array(3).fill({ status: 'completed', attempts: 1 }));
+  expect(persisted('SELECT status FROM banner_generation_batches WHERE id = ?', [failed.batch])[0].status).toBe('completed');
+  const download = await browser.waitForDownload(() => browser.locator('.banner-gallery a').first().click());
+  const file = readFileSync(downloadPath(download));
+  expect(file.subarray(1, 4).toString()).toBe('PNG');
+  expect(file.readUInt32BE(16)).toBe(1080);
+  expect(file.readUInt32BE(20)).toBe(1350);
+  await app.open(`/products/${failed.product}`);
+  await expect(browser.locator('.google-layout:visible .creative-thumbnails img')).toHaveCount(3);
+  const authenticatedCreative = await browser.locator('.creative-thumbnails img').first().getAttribute('src');
+  expect((await http(browser, authenticatedCreative)).status).toBe(200);
+  await screen.getByRole('button', 'Share with client').click();
+  await expect(screen.getByRole('button', 'Revoke link')).toBeVisible();
+  const sharePath = await browser.evaluate(() => new URL(Object.values(window.Livewire.all())[0].$wire.shareUrl).pathname);
+  await screen.getByRole('button', 'Sign out').click();
+  await app.open(sharePath);
+  await expect(browser.locator('.google-layout:visible .creative-thumbnails img')).toHaveCount(3);
+  const sharedCreative = await browser.locator('.creative-thumbnails img').first().getAttribute('src');
+  const sharedMedia = `${sharePath}/media/${failed.media}`;
+  for (const path of [sharedCreative, sharedMedia]) {
+    const response = await http(browser, path);
+    expect(response.status).toBe(200);
+    expect(response.type).toBe('image/png');
+  }
+  const sharedCsv = await browser.waitForDownload(() => browser.locator('.google-section a[href$="/search.csv"]').click());
+  expect(downloadText(sharedCsv)).toContain('BannerRetry Browser Product');
+  // Revocation protects the page and every public delivery endpoint, including already-known URLs.
+  await signIn(context);
+  await app.open(`/products/${failed.product}`);
+  await screen.getByRole('button', 'Revoke link').click();
+  await expect(screen.getByRole('button', 'Share with client')).toBeVisible();
+  for (const path of [sharePath, sharedCreative, sharedMedia, `${sharePath}/google-ads/search.csv`]) expect((await http(browser, path)).status).toBe(404);
 });
 
 test('responsive routes, keyboard navigation, screenshots and accessibility', async context => {

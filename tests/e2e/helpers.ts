@@ -1,4 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { expect } from 'e2e';
 
 export const fixtures = () => JSON.parse(readFileSync('.e2e/runtime/fixtures.json', 'utf8'));
@@ -9,11 +10,16 @@ export async function signIn({ app, screen, browser }, role = 'owner') {
   await screen.getByRole('button', /Sign in/).click();
   await expect(browser).toHaveURL('/campaign-packs');
 }
-export async function http(browser, path) {
-  return browser.evaluate(async path => {
-    const response = await fetch(path, { redirect: 'manual' });
+export async function http(browser, path, headers = {}) {
+  return browser.evaluate(async ({ path, headers }) => {
+    const response = await fetch(path, { redirect: 'manual', headers });
     return { status: response.status, type: response.headers.get('content-type'), body: await response.text() };
-  }, path);
+  }, { path, headers });
+}
+
+// Read-only corroboration of UI/HTTP outcomes in the dedicated disposable SQLite store.
+export function persisted(sql: string, params: Array<string | number> = []) {
+  return JSON.parse(execFileSync('php', ['-r', '$db = new PDO("sqlite:".$argv[1]); $db->exec("PRAGMA query_only = ON"); $query = $db->prepare($argv[2]); $query->execute(json_decode($argv[3], true)); echo json_encode($query->fetchAll(PDO::FETCH_ASSOC));', '.e2e/runtime/database.sqlite', sql, JSON.stringify(params)], { encoding: 'utf8' }));
 }
 
 export function downloadPath(download) {
