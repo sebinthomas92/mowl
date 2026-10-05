@@ -80,7 +80,7 @@ foreach (['review', 'approved', 'reject', 'variation', 'bannerRetry', 'bannerSta
 
 }
 // These are durable failed/retrying/stale states, not fake responses. Recovery uses the real jobs.
-foreach (['failedRetry' => 'failed', 'cronRetry' => 'retrying', 'cronStale' => 'processing'] as $kind => $status) {
+foreach (['failedRetry' => 'failed', 'cronRetry' => 'retrying', 'cronStale' => 'processing', 'conciergeCancel' => 'queued', 'conciergeRetry' => 'failed'] as $kind => $status) {
     $product = $brand->products()->create(['name' => $kind.' Browser Product', 'summary' => 'A disposable recovery product.']);
     $source = $product->sourceSnapshots()->create(['url' => getenv('E2E_PUBLIC_PRODUCT_URL'), 'content_hash' => hash('sha256', $kind), 'status' => 'pending']);
     $pack = CampaignPack::create(['product_id' => $product->id, 'source_snapshot_id' => $source->id, 'name' => $kind.' Browser Pack', 'status' => $status === 'failed' ? 'failed' : 'processing', 'current_version' => 0, 'analysis_mode' => 'standard', 'credit_cost' => 1]);

@@ -8,13 +8,13 @@ test.beforeEach(async ({ browser }) => {
   await browser.addInitScript(() => {
     const record = message => {
       const errors = JSON.parse(sessionStorage.getItem('e2e-errors') || '[]');
-      errors.push(String(message));
+      errors.push(typeof message === 'object' && message !== null ? JSON.stringify(message, Object.getOwnPropertyNames(message)) : String(message));
       sessionStorage.setItem('e2e-errors', JSON.stringify(errors));
     };
     window.addEventListener('error', event => { if (event.message) record(event.message); });
     window.addEventListener('unhandledrejection', event => record(event.reason?.message || event.reason));
     const original = console.error;
-    console.error = (...args) => { record(args.map(String).join(' ')); original.apply(console, args); };
+    console.error = (...args) => { for (const arg of args) record(arg); original.apply(console, args); };
   });
 });
 test.afterEach(async ({ browser }) => {

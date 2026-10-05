@@ -10,6 +10,31 @@ test('public source generation, four approved section variations and failed/stal
 }, async context => {
   const { app, screen, browser } = context;
   expect(fixtures().processingMode).toBe(process.env.E2E_PROCESSING_MODE === 'request' ? 'request' : 'queue');
+
+  // Exercise support actions before global recovery can claim these disposable jobs.
+  await signIn(context, 'concierge');
+  await app.open('/concierge');
+  await screen.getByLabel('Account lookup').fill('Browser Agency');
+  await expect(browser.locator('.concierge-workspaces button')).toHaveCount(1);
+  await browser.locator('.concierge-lookup button').filter({ hasText: 'Browser Agency' }).click();
+  const cancelled = fixtures().conciergeCancel;
+  await browser.locator('.concierge-jobs article').filter({ hasText: 'conciergeCancel Browser Product' }).getByRole('button', 'Cancel').click();
+  await expect(screen.getByRole('status')).toContainText('Queued job cancelled.');
+  expect(persisted('SELECT status, phase FROM campaign_generation_jobs WHERE id = ?', [cancelled.job])[0]).toEqual({ status: 'cancelled', phase: 'support_cancelled' });
+  expect(persisted('SELECT event FROM workspace_audit_events WHERE subject_id = ? AND event = ?', [cancelled.job, 'job_cancelled'])).toHaveLength(1);
+  await browser.reload();
+  await browser.locator('.concierge-lookup button').filter({ hasText: 'Browser Agency' }).click();
+  await expect(browser.locator('.concierge-jobs article').filter({ hasText: 'conciergeCancel Browser Product' })).toContainText('CANCELLED');
+  const retried = fixtures().conciergeRetry;
+  // The failed row appears in job inspection and support queues; select inspection only.
+  await browser.locator('.concierge-jobs article').filter({ hasText: 'conciergeRetry Browser Product' }).first().getByRole('button', 'Retry once').click();
+  await expect(screen.getByRole('status')).toContainText('Job queued for one safe retry.');
+  await app.open(`/campaign-packs/${retried.pack}`);
+  await expect(browser.locator('.approval-line strong')).toHaveText('Draft', { timeout: 45000 });
+  await browser.reload();
+  expect(persisted('SELECT status, attempts FROM campaign_generation_jobs WHERE id = ?', [retried.job])[0]).toEqual({ status: 'completed', attempts: 4 });
+  expect(persisted('SELECT event FROM workspace_audit_events WHERE subject_id = ? AND event = ?', [retried.job, 'job_retry_requested'])).toHaveLength(1);
+  await screen.getByRole('button', 'Sign out').click();
   await signIn(context);
   await app.open('/campaign-packs/create');
   await screen.getByLabel('Brand name').fill('Public Source Browser Brand');
@@ -108,6 +133,9 @@ test('public source generation, four approved section variations and failed/stal
   expect(Number(await browser.locator('.workspace-usage strong').textContent())).toBe(beforeDeep - 3);
   const premiumPack = Number((await browser.url()).split('/').at(-1));
   expect(persisted('SELECT analysis_mode, credit_cost FROM campaign_packs WHERE id = ?', [premiumPack])[0]).toEqual({ analysis_mode: 'deep', credit_cost: 3 });
+  await screen.getByRole('button', '＋ New pack').click();
+  await expect(browser).toHaveURL('/campaign-packs/create');
+  await expect(screen.getByLabel('Brand name')).toBeVisible();
   await app.open('/usage');
   await expect(screen.getByText('Deep campaign pack generation')).toBeVisible();
 });
