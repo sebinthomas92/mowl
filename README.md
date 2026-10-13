@@ -99,6 +99,12 @@ php artisan migrate --force
 
 In request-processing mode, the pack page starts a signed generation request and safely resumes stale jobs when reopened. The authenticated `/internal/campaign-jobs/recover` endpoint is also ready for a Vercel Cron once the project moves to Pro; Vercel supplies `CRON_SECRET` as its bearer token.
 
+Product hub deployments also require the product-hub table migration and its
+application-role permissions migration. Run migrations with the database owner
+before checking the product page; row-level policies alone do not grant table or
+sequence access to `marketing_owl_app`. Vercel's build image has no PHP CLI, so
+this remains a separate deployment step.
+
 ## Verification
 
 ```bash
@@ -106,3 +112,10 @@ php artisan test
 npm run build
 vendor/bin/pint --test
 ```
+
+CI also runs the product-hub permissions regression against disposable PostgreSQL.
+For the same local check, set `PRODUCT_HUB_TEST_DATABASE_URL` to a disposable
+PostgreSQL database whose name ends in `_test`, then run
+`php artisan test --filter=ProductHubPermissionsTest`. The connection must be able
+to create a role and schema; the test rolls back its schema and role changes.
+Without this variable, that PostgreSQL-specific test is skipped.

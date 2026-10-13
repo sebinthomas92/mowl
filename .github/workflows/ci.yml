@@ -19,7 +19,21 @@ jobs:
     name: quality
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: marketingowl_permissions_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
+      PRODUCT_HUB_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/marketingowl_permissions_test
       FFMPEG_PATH: /usr/bin/ffmpeg
       FFPROBE_PATH: /usr/bin/ffprobe
 
@@ -32,7 +46,7 @@ jobs:
         with:
           php-version: '8.4'
           coverage: none
-          extensions: mbstring, intl, gd, sqlite3, pdo_sqlite
+          extensions: mbstring, intl, gd, sqlite3, pdo_sqlite, pdo_pgsql
           tools: composer:v2
 
       - name: Set up Node.js
