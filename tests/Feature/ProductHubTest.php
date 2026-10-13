@@ -155,7 +155,7 @@ class ProductHubTest extends TestCase
     public function test_empty_state_and_campaign_history_are_honest(): void
     {
         [$owner, , $product, $pack] = $this->fixture();
-        $this->actingAs($owner)->get(route('products.show', $product))->assertSee('No approved marketing pack yet');
+        $this->actingAs($owner)->get(route('products.show', $product))->assertOk()->assertSee('No approved marketing pack yet');
         $pack->versions()->firstOrFail()->update(['review_status' => 'approved', 'reviewed_at' => now()]);
         $this->actingAs($owner)->get(route('products.show', $product))->assertSee($pack->name)->assertSee('Campaign history');
     }
