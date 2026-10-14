@@ -208,8 +208,8 @@
     --color-neu-fg: var(--neu-fg);
     --font-display: var(--display);
     --font-sans: var(--sans);
-    --radius-pill: var(--radius-pill);
-    --radius-card: var(--radius-card);
+    --radius-pill: 999px;
+    --radius-card: 20px;
     --shadow-card: var(--shadow);
     --shadow-float: var(--shadow-lg);
 }

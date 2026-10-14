@@ -29,6 +29,8 @@ touch database/database.sqlite
 # Pin Artisan to the local sqlite file so an inherited DB_* setting can never
 # point these commands at a shared database.
 export DB_CONNECTION=sqlite DB_DATABASE="$CLAUDE_PROJECT_DIR/database/database.sqlite"
+# A cached config would ignore the exported DB_* values.
+php artisan config:clear --no-interaction
 php artisan migrate --force --no-interaction
 php artisan db:seed --class=DemoSeeder --force --no-interaction
 
