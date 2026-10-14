@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\PageActivity;
 use App\Services\Pages\Stores\StoreClients;
+use App\Support\Membership;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Schema;
@@ -283,7 +284,9 @@ class PagePublisher
             return;
         }
         $workspace = Workspace::find($page->workspace_id);
-        $recipients = $workspace?->users()->when($actor, fn ($query) => $query->whereKeyNot($actor->id))->get() ?? collect();
+        $recipients = $workspace
+            ? Membership::audience($workspace, $page->product?->brand_id)->when($actor, fn ($query) => $query->whereKeyNot($actor->id))->get()
+            : collect();
         Notification::send($recipients, new PageActivity($event, $page, $version));
     }
 }

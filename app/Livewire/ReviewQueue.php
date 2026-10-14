@@ -96,7 +96,9 @@ class ReviewQueue extends Component
 
     private function item(): ContentItem
     {
-        $item = $this->scoped()->with(['latestVersion', 'campaignPack.sourceSnapshot'])->find($this->itemId ?? $this->firstInQueue());
+        // Only items in the queue: a stale or hand-edited ?item= never decides on a draft or on a different item than the one shown.
+        $item = $this->scoped()->where('status', 'review')->with(['latestVersion', 'campaignPack.sourceSnapshot'])->find($this->itemId ?? $this->firstInQueue())
+            ?? $this->scoped()->where('status', 'review')->with(['latestVersion', 'campaignPack.sourceSnapshot'])->find($this->firstInQueue());
         abort_unless($item && $item->latestVersion, 404);
 
         return $item;

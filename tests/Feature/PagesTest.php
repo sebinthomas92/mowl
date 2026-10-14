@@ -65,6 +65,11 @@ class PagesTest extends TestCase
         [$owner, $workspace, $pack] = $this->fixture();
         $teammate = User::factory()->create();
         $workspace->users()->attach($teammate, ['role' => 'member']);
+        $otherBrand = $workspace->brands()->create(['name' => 'Other Brand']);
+        $scopedElsewhere = User::factory()->create();
+        $workspace->users()->attach($scopedElsewhere, ['role' => 'reviewer', 'brand_id' => $otherBrand->id]);
+        $client = User::factory()->create();
+        $workspace->users()->attach($client, ['role' => 'client', 'brand_id' => $pack->product->brand_id]);
         $page = $this->approvedPage($owner, $pack);
         $this->fakeWordPress();
         $page->update(['store_connection_id' => $this->connectStore($owner)->id]);
@@ -87,6 +92,7 @@ class PagesTest extends TestCase
         $this->assertSame('live', $page->attempts()->sole()->status);
         $this->assertSame(1, $page->versions()->count());
         Notification::assertSentTo($teammate, PageActivity::class, fn (PageActivity $notification) => $notification->event === 'published');
+        Notification::assertNotSentTo([$scopedElsewhere, $client], PageActivity::class);
     }
 
     public function test_a_publish_stays_pending_until_the_address_serves_it_and_fails_after_the_last_check(): void

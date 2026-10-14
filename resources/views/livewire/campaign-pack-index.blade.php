@@ -6,7 +6,7 @@
         <main id="main-content">
         <section class="library-page packs-library">
             <header class="library-header"><div><p class="kicker">PRODUCT LAUNCHES</p><h1>Launch packs</h1><p>Approved, copy-ready campaign intelligence for your media buying team.</p></div>@if($canCreate)<a class="primary-link" href="{{ route('campaign-packs.create') }}">＋ New launch pack</a>@endif</header>
-            <div class="stat-strip"><div><small>PACKS CREATED</small><strong>{{ $packs->count() }}</strong></div><div><small>CREDITS REMAINING</small><strong>{{ $workspace->creditBalance() }}</strong></div><div><small>COGS STATUS</small><strong @class(['healthy' => $packs->every(fn($pack) => $pack->estimated_cost < config('campaigns.cogs_alert'))])>{{ $packs->contains(fn($pack) => $pack->estimated_cost >= config('campaigns.cogs_alert')) ? 'Needs attention' : 'On target' }}</strong></div></div>
+            <div class="stat-strip"><div><small>PACKS CREATED</small><strong>{{ $packs->count() }}</strong></div>@if($canSeeCosts)<div><small>CREDITS REMAINING</small><strong>{{ $workspace->creditBalance() }}</strong></div><div><small>COGS STATUS</small><strong @class(['healthy' => $packs->every(fn($pack) => $pack->estimated_cost < config('campaigns.cogs_alert'))])>{{ $packs->contains(fn($pack) => $pack->estimated_cost >= config('campaigns.cogs_alert')) ? 'Needs attention' : 'On target' }}</strong></div>@endif</div>
             @if($status === 'review')
                 <p class="queue-filter" role="status"><span>Showing packs waiting for review</span><a class="pill ghost sm" href="{{ route('campaign-packs.index') }}" wire:navigate>Show all packs</a></p>
             @endif

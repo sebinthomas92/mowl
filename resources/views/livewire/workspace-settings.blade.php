@@ -29,8 +29,10 @@
                         <div><dt>Owner</dt><dd>{{ $owner?->name ?? 'Unassigned' }}<small>{{ $owner?->email }}</small></dd></div>
                         <div><dt>Members</dt><dd>{{ $memberCount }} of {{ config('campaigns.seat_limit') }} seats</dd></div>
                         <div><dt>Brands</dt><dd>{{ $brandCount }} of {{ config('campaigns.brand_limit') }} brands</dd></div>
+                        @if($canSeeCosts)
                         <div><dt>Credits</dt><dd>{{ $creditBalance }} available</dd></div>
                         <div><dt>Billing</dt><dd>{{ $billingConnected ? 'Connected' : 'Concierge setup pending' }}<small>Beta is $129/month · $2/overage credit</small></dd></div>
+                        @endif
                     </dl>
                     <div class="settings-members"><span>MEMBERS</span>@foreach($members as $member)<p><strong>{{ $member->name }}</strong><small>{{ strtoupper($member->pivot->role) }}</small></p>@endforeach</div>
                 </section>

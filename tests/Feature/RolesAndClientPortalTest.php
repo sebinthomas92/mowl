@@ -50,6 +50,26 @@ class RolesAndClientPortalTest extends TestCase
         $this->actingAs($reviewer)->get(route('campaign-packs.create'))->assertForbidden();
         $this->actingAs($reviewer)->get(route('usage.index'))->assertForbidden();
         $this->actingAs($reviewer)->get(route('products.index'))->assertOk()->assertDontSee('Add product')->assertDontSee('Pack credits');
+        $this->actingAs($reviewer)->get(route('campaign-packs.index'))->assertOk()->assertDontSee('CREDITS REMAINING')->assertDontSee('COGS STATUS');
+        $this->actingAs($reviewer)->get(route('campaign-packs.show', $north))->assertOk()->assertDontSee('tracked cost');
+        $this->actingAs($reviewer)->get(route('workspace.settings'))->assertOk()->assertDontSee('overage credit');
+        $this->actingAs($owner)->get(route('campaign-packs.index'))->assertOk()->assertSee('CREDITS REMAINING');
+    }
+
+    public function test_a_reviewer_cannot_decide_on_a_draft_through_the_url(): void
+    {
+        [$owner, $workspace, $north] = $this->workspace();
+        $queued = $this->inReview($north, $owner);
+        $draft = $north->contentItems()->where('status', 'draft')->firstOrFail();
+        $reviewer = $this->member($workspace, 'reviewer');
+
+        Livewire::actingAs($reviewer)->withQueryParams(['item' => $draft->id])->test(ReviewQueue::class)
+            ->assertSee($queued->title)
+            ->call('approve')
+            ->assertHasNoErrors();
+
+        $this->assertSame('draft', $draft->fresh()->status);
+        $this->assertSame('approved', $queued->fresh()->status);
     }
 
     public function test_a_contributor_submits_but_cannot_approve(): void

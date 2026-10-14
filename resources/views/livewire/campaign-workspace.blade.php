@@ -134,6 +134,7 @@
                 $isOwner = (bool) $membership?->isOwner();
                 $canReview = (bool) $membership?->canReview();
                 $canCreate = (bool) $membership?->canCreate();
+                $canSeeCosts = (bool) $membership?->canSeeCosts();
             @endphp
             <div class="pack-page" id="packs" wire:poll.5s>
                 <header class="pack-toolbar">
@@ -147,7 +148,7 @@
 
                 <section class="product-hero">
                     <div class="product-art" aria-hidden="true"><div class="art-card"><span>CAMPAIGN</span><b>{{ strtoupper(substr($pack->product->name, 0, 2)) }}</b><i></i></div></div>
-                    <div><p class="pack-number">PACK / {{ str_pad($pack->id, 4, '0', STR_PAD_LEFT) }}</p><h1>{{ $pack->product->name }}</h1><p>{{ $pack->product->brand->name }} <i>•</i> {{ $pack->product->price ?: 'Price not supplied' }} <i>•</i> Launch pack v{{ $version->version }}</p><div class="approval-line"><span>{{ $version->review_status === 'approved' ? '✓' : '•' }}</span><strong>{{ str($version->review_status)->title() }}</strong><i></i><small>{{ $version->reviewed_at ? 'Reviewed '.$version->reviewed_at->format('M j, Y') : 'Generated '.$version->created_at->format('M j, Y') }}</small><i></i><small>${{ number_format($pack->estimated_cost, 3) }} tracked cost</small></div></div>
+                    <div><p class="pack-number">PACK / {{ str_pad($pack->id, 4, '0', STR_PAD_LEFT) }}</p><h1>{{ $pack->product->name }}</h1><p>{{ $pack->product->brand->name }} <i>•</i> {{ $pack->product->price ?: 'Price not supplied' }} <i>•</i> Launch pack v{{ $version->version }}</p><div class="approval-line"><span>{{ $version->review_status === 'approved' ? '✓' : '•' }}</span><strong>{{ str($version->review_status)->title() }}</strong><i></i><small>{{ $version->reviewed_at ? 'Reviewed '.$version->reviewed_at->format('M j, Y') : 'Generated '.$version->created_at->format('M j, Y') }}</small>@if($canSeeCosts)<i></i><small>${{ number_format($pack->estimated_cost, 3) }} tracked cost</small>@endif</div></div>
                 </section>
 
                 @php
