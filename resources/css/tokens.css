@@ -1,0 +1,224 @@
+/*
+ * Marketing Owl design tokens.
+ *
+ * Source of truth: the MarketingOwl App design artifact (light canvas, coral accent,
+ * dark hero bands, Fraunces display + DM Sans UI). Every colour in the app resolves
+ * to one of these variables so light and dark themes switch in one place.
+ *
+ * Theme selection: the OS preference applies by default; `data-theme="light|dark"`
+ * on <html> overrides it.
+ */
+
+:root {
+    color-scheme: light;
+
+    --canvas: #f7f7f7;
+    --surface: #ffffff;
+    --surface-2: #f2f2f2;
+    --line: #eaeaea;
+    --line-strong: #d6d6d6;
+
+    --ink: #0f0f0f;
+    --ink-2: #454545;
+    --muted: #6b6b6b;
+
+    --accent: #d9381e;
+    --accent-hover: #c2301a;
+    --accent-soft: #fdece8;
+    --accent-line: #f2c2b8;
+    --on-accent: #ffffff;
+    --link: #c2301a;
+    --eyebrow: #b8321a;
+    --focus: #5b34c2;
+
+    --nav-cur-bg: #0f0f0f;
+    --nav-cur-fg: #ffffff;
+
+    /* Dark bands (hero, sidebar, inverse panels) stay dark in both themes. */
+    --hero: #0f0f0f;
+    --hero-2: #1f1f1e;
+    --hero-ink: #ffffff;
+    --hero-muted: #cfcfcf;
+    --hero-accent: #ff9c82;
+
+    --ok-bg: #e8f5ee;
+    --ok-fg: #1b6b43;
+    --warn-bg: #fff3df;
+    --warn-fg: #7a4a00;
+    --rev-bg: #f1ebff;
+    --rev-fg: #5b34c2;
+    --bad-bg: #fdecea;
+    --bad-fg: #a8261b;
+    --neu-bg: #f2f2f2;
+    --neu-fg: #333333;
+
+    --shadow: 0 1px 2px rgba(15, 15, 15, .04), 0 8px 24px rgba(15, 15, 15, .05);
+    --shadow-lg: 0 2px 4px rgba(15, 15, 15, .06), 0 24px 48px rgba(15, 15, 15, .14);
+    --scrim: rgba(15, 15, 15, .32);
+
+    --gradient-brand: linear-gradient(90deg, #ff5a3d, #ea38d0);
+    --gradient-avatar: linear-gradient(140deg, #ff8a6b, #ea38d0);
+    --glow-coral: #ff5a3d;
+    --glow-magenta: #ea38d0;
+    --glow-lilac: #b98cff;
+
+    --display: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --sans: 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --ease: cubic-bezier(.075, .82, .165, 1);
+
+    --radius-pill: 999px;
+    --radius-card: 20px;
+    --radius-hero: 24px;
+    --radius-input: 12px;
+    --radius-thumb: 14px;
+    --touch: 44px;
+
+    /* Legacy names used throughout app.css, kept as aliases. */
+    --orange: var(--accent);
+    --orange-deep: var(--accent-hover);
+    --charcoal: var(--ink-2);
+    --paper: var(--canvas);
+    --sidebar: var(--hero);
+    --sidebar-2: var(--hero-2);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        color-scheme: dark;
+
+        --canvas: #111110;
+        --surface: #1b1b1a;
+        --surface-2: #262624;
+        --line: #30302e;
+        --line-strong: #44443f;
+
+        --ink: #f3f3f1;
+        --ink-2: #d2d2ce;
+        --muted: #a6a6a0;
+
+        --accent: #d9381e;
+        --accent-hover: #e5482d;
+        --accent-soft: #3a1c16;
+        --accent-line: #6b2a1e;
+        --on-accent: #ffffff;
+        --link: #ff8f73;
+        --eyebrow: #ff9c82;
+        --focus: #c9b6ff;
+
+        --nav-cur-bg: #f3f3f1;
+        --nav-cur-fg: #111110;
+
+        --hero: #050505;
+        --hero-2: #262624;
+        --hero-ink: #ffffff;
+        --hero-muted: #cfcfcf;
+
+        --ok-bg: #15301f;
+        --ok-fg: #86dbaa;
+        --warn-bg: #3a2a0c;
+        --warn-fg: #f2c46b;
+        --rev-bg: #2a2140;
+        --rev-fg: #c9b6ff;
+        --bad-bg: #3d1714;
+        --bad-fg: #ffa094;
+        --neu-bg: #2a2a28;
+        --neu-fg: #d8d8d4;
+
+        --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+        --shadow-lg: 0 2px 4px rgba(0, 0, 0, .4), 0 24px 48px rgba(0, 0, 0, .5);
+        --scrim: rgba(0, 0, 0, .55);
+    }
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --canvas: #111110;
+    --surface: #1b1b1a;
+    --surface-2: #262624;
+    --line: #30302e;
+    --line-strong: #44443f;
+
+    --ink: #f3f3f1;
+    --ink-2: #d2d2ce;
+    --muted: #a6a6a0;
+
+    --accent: #d9381e;
+    --accent-hover: #e5482d;
+    --accent-soft: #3a1c16;
+    --accent-line: #6b2a1e;
+    --on-accent: #ffffff;
+    --link: #ff8f73;
+    --eyebrow: #ff9c82;
+    --focus: #c9b6ff;
+
+    --nav-cur-bg: #f3f3f1;
+    --nav-cur-fg: #111110;
+
+    --hero: #050505;
+    --hero-2: #262624;
+    --hero-ink: #ffffff;
+    --hero-muted: #cfcfcf;
+
+    --ok-bg: #15301f;
+    --ok-fg: #86dbaa;
+    --warn-bg: #3a2a0c;
+    --warn-fg: #f2c46b;
+    --rev-bg: #2a2140;
+    --rev-fg: #c9b6ff;
+    --bad-bg: #3d1714;
+    --bad-fg: #ffa094;
+    --neu-bg: #2a2a28;
+    --neu-fg: #d8d8d4;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+    --shadow-lg: 0 2px 4px rgba(0, 0, 0, .4), 0 24px 48px rgba(0, 0, 0, .5);
+    --scrim: rgba(0, 0, 0, .55);
+}
+
+/* Expose the tokens to Tailwind utilities (bg-surface, text-ink, font-display, ...). */
+@theme inline {
+    --color-canvas: var(--canvas);
+    --color-surface: var(--surface);
+    --color-surface-2: var(--surface-2);
+    --color-line: var(--line);
+    --color-line-strong: var(--line-strong);
+    --color-ink: var(--ink);
+    --color-ink-2: var(--ink-2);
+    --color-muted: var(--muted);
+    --color-accent: var(--accent);
+    --color-accent-hover: var(--accent-hover);
+    --color-accent-soft: var(--accent-soft);
+    --color-on-accent: var(--on-accent);
+    --color-link: var(--link);
+    --color-eyebrow: var(--eyebrow);
+    --color-focus: var(--focus);
+    --color-hero: var(--hero);
+    --color-hero-ink: var(--hero-ink);
+    --color-hero-muted: var(--hero-muted);
+    --color-ok-bg: var(--ok-bg);
+    --color-ok-fg: var(--ok-fg);
+    --color-warn-bg: var(--warn-bg);
+    --color-warn-fg: var(--warn-fg);
+    --color-rev-bg: var(--rev-bg);
+    --color-rev-fg: var(--rev-fg);
+    --color-bad-bg: var(--bad-bg);
+    --color-bad-fg: var(--bad-fg);
+    --color-neu-bg: var(--neu-bg);
+    --color-neu-fg: var(--neu-fg);
+    --font-display: var(--display);
+    --font-sans: var(--sans);
+    --radius-pill: var(--radius-pill);
+    --radius-card: var(--radius-card);
+    --shadow-card: var(--shadow);
+    --shadow-float: var(--shadow-lg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
