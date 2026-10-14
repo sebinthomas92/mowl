@@ -8,6 +8,7 @@ use App\Models\ContentItem;
 use App\Models\ContentVersion;
 use App\Models\Product;
 use App\Services\ContentLibrary;
+use App\Services\Pages\PageBuilder;
 use App\Services\SectionRegenerator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
@@ -267,6 +268,13 @@ class ContentBrowser extends Component
         }
         if ($item->banner_creative_id && $pack) {
             $used[] = ['icon' => 'photo', 'text' => "Banner Studio in {$pack->name}", 'url' => route('campaign-packs.show', $pack).'#banner-studio'];
+        }
+        if (PageBuilder::available()) {
+            foreach ($item->pageSections()->with('page')->get()->unique('page_id') as $section) {
+                $page = $section->page;
+                $state = $page->live_version ? "live v{$page->live_version}" : 'not published';
+                $used[] = ['icon' => 'layout', 'text' => "Page: {$page->name} ({$section->title}, draft v{$page->draft_version}, {$state})", 'url' => route('products.show', [$page->product_id, 'tab' => 'pages', 'page' => $page->id])];
+            }
         }
         if ($item->variationOf) {
             $used[] = ['icon' => 'copy', 'text' => "Variation of {$item->variationOf->title}", 'url' => null];

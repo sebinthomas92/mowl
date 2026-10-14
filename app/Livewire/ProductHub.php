@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductFact;
 use App\Models\SourceSnapshot;
 use App\Services\ContentLibrary;
+use App\Services\Pages\PageBuilder;
 use App\Services\ProductHubContentAdapter;
 use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
@@ -26,7 +27,7 @@ class ProductHub extends Component
 
     public ?string $shareUrl = null;
 
-    public const TABS = ['overview' => 'Overview', 'knowledge' => 'Knowledge', 'content' => 'Content', 'packs' => 'Launch packs', 'hub' => 'Client hub'];
+    public const TABS = ['overview' => 'Overview', 'knowledge' => 'Knowledge', 'content' => 'Content', 'pages' => 'Pages', 'packs' => 'Launch packs', 'hub' => 'Client hub'];
 
     #[Url]
     public string $tab = 'overview';
@@ -221,8 +222,9 @@ class ProductHub extends Component
         $packs = $this->product->campaignPacks->sortByDesc('id')->values();
         $tabs = self::TABS;
         $contentItems = ContentLibrary::available() ? $this->product->contentItems()->get(['id', 'title', 'status', 'current_version', 'type']) : null;
+        $livePage = PageBuilder::available() ? $this->product->pages()->whereNotNull('live_version')->latest('verified_at')->first() : null;
 
-        return view('livewire.product-hub', compact('workspace', 'version', 'content', 'sections', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience', 'contentItems'))
+        return view('livewire.product-hub', compact('workspace', 'version', 'content', 'sections', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience', 'contentItems', 'livePage'))
             ->layout('components.layouts.app');
     }
 

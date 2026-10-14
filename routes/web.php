@@ -6,6 +6,7 @@ use App\Http\Controllers\CampaignJobController;
 use App\Http\Controllers\CampaignPackDeliveryController;
 use App\Http\Controllers\ClientReviewController;
 use App\Http\Controllers\ProductHubDeliveryController;
+use App\Http\Controllers\SandboxStoreController;
 use App\Http\Controllers\WorkspaceInvitationController;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\Register;
@@ -41,6 +42,11 @@ Route::get('/invitations/{token}', [WorkspaceInvitationController::class, 'accep
 Route::get('/shared/campaign-packs/{token}', [CampaignPackDeliveryController::class, 'share'])->name('campaign-packs.share');
 Route::get('/client/{token}', ClientReview::class)->middleware('throttle:60,1')->name('client.review');
 Route::get('/client/{token}/banners/{contentItem}', [ClientReviewController::class, 'banner'])->middleware('throttle:120,1')->name('client.review-banner');
+Route::middleware('throttle:120,1')->group(function (): void {
+    Route::get('/sandbox-store/{token}', [SandboxStoreController::class, 'home'])->name('sandbox-store.home');
+    Route::get('/sandbox-store/{token}/pages/{page}/{slug}', [SandboxStoreController::class, 'page'])->name('sandbox-store.page');
+    Route::get('/sandbox-store/{token}/media/{key}', [SandboxStoreController::class, 'media'])->name('sandbox-store.media');
+});
 Route::get('/shared/products/{token}', [ProductHubDeliveryController::class, 'share'])->name('product-hubs.share');
 Route::get('/shared/products/{token}/google-ads/{campaignType}.csv', [ProductHubDeliveryController::class, 'sharedExport'])->name('product-hubs.shared-export');
 Route::get('/shared/products/{token}/media/{mediaAsset}', [ProductHubDeliveryController::class, 'sharedMedia'])->name('product-hubs.shared-media');

@@ -42,6 +42,7 @@
                 @if($needsDecision)<a class="tag warn" href="{{ route('products.show', [$product, 'tab' => 'knowledge']) }}" wire:navigate><span class="dot"></span>{{ trans_choice(':count fact needs confirmation|:count facts need confirmation', $needsDecision) }}</a>@endif
                 @if($inReview)<a class="tag rev" href="{{ $contentItems !== null ? route('review.index') : route('products.show', [$product, 'tab' => 'packs']) }}" wire:navigate><span class="dot"></span>{{ $inReview }} awaiting review</a>@endif
                 @if($version)<span class="tag ok"><span class="dot"></span>Approved v{{ $version->version }}</span>@endif
+                @if($livePage ?? null)<a class="tag ok" href="{{ route('products.show', [$product, 'tab' => 'pages', 'page' => $livePage->id]) }}" wire:navigate><span class="dot"></span>Page live · v{{ $livePage->live_version }}</a>@endif
             </div>
         </div>
         <div class="hero-actions">

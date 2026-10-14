@@ -35,6 +35,9 @@
                     <div class="settings-members"><span>MEMBERS</span>@foreach($members as $member)<p><strong>{{ $member->name }}</strong><small>{{ strtoupper($member->pivot->role) }}</small></p>@endforeach</div>
                 </section>
             </div>
+            @if(\App\Services\Pages\PageBuilder::available())
+                <livewire:store-connections />
+            @endif
         </section>
         </main>
     </div>
