@@ -407,9 +407,12 @@ class CampaignWorkspace extends Component
 
     private function workspaceProduct(int $productId): Product
     {
-        return Product::query()
+        $product = Product::query()
             ->whereHas('brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id))
-            ->findOrFail($productId);
+            ->find($productId);
+        abort_unless($product, 404);
+
+        return $product;
     }
 
     private function workspacePack(): CampaignPack
