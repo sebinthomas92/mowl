@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\Membership;
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -20,7 +21,7 @@ class User extends Authenticatable
 
     public function workspaces(): BelongsToMany
     {
-        return $this->belongsToMany(Workspace::class, 'workspace_user')->withPivot('role')->withTimestamps();
+        return $this->belongsToMany(Workspace::class, 'workspace_user')->withPivot(Membership::pivotColumns())->withTimestamps();
     }
 
     /**

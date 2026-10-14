@@ -20,7 +20,7 @@
     @endif
     @if($flash)<div class="banner ok" role="status"><i class="ti ti-circle-check" aria-hidden="true"></i><span>{{ $flash }}</span></div>@endif
     @error('decision')<div class="banner bad" role="alert"><i class="ti ti-alert-triangle" aria-hidden="true"></i><span>{{ $message }}</span></div>@enderror
-    @if($picked)
+    @if($canCreate && $picked)
         <div class="banner neu"><span class="num">{{ count($picked) }} selected</span><button type="button" class="pill ghost sm" wire:click="bulkSubmit">Submit selected for review</button><button type="button" class="linkbtn" wire:click="$set('picked', [])">Clear</button></div>
     @endif
 
@@ -30,7 +30,7 @@
                 <div class="empty">
                     <strong>No content yet</strong>
                     <span class="small muted">Every launch pack output (positioning, angles, video routes, offers, channel copy and banners) appears here as its own item with versions and approval.</span>
-                    <a class="pill pri sm" href="{{ route('campaign-packs.create', array_filter(['product' => $productId])) }}" wire:navigate>Create a launch pack</a>
+                    @if($canCreate)<a class="pill pri sm" href="{{ route('campaign-packs.create', array_filter(['product' => $productId])) }}" wire:navigate>Create a launch pack</a>@endif
                 </div>
             @elseif($list->isEmpty())
                 <div class="empty"><strong>Nothing matches these filters</strong><button type="button" class="pill ghost sm" wire:click="clearFilters">Clear filters</button></div>
@@ -44,7 +44,7 @@
                                 <span class="muted xs">@if($showProduct){{ $item->product->name }} · @endif{{ \Illuminate\Support\Str::singular(\App\Models\ContentItem::TYPES[$item->type] ?? $item->type) }} · v{{ $item->current_version }}</span>
                                 @include('content.status-tag', ['status' => $item->status])
                             </button>
-                            <input class="sel" type="checkbox" value="{{ $item->id }}" wire:model.live="picked" aria-label="Select {{ $item->title }}">
+                            @if($canCreate)<input class="sel" type="checkbox" value="{{ $item->id }}" wire:model.live="picked" aria-label="Select {{ $item->title }}">@endif
                         </div>
                     @endforeach
                 </div>
@@ -63,7 +63,7 @@
                 </div>
 
                 <div class="dtabs" role="tablist" aria-label="Item details">
-                    @foreach(['preview' => 'Preview', 'edit' => 'Edit', 'versions' => 'Versions · '.$versions->count(), 'comments' => 'Comments · '.$versions->sum(fn ($version) => $version->comments->count()), 'used' => 'Used in'] as $key => $label)
+                    @foreach(array_filter(['preview' => 'Preview', 'edit' => $canCreate ? 'Edit' : null, 'versions' => 'Versions · '.$versions->count(), 'comments' => 'Comments · '.$versions->sum(fn ($version) => $version->comments->count()), 'used' => 'Used in']) as $key => $label)
                         <button type="button" role="tab" aria-selected="{{ $detailTab === $key ? 'true' : 'false' }}" wire:click="showTab('{{ $key }}')">{{ $label }}</button>
                     @endforeach
                 </div>
@@ -92,7 +92,7 @@
                                 <p class="small muted">This item has no free-text fields. Use Regenerate to change it.</p>
                             @endforelse
                             @if($selected->type === 'video')<p class="xs muted">Timed voiceover, captions and the shot plan change through Regenerate, so their timing stays checked.</p>@endif
-                            @if($latest->status === 'draft' && $editable)
+                            @if($canCreate && $latest->status === 'draft' && $editable)
                                 <button type="button" class="pill ghost sm self-start" wire:click="saveDraft">Save draft</button>
                             @endif
                             @break
@@ -130,7 +130,9 @@
                 </div>
 
                 <div class="row content-actions">
-                    @if($latest->status === 'draft')
+                    @if(! $canCreate)
+                        @if($latest->status === 'review')<a class="pill dark sm" href="{{ route('review.index', ['item' => $selected->id]) }}" wire:navigate>Open in review</a>@endif
+                    @elseif($latest->status === 'draft')
                         <button type="button" class="pill pri sm" wire:click="submit">Submit v{{ $latest->version }} for review</button>
                         @if($detailTab !== 'edit' && $editable)<button type="button" class="pill ghost sm" wire:click="showTab('edit')">Edit</button>@endif
                     @elseif($latest->status === 'changes')
@@ -140,10 +142,10 @@
                     @elseif($latest->status === 'approved')
                         <button type="button" class="pill ghost sm" wire:click="revise">Start revision v{{ $latest->version + 1 }}</button>
                     @endif
-                    @if(in_array($latest->status, ['approved', 'review'], true))
+                    @if($canCreate && in_array($latest->status, ['approved', 'review'], true))
                         <button type="button" class="pill ghost sm" wire:click="variation">Create variation</button>
                     @endif
-                    @if($regenerable)
+                    @if($canCreate && $regenerable)
                         <button type="button" class="pill ghost sm" wire:click="regenerate" wire:loading.attr="disabled" wire:target="regenerate" @disabled($packBusy)>
                             <i class="ti ti-refresh" aria-hidden="true"></i>{{ $packBusy ? 'Generating…' : 'Regenerate' }}
                         </button>

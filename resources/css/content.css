@@ -113,3 +113,25 @@
 .client-link-form{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
 .client-link-form .field{flex:1 1 180px}
 .share-url{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px;word-break:break-all}
+
+/* Client portal */
+.portal-title{font-size:20px;margin:0}
+.portal-note{background:var(--surface-2);padding:10px;border-radius:12px}
+.portal-thumb{width:52px;flex:none}
+.portal-thumb .thumb{width:52px;border-radius:12px}
+.portal-details{display:contents}
+.portal-details[open]>.client-preview{flex:1 1 100%;margin-top:8px}
+.portal-url{word-break:break-all}
+.client-head form{margin:0}
+
+/* Team roles */
+.team-roles .tbl td{vertical-align:middle}
+.team-roles .input-sm{min-height:36px;padding:4px 10px;font-size:13px;max-width:200px}
+.team-actions{white-space:nowrap;text-align:right}
+.team-actions .linkbtn{margin-left:10px}
+.team-invite{gap:12px}
+.team-roles-guide{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;border-top:1px solid var(--line);padding-top:14px}
+.team-roles-guide>div{display:flex;flex-direction:column;gap:4px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.team-roles>.tw{position:relative;max-width:100%}
+@media(max-width:520px){.client-head{padding:12px 16px}.client-head .grow{flex:1 1 100%;order:-1}.client-head svg{display:none}}

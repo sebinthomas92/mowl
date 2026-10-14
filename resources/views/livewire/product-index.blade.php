@@ -5,7 +5,7 @@
         @include('partials.top-bar')
         <main id="main-content">
         <section class="library-page">
-            <header class="library-header"><div><p class="kicker">OFFER INVENTORY</p><h1>Products</h1><p>Source-linked products ready to become launch packs.</p></div><a class="pill pri" href="{{ route('products.create', array_filter(['brand' => $brand])) }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> Add product</a></header>
+            <header class="library-header"><div><p class="kicker">OFFER INVENTORY</p><h1>Products</h1><p>Source-linked products ready to become launch packs.</p></div>@if($canCreate)<a class="pill pri" href="{{ route('products.create', array_filter(['brand' => $brand])) }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> Add product</a>@endif</header>
             @if($brands->count() > 1)
                 <div class="chips" role="group" aria-label="Brand">
                     <button type="button" class="chip" aria-pressed="{{ $brand ? 'false' : 'true' }}" wire:click="$set('brand', null)">All brands</button>
@@ -15,7 +15,7 @@
                 </div>
             @endif
             @if($products->isEmpty())
-                <div class="library-empty"><span>▱</span><h2>{{ $brand ? 'No products for this brand yet' : 'No products yet' }}</h2><p>Add a product from its page or by hand. Saving never starts generation.</p><a href="{{ route('products.create', array_filter(['brand' => $brand])) }}" wire:navigate>Add a product →</a></div>
+                <div class="library-empty"><span>▱</span><h2>{{ $brand ? 'No products for this brand yet' : 'No products yet' }}</h2><p>Add a product from its page or by hand. Saving never starts generation.</p>@if($canCreate)<a href="{{ route('products.create', array_filter(['brand' => $brand])) }}" wire:navigate>Add a product →</a>@endif</div>
             @else
                 <div class="data-table" role="table" aria-label="Products">
                     <div class="data-row data-heading" role="row"><span>PRODUCT</span><span>BRAND</span><span>PACKS</span><span>STATUS</span></div>

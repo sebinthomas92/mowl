@@ -10,8 +10,10 @@ use App\Models\Product;
 use App\Services\ContentLibrary;
 use App\Services\Pages\PageBuilder;
 use App\Services\SectionRegenerator;
+use App\Support\Membership;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -26,6 +28,7 @@ class ContentBrowser extends Component
     /** Keys that hold ids, ranks or timing, never prose a person should retype. */
     private const LOCKED_KEYS = ['id', 'shot_id', 'status', 'supporting_claim_ids', 'claim_validation_status', 'angle_rank', 'rank', 'voiceover', 'captions', 'shot_plan', 'final_url', 'total_duration_seconds'];
 
+    #[Locked]
     public ?int $productId = null;
 
     #[Url(as: 'type')]
@@ -195,7 +198,7 @@ class ContentBrowser extends Component
     public function render(ContentLibrary $library)
     {
         $workspace = $this->currentWorkspace();
-        $all = $library->items($workspace, $this->product());
+        $all = $library->items($workspace, $this->product(), $this->membership());
         $list = $all
             ->when($this->type !== 'all', fn (Collection $items) => $items->where('type', $this->type))
             ->when($this->status !== 'all', fn (Collection $items) => $items->where('status', $this->status))
@@ -218,6 +221,7 @@ class ContentBrowser extends Component
             'usedIn' => $selected ? $this->usedIn($selected) : [],
             'showProduct' => ! $this->productId,
             'isOwner' => $this->isOwner(),
+            'canCreate' => (bool) $this->membership()?->canCreate(),
             'clientLinks' => $this->productId
                 ? ContentClientLink::query()->where('workspace_id', $workspace->id)->where('product_id', $this->productId)->whereNull('revoked_at')->where('expires_at', '>', now())->latest()->get()
                 : collect(),
@@ -289,20 +293,30 @@ class ContentBrowser extends Component
             return null;
         }
 
-        return Product::query()->whereHas('brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id))->find($this->productId);
+        $query = Product::query()->whereHas('brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id));
+
+        return $this->membership()?->scopeBrands($query)->find($this->productId);
+    }
+
+    private function membership(): ?Membership
+    {
+        return Membership::of(auth()->user(), $this->currentWorkspace());
     }
 
     private function isOwner(): bool
     {
-        return $this->currentWorkspace()->users()->whereKey(auth()->id())->wherePivot('role', 'owner')->exists();
+        return (bool) $this->membership()?->isOwner();
     }
 
+    /** Items of the workspace (or the product) within the member's brand scope. */
     private function scopedItems()
     {
-        return ContentItem::query()
+        $query = ContentItem::query()
             ->where('workspace_id', $this->currentWorkspace()->id)
             ->when($this->productId, fn ($query) => $query->where('product_id', $this->productId))
             ->with('latestVersion');
+
+        return $this->membership()?->scopeThroughProduct($query) ?? $query->whereRaw('1 = 0');
     }
 
     private function item(?int $id = null): ContentItem

@@ -130,7 +130,10 @@
             @else
             @php
                 $content = $displayContent;
-                $isOwner = $workspace->users()->whereKey(auth()->id())->wherePivot('role', 'owner')->exists();
+                $membership = \App\Support\Membership::of(auth()->user(), $workspace);
+                $isOwner = (bool) $membership?->isOwner();
+                $canReview = (bool) $membership?->canReview();
+                $canCreate = (bool) $membership?->canCreate();
             @endphp
             <div class="pack-page" id="packs" wire:poll.5s>
                 <header class="pack-toolbar">
@@ -215,8 +218,8 @@
                 <section class="review-panel">
                     <div><p class="section-label">HUMAN REVIEW</p><h2>{{ $version->review_status === 'approved' ? 'This version is locked.' : 'Review before media buyers use this version.' }}</h2><p>{{ $version->review_note ?: 'Draft changes remain separate from approved versions.' }}</p></div>
                     <div class="review-actions">
-                        @if($version->review_status === 'draft')<button type="button" class="secondary-button" wire:click="requestReview">Send to review</button>@endif
-                        @if($isOwner && in_array($version->review_status, ['draft', 'review']))
+                        @if($canCreate && $version->review_status === 'draft')<button type="button" class="secondary-button" wire:click="requestReview">Send to review</button>@endif
+                        @if($canReview && in_array($version->review_status, ['draft', 'review']))
                             <input wire:model="reviewNote" aria-label="Approval or rejection note" placeholder="Review note (required to reject)">
                             <button type="button" class="secondary-button" wire:click="rejectVersion">Reject</button><button type="button" class="copy-pack" wire:click="approveVersion" @disabled($qaIssues)>{{ $qaIssues ? 'Approval blocked' : 'Approve & lock' }}</button>
                         @endif
@@ -229,7 +232,7 @@
 
                 <section class="review-panel compact-review">
                     <div><p class="section-label">SOURCE TRUTH</p><h3>{{ $pack->sourceSnapshot->approved_at ? 'Source approved '.$pack->sourceSnapshot->approved_at->format('M j, Y') : 'Source needs an owner approval' }}</h3><p>{{ $pack->sourceSnapshot->url }} · {{ $pack->product->sourceSnapshots()->count() }} source snapshots retained</p></div>
-                    @if($isOwner && ! $pack->sourceSnapshot->approved_at)<button type="button" class="secondary-button" wire:click="approveSource">Approve source truth</button>@endif
+                    @if($canReview && ! $pack->sourceSnapshot->approved_at)<button type="button" class="secondary-button" wire:click="approveSource">Approve source truth</button>@endif
                 </section>
 
                 @if($version->review_status === 'approved')

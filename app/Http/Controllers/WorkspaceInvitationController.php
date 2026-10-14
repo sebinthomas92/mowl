@@ -24,17 +24,21 @@ class WorkspaceInvitationController extends Controller
             $lockedInvitation = WorkspaceInvitation::query()->lockForUpdate()->findOrFail($invitation->id);
             abort_unless($lockedInvitation->isOpen(), 410);
 
-            $alreadyMember = $lockedInvitation->workspace->users()->whereKey($request->user()->id)->exists();
-            abort_if(! $alreadyMember && $lockedInvitation->workspace->users()->count() >= config('campaigns.seat_limit'), 409);
+            $existing = $lockedInvitation->workspace->users()->whereKey($request->user()->id)->first();
+            // An owner keeps ownership; an invitation never demotes them.
+            abort_if($existing?->pivot->role === 'owner', 409);
+            abort_if(! $existing && $lockedInvitation->role !== 'client' && $lockedInvitation->workspace->users()->wherePivot('role', '!=', 'client')->count() >= config('campaigns.seat_limit'), 409);
 
             $lockedInvitation->workspace->users()->syncWithoutDetaching([
-                $request->user()->id => ['role' => $lockedInvitation->role],
+                $request->user()->id => $lockedInvitation->pivotAttributes(),
             ]);
             $lockedInvitation->update(['accepted_at' => now()]);
         });
 
         $request->session()->put('current_workspace_id', $invitation->workspace_id);
 
-        return redirect()->route('team.index')->with('status', 'You joined '.$invitation->workspace->name.'.');
+        return $invitation->role === 'client'
+            ? redirect()->route('portal.index')
+            : redirect()->route('team.index')->with('status', 'You joined '.$invitation->workspace->name.'.');
     }
 }

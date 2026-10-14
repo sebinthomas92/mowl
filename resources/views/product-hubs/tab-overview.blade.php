@@ -75,7 +75,7 @@
         @forelse($packs->take(4) as $pack)
             @include('product-hubs.pack-row', ['pack' => $pack])
         @empty
-            <div class="empty"><strong>No launch packs yet</strong><span class="small muted">A launch pack turns this product's confirmed facts into channel-ready copy.</span><a class="pill pri sm" href="{{ route('campaign-packs.create', ['product' => $product->id]) }}" wire:navigate>Create a launch pack</a></div>
+            <div class="empty"><strong>No launch packs yet</strong><span class="small muted">A launch pack turns this product's confirmed facts into channel-ready copy.</span>@if($canManage)<a class="pill pri sm" href="{{ route('campaign-packs.create', ['product' => $product->id]) }}" wire:navigate>Create a launch pack</a>@endif</div>
         @endforelse
     </section>
 

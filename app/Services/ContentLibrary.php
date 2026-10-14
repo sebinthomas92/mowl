@@ -11,6 +11,7 @@ use App\Models\Product;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\ContentActivity;
+use App\Support\Membership;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -285,8 +286,7 @@ class ContentLibrary
 
     public function addComment(ContentVersion $version, string $body, ?User $actor, ?string $clientName = null): ContentComment
     {
-        $workspace = Workspace::find($version->item->workspace_id);
-        $role = $clientName ? 'client' : ($actor && $workspace?->users()->whereKey($actor->id)->wherePivot('role', 'owner')->exists() ? 'owner' : 'member');
+        $role = $clientName ? 'client' : (Membership::of($actor, $version->item->workspace_id)?->role ?? 'member');
 
         return $version->comments()->create([
             'workspace_id' => $version->item->workspace_id, 'user_id' => $actor?->id,
@@ -418,10 +418,12 @@ class ContentLibrary
     }
 
     /** Items the workspace can see, with their latest version, newest first. */
-    public function items(Workspace $workspace, ?Product $product = null): Collection
+    public function items(Workspace $workspace, ?Product $product = null, ?Membership $membership = null): Collection
     {
-        return ContentItem::query()
-            ->where('workspace_id', $workspace->id)
+        $query = ContentItem::query()->where('workspace_id', $workspace->id);
+        $membership?->scopeThroughProduct($query);
+
+        return $query
             ->when($product, fn ($query) => $query->where('product_id', $product->id))
             ->with(['latestVersion', 'product.brand', 'campaignPack', 'bannerCreative'])
             ->orderByDesc('updated_at')->orderByDesc('id')
@@ -456,9 +458,9 @@ class ContentLibrary
             return;
         }
         $workspace = Workspace::find($version->item->workspace_id);
-        $recipients = $workspace->users()->when($actor, fn ($query) => $query->whereKeyNot($actor->id));
+        $recipients = Membership::audience($workspace, $version->item->product?->brand_id)->when($actor, fn ($query) => $query->whereKeyNot($actor->id));
         if ($event === 'review_requested') {
-            $recipients->wherePivot('role', 'owner');
+            $recipients->wherePivotIn('role', ['owner', 'reviewer']);
         }
         Notification::send($recipients->get(), new ContentActivity($event, $version, $actor?->name ?? $clientName ?? 'A client'));
     }

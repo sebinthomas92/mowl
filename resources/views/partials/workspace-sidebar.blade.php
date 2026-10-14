@@ -1,3 +1,4 @@
+@php($sideMembership = \App\Support\Membership::of(auth()->user(), $workspace))
 @php($creditBalance = $workspace->creditBalance())
 @php($monthlyCredits = config('campaigns.monthly_credits'))
 @php($creditsUsed = max(0, $monthlyCredits - $creditBalance))
@@ -15,7 +16,7 @@
 ])
 @php($secondary = array_filter([
     $navLink('team.index', 'team.*', 'Team', 'users'),
-    $navLink('usage.index', 'usage.*', 'Usage', 'chart-bar'),
+    $sideMembership?->canSeeCosts() ? $navLink('usage.index', 'usage.*', 'Usage', 'chart-bar') : null,
     $navLink('workspace.settings', 'workspace.settings', 'Settings', 'settings'),
     $isConcierge ? $navLink('concierge.index', 'concierge.*', 'Concierge', 'lifebuoy') : null,
 ]))
@@ -56,9 +57,11 @@
         @endforeach
     </nav>
 
+    @if($sideMembership?->canSeeCosts())
     <div class="note">
         <div class="note-row"><span>Pack credits</span><strong class="num">{{ $creditBalance }} left</strong></div>
         <div class="meter" role="meter" aria-label="Pack credits used this cycle" aria-valuemin="0" aria-valuemax="{{ $monthlyCredits }}" aria-valuenow="{{ $creditsUsed }}"><i style="width: {{ min(100, ($creditsUsed / max(1, $monthlyCredits)) * 100) }}%"></i></div>
         <span>{{ $creditsUsed }} of {{ $monthlyCredits }} used this cycle</span>
     </div>
+    @endif
 </aside>

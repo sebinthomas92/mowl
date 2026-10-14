@@ -76,17 +76,17 @@
 
                     <aside class="card col review-decision" aria-label="Decision">
                         <span class="eyebrow">Your decision on v{{ $current->version }}</span>
-                        <span class="muted xs">Reviewing as {{ auth()->user()->name }} · {{ $isOwner ? 'Owner' : 'Team member' }}</span>
+                        <span class="muted xs">Reviewing as {{ auth()->user()->name }} · {{ $roleLabel }}</span>
                         <p class="small">Approval marks this exact version as usable. It does not publish anything.</p>
                         @error('decision')<div class="banner bad xs" role="alert">{{ $message }}</div>@enderror
-                        @if($isOwner)
+                        @if($canReview)
                             <button type="button" class="pill dark block" wire:click="approve" wire:loading.attr="disabled">Approve v{{ $current->version }}</button>
                             <button type="button" class="pill ghost block" wire:click="requestChanges" wire:loading.attr="disabled">Request changes</button>
                             @if($sourceNeedsApproval)
                                 <div class="banner warn xs">The product source is not approved yet, so launch pack sections cannot be approved.<button type="button" class="linkbtn" wire:click="approveSource">Approve source</button></div>
                             @endif
                         @else
-                            <div class="banner neu xs">Only workspace owners can approve or request changes. You can still comment.</div>
+                            <div class="banner neu xs">Owners and reviewers approve or request changes. You can still comment in Content.</div>
                         @endif
                         <ul class="checks" aria-label="Automatic checks">
                             @foreach($checks as $check)

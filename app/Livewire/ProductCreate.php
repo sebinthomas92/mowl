@@ -9,6 +9,7 @@ use App\Models\SourceSnapshot;
 use App\Services\ProductImageImporter;
 use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
+use App\Support\Membership;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
@@ -61,7 +62,7 @@ class ProductCreate extends Component
 
     public function mount(): void
     {
-        $brands = $this->currentWorkspace()->brands()->orderBy('name')->get(['id']);
+        $brands = $this->scopedBrands()->orderBy('name')->get(['id']);
         $requested = (int) request()->query('brand');
         $this->brandId = (string) ($brands->firstWhere('id', $requested)?->id ?? $brands->first()?->id ?? 'new');
     }
@@ -214,15 +215,16 @@ class ProductCreate extends Component
     public function render()
     {
         $workspace = $this->currentWorkspace();
-        $brands = $workspace->brands()->orderBy('name')->get();
+        $brands = $this->scopedBrands()->orderBy('name')->get();
         $brand = $brands->firstWhere('id', (int) $this->brandId);
 
         return view('livewire.product-create', [
             'workspace' => $workspace,
             'brands' => $brands,
             'brand' => $brand,
-            'brandLimitReached' => $brands->count() >= config('campaigns.brand_limit'),
-            'duplicate' => $this->duplicateId ? Product::query()->whereKey($this->duplicateId)->with('brand')->first() : null,
+            'brandLimitReached' => $workspace->brands()->count() >= config('campaigns.brand_limit'),
+            'canCreateBrands' => (bool) $this->membership()?->canCreateBrands(),
+            'duplicate' => $this->duplicateId ? Product::query()->whereKey($this->duplicateId)->whereIn('brand_id', $brands->pluck('id'))->with('brand')->first() : null,
             'profileAvailable' => Brand::profileAvailable(),
         ])->layout('components.layouts.app');
     }
@@ -232,8 +234,11 @@ class ProductCreate extends Component
         $workspace = $this->currentWorkspace();
         if ($this->brandId !== 'new') {
             // Only this workspace's brands can own the product.
-            return $workspace->brands()->find((int) $this->brandId)
+            return $this->scopedBrands()->find((int) $this->brandId)
                 ?? throw ValidationException::withMessages(['brandId' => 'Pick one of your brands.']);
+        }
+        if (! $this->membership()?->canCreateBrands()) {
+            throw ValidationException::withMessages(['brandId' => 'Pick one of your brands.']);
         }
 
         $data = $this->validate(['newBrandName' => ['required', 'string', 'max:120']], [
@@ -268,7 +273,7 @@ class ProductCreate extends Component
         }
 
         $match = SourceSnapshot::query()
-            ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id))
+            ->whereHas('product.brand', fn ($query) => $this->membership()?->scopeBrands($query->where('workspace_id', $this->currentWorkspace()->id), 'id') ?? $query->whereRaw('1 = 0'))
             ->latest('id')
             ->get(['id', 'product_id', 'url', 'canonical_url'])
             ->first(fn (SourceSnapshot $snapshot) => in_array(self::addressKey($snapshot->url), $keys, true)
@@ -291,5 +296,18 @@ class ProductCreate extends Component
         $path = rtrim($parts['path'] ?? '', '/');
 
         return $host.(isset($parts['port']) ? ':'.$parts['port'] : '').$path.(isset($parts['query']) ? '?'.$parts['query'] : '');
+    }
+
+    private function membership(): ?Membership
+    {
+        return Membership::of(auth()->user(), $this->currentWorkspace());
+    }
+
+    /** Brands the member may add products to. */
+    private function scopedBrands()
+    {
+        $query = $this->currentWorkspace()->brands()->getQuery();
+
+        return $this->membership()?->scopeBrands($query, 'id') ?? $query->whereRaw('1 = 0');
     }
 }

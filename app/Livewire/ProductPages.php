@@ -11,7 +11,9 @@ use App\Services\Pages\PageBuilder;
 use App\Services\Pages\PageImages;
 use App\Services\Pages\PagePublisher;
 use App\Services\Pages\PageRenderer;
+use App\Support\Membership;
 use Illuminate\Validation\ValidationException;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -20,6 +22,7 @@ class ProductPages extends Component
 {
     use InteractsWithWorkspace;
 
+    #[Locked]
     public int $productId;
 
     #[Url(as: 'page')]
@@ -204,9 +207,10 @@ class ProductPages extends Component
 
     private function product(): ?Product
     {
-        return Product::query()->whereKey($this->productId)
-            ->whereHas('brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id))
-            ->with('brand')->first();
+        $query = Product::query()->whereKey($this->productId)
+            ->whereHas('brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id));
+
+        return Membership::of(auth()->user(), $this->currentWorkspace())?->scopeBrands($query)->with('brand')->first();
     }
 
     private function pages()
@@ -232,6 +236,6 @@ class ProductPages extends Component
 
     private function isOwner(): bool
     {
-        return auth()->user()->workspaces()->whereKey($this->currentWorkspace()->id)->wherePivot('role', 'owner')->exists();
+        return (bool) Membership::of(auth()->user(), $this->currentWorkspace())?->canPublish();
     }
 }

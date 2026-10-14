@@ -4,6 +4,7 @@ use App\Http\Controllers\BannerDeliveryController;
 use App\Http\Controllers\BannerGenerationController;
 use App\Http\Controllers\CampaignJobController;
 use App\Http\Controllers\CampaignPackDeliveryController;
+use App\Http\Controllers\ClientPortalController;
 use App\Http\Controllers\ClientReviewController;
 use App\Http\Controllers\ProductHubDeliveryController;
 use App\Http\Controllers\SandboxStoreController;
@@ -14,6 +15,7 @@ use App\Livewire\BrandEditor;
 use App\Livewire\BrandIndex;
 use App\Livewire\CampaignPackIndex;
 use App\Livewire\CampaignWorkspace;
+use App\Livewire\ClientPortal;
 use App\Livewire\ClientReview;
 use App\Livewire\ConciergeIndex;
 use App\Livewire\LibraryIndex;
@@ -52,7 +54,7 @@ Route::get('/shared/products/{token}/google-ads/{campaignType}.csv', [ProductHub
 Route::get('/shared/products/{token}/media/{mediaAsset}', [ProductHubDeliveryController::class, 'sharedMedia'])->name('product-hubs.shared-media');
 Route::get('/shared/products/{token}/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'sharedCreative'])->name('product-hubs.shared-creative');
 
-Route::middleware('auth')->group(function (): void {
+Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::post('/workspaces/{workspace}/select', function (Workspace $workspace, Request $request) {
         abort_unless($request->user()->workspaces()->whereKey($workspace->id)->exists(), 404);
         $request->session()->put('current_workspace_id', $workspace->id);
@@ -80,6 +82,8 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/usage', UsageIndex::class)->name('usage.index');
     Route::get('/settings', WorkspaceSettings::class)->name('workspace.settings');
     Route::get('/concierge', ConciergeIndex::class)->name('concierge.index');
+    Route::get('/portal', ClientPortal::class)->name('portal.index');
+    Route::get('/portal/items/{contentItem}/image', [ClientPortalController::class, 'image'])->name('portal.image');
     Route::post('/internal/campaign-jobs/{generationJob}/process', [CampaignJobController::class, 'process'])
         ->middleware(['signed', 'throttle:6,1'])
         ->name('campaign-jobs.process');

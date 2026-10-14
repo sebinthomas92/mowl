@@ -1,5 +1,5 @@
 <section class="card">
-    <div class="row"><span class="eyebrow">Launch packs for {{ $product->name }}</span><span class="sp"></span><a class="pill pri sm" href="{{ route('campaign-packs.create', ['product' => $product->id]) }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i>New launch pack</a></div>
+    <div class="row"><span class="eyebrow">Launch packs for {{ $product->name }}</span><span class="sp"></span>@if($canManage)<a class="pill pri sm" href="{{ route('campaign-packs.create', ['product' => $product->id]) }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i>New launch pack</a>@endif</div>
     @forelse($packs as $pack)
         @include('product-hubs.pack-row', ['pack' => $pack])
     @empty
