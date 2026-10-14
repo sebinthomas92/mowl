@@ -36,10 +36,22 @@
             <div class="field"><label for="store-name">Name</label><input id="store-name" class="input" wire:model="name" maxlength="120" placeholder="{{ $driver === 'sandbox' ? 'Sandbox store' : 'Northline store' }}">@error('name')<span class="field-error">{{ $message }}</span>@enderror</div>
             <div class="field"><label for="store-brand">Brand</label><select id="store-brand" class="input" wire:model="brandId"><option value="">Every brand</option>@foreach($brands as $brand)<option value="{{ $brand->id }}">{{ $brand->name }}</option>@endforeach</select>@error('brandId')<span class="field-error">{{ $message }}</span>@enderror</div>
             @if($driver === 'woocommerce')
-                <div class="field full"><label for="store-url">Store URL</label><input id="store-url" class="input" type="url" wire:model="siteUrl" placeholder="https://shop.example.com" autocomplete="url">@error('siteUrl')<span class="field-error">{{ $message }}</span>@enderror</div>
+                <div class="field full"><label for="store-url">Store URL</label><input id="store-url" class="input" type="url" wire:model.blur="siteUrl" placeholder="https://shop.example.com" autocomplete="url">@error('siteUrl')<span class="field-error">{{ $message }}</span>@enderror</div>
                 <div class="field"><label for="store-user">WordPress username</label><input id="store-user" class="input" wire:model="username" autocomplete="off" spellcheck="false">@error('username')<span class="field-error">{{ $message }}</span>@enderror</div>
                 <div class="field"><label for="store-secret">Application password</label><input id="store-secret" class="input" type="password" wire:model="secret" autocomplete="new-password" placeholder="{{ $editingId ? 'Leave empty to keep the current one' : 'xxxx xxxx xxxx xxxx xxxx xxxx' }}">@error('secret')<span class="field-error">{{ $message }}</span>@enderror</div>
-                <p class="xs muted full">In WordPress, open Users, then Profile, then Application Passwords, and create one for MarketingOwl. The user needs to be an Editor or Administrator. WooCommerce API keys cannot publish pages. The password is stored encrypted.</p>
+                @php
+                    $profileUrl = filter_var($siteUrl, FILTER_VALIDATE_URL) && in_array(parse_url($siteUrl, PHP_URL_SCHEME), ['http', 'https'], true)
+                        ? rtrim($siteUrl, '/').'/wp-admin/profile.php#application-passwords-section' : null;
+                @endphp
+                <div class="full connect-steps">
+                    <p class="xs medium">Getting the application password</p>
+                    <ol class="xs muted">
+                        <li>Sign in to WordPress as an Editor or Administrator.</li>
+                        <li>Open @if($profileUrl)<a href="{{ $profileUrl }}" target="_blank" rel="noopener noreferrer">your profile's Application Passwords</a>@else Users, then Profile, then Application Passwords @endif, type MarketingOwl as the name and click Add New Application Password.</li>
+                        <li>Copy the password WordPress shows once and paste it here, spaces and all.</li>
+                    </ol>
+                    <p class="xs muted">WooCommerce API keys cannot publish pages, so this uses a WordPress user. The password is stored encrypted, and you can revoke it in WordPress at any time.</p>
+                </div>
             @endif
             <div class="row full">
                 <button type="submit" class="pill pri sm" wire:loading.attr="disabled" wire:target="save"><span wire:loading.remove wire:target="save">{{ $editingId ? 'Check and save' : 'Check and connect' }}</span><span wire:loading wire:target="save">Checking the store…</span></button>
