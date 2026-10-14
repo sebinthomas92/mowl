@@ -13,6 +13,7 @@ use App\Notifications\CampaignActivity;
 use App\Services\ContentLibrary;
 use App\Services\Pages\PageBuilder;
 use App\Services\ProductKnowledge;
+use App\Support\Membership;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
@@ -189,7 +190,9 @@ class CampaignPlanner
             return;
         }
         $workspace = Workspace::find($campaign->workspace_id);
-        $recipients = $workspace?->users()->when($actor, fn ($query) => $query->whereKeyNot($actor->id))->get() ?? collect();
+        $recipients = $workspace
+            ? Membership::audience($workspace, $campaign->product?->brand_id)->when($actor, fn ($query) => $query->whereKeyNot($actor->id))->get()
+            : collect();
         Notification::send($recipients, new CampaignActivity($event, $campaign));
     }
 

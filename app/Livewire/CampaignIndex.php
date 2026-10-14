@@ -6,6 +6,7 @@ use App\Concerns\InteractsWithWorkspace;
 use App\Models\Campaign;
 use App\Services\Campaigns\CampaignPlanner;
 use App\Services\Campaigns\CampaignResults;
+use App\Support\Membership;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -24,9 +25,10 @@ class CampaignIndex extends Component
         $campaigns = collect();
         $counts = [];
         if ($available) {
-            $all = Campaign::query()->where('workspace_id', $workspace->id)
-                ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-                ->with(['product.brand', 'results'])->orderByRaw("case status when 'active' then 0 when 'paused' then 1 when 'planned' then 2 else 3 end")->orderByDesc('id')->get();
+            $query = Campaign::query()->where('workspace_id', $workspace->id)
+                ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id));
+            Membership::of(auth()->user(), $workspace)?->scopeThroughProduct($query);
+            $all = $query->with(['product.brand', 'results'])->orderByRaw("case status when 'active' then 0 when 'paused' then 1 when 'planned' then 2 else 3 end")->orderByDesc('id')->get();
             $counts = $all->countBy('status')->all();
             $this->status = array_key_exists($this->status, Campaign::STATUSES) ? $this->status : 'all';
             $campaigns = $this->status === 'all' ? $all : $all->where('status', $this->status)->values();

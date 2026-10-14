@@ -220,6 +220,30 @@ class CampaignsTest extends TestCase
         }
     }
 
+    public function test_a_brand_scoped_member_only_sees_and_hears_about_their_brand(): void
+    {
+        [$owner, $workspace, $pack] = $this->fixture();
+        $ours = $this->launched($owner, $pack, ['name' => 'Kettle autumn push']);
+        $other = $workspace->brands()->create(['name' => 'Other Brand'])->products()->create(['name' => 'Other Product', 'summary' => 'Another product.']);
+        $theirs = app(CampaignPlanner::class)->plan($other, $owner, null, ['name' => 'Other brand secret plan']);
+
+        $member = User::factory()->create();
+        $workspace->users()->attach($member, ['role' => 'member', 'brand_id' => $pack->product->brand_id]);
+
+        Livewire::actingAs($member)->test(CampaignIndex::class)
+            ->assertSee('Kettle autumn push')
+            ->assertDontSee('Other brand secret plan');
+        Livewire::actingAs($member)->test(ProductCampaigns::class, ['productId' => $other->id])->assertStatus(404);
+        Livewire::actingAs($member)->test(ProductCampaigns::class, ['productId' => $pack->product_id])->assertSee('Kettle autumn push');
+
+        Notification::fake();
+        $planner = app(CampaignPlanner::class);
+        $planner->notify($theirs, 'launched', $owner);
+        Notification::assertNotSentTo($member, CampaignActivity::class);
+        $planner->notify($ours, 'launched', $owner);
+        Notification::assertSentTo($member, CampaignActivity::class);
+    }
+
     public function test_campaigns_stay_inside_their_workspace(): void
     {
         [$owner, , $pack] = $this->fixture();

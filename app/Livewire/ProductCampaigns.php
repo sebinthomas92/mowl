@@ -11,7 +11,9 @@ use App\Models\WorkspaceCredit;
 use App\Services\Campaigns\CampaignPlanner;
 use App\Services\Campaigns\CampaignResults;
 use App\Services\Pages\PageBuilder;
+use App\Support\Membership;
 use Illuminate\Validation\Rule;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -20,6 +22,7 @@ class ProductCampaigns extends Component
 {
     use InteractsWithWorkspace;
 
+    #[Locked]
     public int $productId;
 
     /** campaigns: one campaign in detail; results: every campaign's results side by side. */
@@ -56,7 +59,9 @@ class ProductCampaigns extends Component
 
     public function plan(CampaignPlanner $planner): void
     {
-        $campaign = $planner->plan($this->product(), auth()->user());
+        $product = $this->product();
+        abort_unless($product, 404);
+        $campaign = $planner->plan($product, auth()->user());
         $this->mode = 'campaigns';
         $this->campaignId = $campaign->id;
         $this->startEditing();
@@ -209,6 +214,7 @@ class ProductCampaigns extends Component
     public function render(CampaignPlanner $planner, CampaignResults $results)
     {
         $product = $this->product();
+        abort_unless($product, 404);
         $campaigns = $this->campaigns();
         $data = ['product' => $product, 'campaigns' => $campaigns];
 
@@ -247,9 +253,12 @@ class ProductCampaigns extends Component
 
     private function product(): ?Product
     {
-        return Product::query()->whereKey($this->productId)
-            ->whereHas('brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id))
-            ->with('brand')->first();
+        $workspace = $this->currentWorkspace();
+        $query = Product::query()->whereKey($this->productId)
+            ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id));
+        Membership::of(auth()->user(), $workspace)?->scopeBrands($query);
+
+        return $query->with('brand')->first();
     }
 
     private function campaigns()
