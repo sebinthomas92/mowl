@@ -215,7 +215,7 @@ class ProductCreateTest extends TestCase
             ->set('brandId', (string) $foreign->id)
             ->set('name', 'Desk Mat')
             ->call('save')
-            ->assertNotFound();
+            ->assertHasErrors('brandId');
 
         $this->assertSame(0, Product::count());
     }

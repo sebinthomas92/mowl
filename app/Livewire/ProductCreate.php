@@ -231,7 +231,9 @@ class ProductCreate extends Component
     {
         $workspace = $this->currentWorkspace();
         if ($this->brandId !== 'new') {
-            return $workspace->brands()->findOrFail((int) $this->brandId);
+            // Only this workspace's brands can own the product.
+            return $workspace->brands()->find((int) $this->brandId)
+                ?? throw ValidationException::withMessages(['brandId' => 'Pick one of your brands.']);
         }
 
         $data = $this->validate(['newBrandName' => ['required', 'string', 'max:120']], [

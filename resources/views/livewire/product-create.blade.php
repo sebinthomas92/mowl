@@ -83,6 +83,7 @@
                                     @endforeach
                                     <option value="new" @disabled($brandLimitReached)>New brand…{{ $brandLimitReached ? ' (limit reached)' : '' }}</option>
                                 </select>
+                                @error('brandId')<span class="err" role="alert">{{ $message }}</span>@enderror
                             </div>
                             @if($brandId === 'new')
                                 <div class="field c6">
