@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Livewire\WorkflowIndex;
+use App\Models\LibraryPrompt;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\WorkflowCatalog;
@@ -138,6 +139,50 @@ MD);
             $this->assertNotNull($catalog->find(pathinfo($file, PATHINFO_FILENAME)), basename($file).' did not parse');
         }
         $this->assertTrue(true);
+    }
+
+    public function test_import_command_loads_a_licensed_collection_as_packs(): void
+    {
+        $file = $this->library.'/export.json';
+        File::put($file, json_encode([
+            ['id' => 'a1', 'title' => 'Aurora hero', 'category' => 'Hero Section', 'tags' => ['premium'], 'body' => "Build a hero.\n## Layout\nTwo columns."],
+            ['id' => 'a2', 'title' => 'Plain hero', 'category' => 'Hero Section', 'tags' => ['free'], 'body' => 'Build a plain hero.'],
+            ['id' => 'b1', 'title' => 'Agency site', 'category' => 'Agency', 'tags' => ['free'], 'body' => 'Build an agency site.'],
+            ['id' => 'x', 'title' => '', 'body' => 'skipped'],
+        ]));
+
+        $this->artisan('workflows:import-prompts', ['file' => $file])
+            ->expectsOutput('3 prompts imported into 2 packs.')
+            ->assertSuccessful();
+
+        $hero = app(WorkflowCatalog::class)->find('motionsites-hero-section');
+        $this->assertSame('Hero Section', $hero['name']);
+        $this->assertSame('Website design', $hero['category_label']);
+        $this->assertSame('2 prompts, 1 premium.', $hero['description']);
+        $this->assertSame(['Aurora hero', 'Plain hero'], array_column($hero['prompts'], 'title'));
+        $this->assertStringContainsString('MotionSites.ai', $hero['credit']);
+
+        // Re-importing updates by id and drops prompts the export no longer has.
+        File::put($file, json_encode([['id' => 'a1', 'title' => 'Aurora hero v2', 'category' => 'Hero Section', 'body' => 'New body.']]));
+        $this->artisan('workflows:import-prompts', ['file' => $file])->assertSuccessful();
+        $this->assertSame(1, LibraryPrompt::count());
+        $this->assertSame('free', LibraryPrompt::first()->tier);
+        $this->artisan('workflows:import-prompts', ['file' => $this->library.'/missing.json'])->assertFailed();
+    }
+
+    public function test_database_packs_show_premium_tags_credit_and_download(): void
+    {
+        LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '1', 'pack' => 'Landing Page', 'title' => 'Glass landing', 'body' => "Intro\n## Section\nDetails", 'tier' => 'premium', 'position' => 1, 'credit' => 'From the MotionSites.ai collection, licensed for Marketing Owl']);
+        $user = $this->member();
+
+        Livewire::actingAs($user)->withQueryParams(['workflow' => 'motionsites-landing-page'])->test(WorkflowIndex::class)
+            ->assertSee('Glass landing')
+            ->assertSee('Premium')
+            ->assertSee('licensed for Marketing Owl');
+
+        $download = $this->actingAs($user)->get(route('workflows.download', 'motionsites-landing-page'))->assertOk()->getContent();
+        $this->assertStringContainsString("## Glass landing\nIntro\n### Section", $download);
+        $this->assertStringContainsString('credit: From the MotionSites.ai collection', $download);
     }
 
     private function member(): User

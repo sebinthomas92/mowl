@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\LibraryPrompt;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 /**
@@ -12,7 +14,8 @@ use Illuminate\Support\Str;
  *
  * A library file starts with a frontmatter block of `key: value` lines and
  * holds one prompt per "## " heading. Text before the first heading is the
- * workflow's description.
+ * workflow's description. Licensed collections that may not be published in
+ * the repository live in the library_prompts table, one pack per `pack`.
  */
 class WorkflowCatalog
 {
@@ -24,6 +27,7 @@ class WorkflowCatalog
         return $this->workflows ??= collect(config('workflows.hosted', []))
             ->map(fn (array $workflow) => $this->normalize($workflow + ['prompts' => [], 'kind' => 'workflow']))
             ->concat($this->library())
+            ->concat($this->collections())
             ->sortBy(fn (array $workflow) => [array_search($workflow['category'], array_keys($this->categories()), true), $workflow['order'], $workflow['name']])
             ->values();
     }
@@ -39,10 +43,88 @@ class WorkflowCatalog
         return config('workflows.categories', []);
     }
 
-    /** The library file behind a prompt pack or skill, for download. */
-    public function path(array $workflow): ?string
+    /** Fills in prompt bodies that the catalog listing leaves out. */
+    public function withBodies(array $workflow): array
     {
-        return $workflow['file'] ?? null;
+        $missing = array_filter(array_column($workflow['prompts'], 'id'));
+        if ($missing === []) {
+            return $workflow;
+        }
+
+        $bodies = LibraryPrompt::query()->whereKey($missing)->pluck('body', 'id');
+        foreach ($workflow['prompts'] as $index => $prompt) {
+            if (isset($prompt['id'])) {
+                $workflow['prompts'][$index]['body'] = (string) $bodies->get($prompt['id'], '');
+            }
+        }
+
+        return $workflow;
+    }
+
+    /** The pack as a Markdown file for an agent: the library file itself, or one built from its prompts. */
+    public function markdown(array $workflow): ?string
+    {
+        if (! empty($workflow['file'])) {
+            return File::get($workflow['file']);
+        }
+
+        if ($workflow['prompts'] === []) {
+            return null;
+        }
+
+        $workflow = $this->withBodies($workflow);
+
+        $lines = ['---', 'name: '.$workflow['name'], 'category: '.$workflow['category']];
+        if ($workflow['credit']) {
+            $lines[] = 'credit: '.$workflow['credit'];
+        }
+        $lines[] = '---';
+        if ($workflow['description']) {
+            $lines[] = $workflow['description'];
+        }
+        foreach ($workflow['prompts'] as $prompt) {
+            $lines[] = '';
+            $lines[] = '## '.$prompt['title'];
+            $lines[] = preg_replace('/^## /m', '### ', $prompt['body']);
+        }
+
+        return implode("\n", $lines)."\n";
+    }
+
+    /** @return Collection<int, array<string, mixed>> */
+    private function collections(): Collection
+    {
+        if (! Schema::hasTable('library_prompts')) {
+            return collect();
+        }
+
+        // Bodies are loaded only for the pack being shown (see withBodies()).
+        return LibraryPrompt::query()
+            ->select(['id', 'collection', 'pack', 'category', 'title', 'tier', 'position', 'credit'])
+            ->orderBy('collection')->orderBy('pack')->orderBy('position')->orderBy('id')
+            ->get()
+            ->groupBy(fn (LibraryPrompt $prompt) => $prompt->collection.'|'.$prompt->pack)
+            ->map(function (Collection $prompts) {
+                $first = $prompts->first();
+                $premium = $prompts->where('tier', 'premium')->count();
+
+                return $this->normalize([
+                    'slug' => $first->collection.'-'.$first->pack,
+                    'name' => $first->pack,
+                    'category' => $first->category,
+                    'availability' => 'download',
+                    'description' => $prompts->count().' '.Str::plural('prompt', $prompts->count()).($premium ? ", {$premium} premium" : '').'.',
+                    'credit' => $first->credit,
+                    'source_url' => config('workflows.source_url'),
+                    'prompts' => $prompts->map(fn (LibraryPrompt $prompt) => [
+                        'id' => $prompt->id,
+                        'title' => $prompt->title,
+                        'body' => null,
+                        'tier' => $prompt->tier,
+                    ])->values()->all(),
+                ]);
+            })
+            ->values();
     }
 
     /** @return Collection<int, array<string, mixed>> */
@@ -109,6 +191,7 @@ class WorkflowCatalog
             'length' => null,
             'description' => null,
             'source_url' => null,
+            'credit' => null,
             'action' => null,
             'order' => 100,
         ], $workflow, [
