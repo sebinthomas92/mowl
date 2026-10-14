@@ -135,3 +135,4 @@
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .team-roles>.tw{position:relative;max-width:100%}
 @media(max-width:520px){.client-head{padding:12px 16px}.client-head .grow{flex:1 1 100%;order:-1}.client-head svg{display:none}}
+.fieldset-plain{display:contents;border:0;margin:0;padding:0;min-width:0}

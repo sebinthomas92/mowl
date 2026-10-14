@@ -3,7 +3,7 @@
         <div class="empty">
             <strong>No pages yet</strong>
             <span class="small muted">A landing page is built from approved content. Start a draft now and bind content as it gets approved. Publishing sends it to your WooCommerce store.</span>
-            <button type="button" class="pill pri sm" wire:click="startPage" wire:loading.attr="disabled">Start a page draft</button>
+            @if($canEdit)<button type="button" class="pill pri sm" wire:click="startPage" wire:loading.attr="disabled">Start a page draft</button>@endif
         </div>
     @else
         @php
@@ -20,7 +20,7 @@
                         <button type="button" class="chip" aria-pressed="{{ $option->id === $page->id ? 'true' : 'false' }}" wire:click="showPage({{ $option->id }})">{{ $option->name }}</button>
                     @endforeach
                 </div>
-                <button type="button" class="linkbtn" wire:click="startPage"><i class="ti ti-plus" aria-hidden="true"></i> New page</button>
+                @if($canEdit)<button type="button" class="linkbtn" wire:click="startPage"><i class="ti ti-plus" aria-hidden="true"></i> New page</button>@endif
             </div>
 
         @if($flash)<div class="banner ok" role="status"><i class="ti ti-circle-check" aria-hidden="true"></i><span>{{ $flash }}</span></div>@endif
@@ -29,6 +29,8 @@
         <div class="pages-layout">
             <aside class="card col pages-sections" aria-label="Sections and content">
                 <span class="eyebrow">Sections and content</span>
+                {{-- Reviewers see the page read-only: a disabled fieldset disables every control inside it. --}}
+                <fieldset class="fieldset-plain" @disabled(! $canEdit)>
                 @foreach($sections as $section)
                     @php $item = $section->contentItem; @endphp
                     <div class="pages-section" wire:key="section-{{ $section->id }}">
@@ -93,6 +95,7 @@
                     @error('slug')<span class="field-error">{{ $message }}</span>@enderror
                     <button type="submit" class="pill ghost sm self-start">Save page</button>
                 </form>
+                </fieldset>
                 <span class="muted xs">{{ $frozen ? "v{$page->draft_version} was published. Your next edit starts draft v".($page->draft_version + 1).'.' : 'Editing a published page starts a new draft version.' }}</span>
             </aside>
 

@@ -165,7 +165,7 @@ class ProductPages extends Component
     {
         $product = $this->product();
         $page = $this->pageId ? $this->page() : null;
-        $data = ['product' => $product, 'page' => $page, 'pages' => $this->pages(), 'isOwner' => $this->isOwner(), 'kinds' => PageSection::KINDS];
+        $data = ['product' => $product, 'page' => $page, 'pages' => $this->pages(), 'isOwner' => $this->isOwner(), 'canEdit' => (bool) Membership::of(auth()->user(), $this->currentWorkspace())?->canCreate(), 'kinds' => PageSection::KINDS];
 
         if ($page) {
             $snapshot = $builder->snapshot($page);

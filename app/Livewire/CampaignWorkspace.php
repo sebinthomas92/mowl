@@ -272,7 +272,7 @@ class CampaignWorkspace extends Component
     {
         $this->ensureReviewer();
         $version = $this->selectedPackVersion();
-        abort_unless(in_array($version->review_status, ['draft', 'review']), 422);
+        abort_unless(in_array($version->review_status, $this->decidableStatuses()), 422);
         app(CampaignPackSafetyValidator::class)->assertApprovable($version, $version->campaignPack->sourceSnapshot);
         $version->update([
             'review_status' => 'approved',
@@ -286,12 +286,18 @@ class CampaignWorkspace extends Component
         $this->reviewNote = '';
     }
 
+    /** Owners may decide on a draft directly; reviewers only decide on what was submitted. */
+    private function decidableStatuses(): array
+    {
+        return Membership::of(auth()->user(), $this->currentWorkspace())?->isOwner() ? ['draft', 'review'] : ['review'];
+    }
+
     public function rejectVersion(): void
     {
         $this->ensureReviewer();
         $data = $this->validate(['reviewNote' => ['required', 'string', 'max:2000']]);
         $version = $this->selectedPackVersion();
-        abort_unless(in_array($version->review_status, ['draft', 'review']), 422);
+        abort_unless(in_array($version->review_status, $this->decidableStatuses()), 422);
         $version->update(['review_status' => 'rejected', 'reviewed_by_user_id' => auth()->id(), 'reviewed_at' => now(), 'review_note' => $data['reviewNote']]);
         $version->campaignPack->update(['status' => 'rejected']);
         $this->audit('campaign_pack_version_rejected', $version, $data['reviewNote']);

@@ -2,14 +2,18 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\CampaignWorkspace;
 use App\Livewire\ClientPortal;
 use App\Livewire\ContentBrowser;
 use App\Livewire\GlobalSearch;
+use App\Livewire\ProductPages;
 use App\Livewire\ReviewQueue;
+use App\Livewire\StoreConnections;
 use App\Livewire\TeamIndex;
 use App\Models\Brand;
 use App\Models\CampaignPack;
 use App\Models\ContentItem;
+use App\Models\StoreConnection;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
@@ -70,6 +74,24 @@ class RolesAndClientPortalTest extends TestCase
 
         $this->assertSame('draft', $draft->fresh()->status);
         $this->assertSame('approved', $queued->fresh()->status);
+    }
+
+    public function test_a_reviewer_cannot_approve_a_pack_draft_or_edit_pages_or_see_other_brands_stores(): void
+    {
+        [$owner, $workspace, $north, $kettle] = $this->workspace();
+        $reviewer = $this->member($workspace, 'reviewer', $north->product->brand_id);
+
+        Livewire::actingAs($reviewer)->test(CampaignWorkspace::class, ['pack' => $north])->call('approveVersion')->assertStatus(422);
+        $this->assertSame('draft', $north->versions()->first()->review_status);
+
+        $north->product->pages()->create(['workspace_id' => $workspace->id, 'name' => 'North page', 'slug' => 'north', 'headline' => 'North', 'draft_version' => 1]);
+        Livewire::actingAs($reviewer)->test(ProductPages::class, ['productId' => $north->product_id])
+            ->assertSee('North page')->assertDontSee('New page')->assertSeeHtml('<fieldset class="fieldset-plain" disabled');
+
+        StoreConnection::create(['workspace_id' => $workspace->id, 'brand_id' => $kettle->product->brand_id, 'name' => 'Kettle store', 'driver' => 'sandbox', 'site_url' => 'https://kettle.test', 'status' => 'connected']);
+        StoreConnection::create(['workspace_id' => $workspace->id, 'brand_id' => $north->product->brand_id, 'name' => 'North store', 'driver' => 'sandbox', 'site_url' => 'https://north.test', 'status' => 'connected']);
+        Livewire::actingAs($reviewer)->test(StoreConnections::class)->assertSee('North store')->assertDontSee('Kettle store');
+        Livewire::actingAs($owner)->test(StoreConnections::class)->assertSee('Kettle store');
     }
 
     public function test_a_contributor_submits_but_cannot_approve(): void
