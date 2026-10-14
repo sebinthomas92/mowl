@@ -157,72 +157,58 @@ class ProductKnowledge
     }
 
     /**
-     * Apply confirmed knowledge to the structured truth a generator receives:
-     * confirmed values win over the raw page, excluded facts are removed.
-     */
-    public function overlay(Product $product, array $truth): array
-    {
-        $facts = $product->facts()->get()->keyBy('key');
-
-        foreach (self::FACTS as $key => $definition) {
-            $fact = $facts->get($key);
-            if (! $fact || ! $definition['sourced']) {
-                continue;
-            }
-            if ($fact->status === 'excluded') {
-                unset($truth[$key]);
-                if ($key === 'price') {
-                    unset($truth['currency']);
-                }
-
-                continue;
-            }
-            if ($fact->confirmed_value !== null) {
-                $truth[$key] = $fact->confirmed_value;
-                if ($key === 'price') {
-                    unset($truth['currency']);
-                }
-            }
-        }
-
-        return $truth;
-    }
-
-    /**
-     * Everything a generator receives, with confirmed knowledge applied and excluded facts scrubbed
-     * from every input: the product record, the structured truth, the page description and the raw text.
+     * Everything a generator receives. The extracted truth stays exactly what the page said, minus
+     * excluded facts, so page-cited evidence can only match the page. Team-entered values, and confirmed
+     * values that differ from the page, travel separately as team knowledge with their own provenance.
+     * Excluded facts are scrubbed from every input: the product record, the truth, the description and the raw text.
      *
      * @return array{0: Product, 1: array}
      */
     public function prepare(Product $product, array $page): array
     {
         $facts = $product->facts()->get()->keyBy('key');
-        $rawTruth = $page['product_truth'] ?? [];
-        $page['product_truth'] = $this->overlay($product, $rawTruth);
+        $truth = $page['product_truth'] ?? [];
+        $original = $truth;
+        $raw = $this->sourceValues($truth);
         $subject = clone $product;
+        $team = [];
 
-        foreach ($facts->where('status', 'excluded') as $fact) {
-            $column = self::FACTS[$fact->key]['product'] ?? null;
-            if ($column && $column !== 'name') {
-                $subject->setAttribute($column, null);
+        foreach (self::FACTS as $key => $definition) {
+            $fact = $facts->get($key);
+            if (! $fact) {
+                continue;
             }
-            if ($fact->key === 'description') {
-                unset($page['description']);
-            }
-            $values = array_filter([$fact->source_value, $fact->confirmed_value, is_scalar($rawTruth[$fact->key] ?? null) && mb_strlen((string) $rawTruth[$fact->key]) >= 4 ? (string) $rawTruth[$fact->key] : null, $fact->key === 'price' ? $product->price : null, $fact->key === 'description' ? $product->summary : null],
-                fn ($value) => is_string($value) && mb_strlen(trim($value)) >= 2);
-            foreach (['content', 'description'] as $field) {
-                if (isset($page[$field]) && is_string($page[$field])) {
-                    $page[$field] = str_ireplace(array_map('trim', $values), '', $page[$field]);
+            $column = $definition['product'] ?? null;
+            if ($fact->status === 'excluded') {
+                unset($truth[$key]);
+                if ($key === 'price') {
+                    unset($truth['currency']);
                 }
+                if ($key === 'description') {
+                    unset($page['description']);
+                }
+                if ($column && $column !== 'name') {
+                    $subject->setAttribute($column, null);
+                }
+
+                continue;
+            }
+            if ($fact->confirmed_value === null) {
+                continue;
+            }
+            if ($column) {
+                $subject->setAttribute($column, $fact->confirmed_value);
+            }
+            if (! $definition['sourced'] || ! isset($raw[$key]) || ! $this->same($raw[$key], $fact->confirmed_value, $key)) {
+                $team[$key] = $fact->confirmed_value;
             }
         }
 
-        $team = [];
-        foreach (self::FACTS as $key => $definition) {
-            $fact = $facts->get($key);
-            if (! $definition['sourced'] && $fact && $fact->status !== 'excluded' && $fact->confirmed_value !== null) {
-                $team[$key] = $fact->confirmed_value;
+        $page['product_truth'] = $truth;
+        $excluded = $this->excludedValues($product, $original);
+        foreach (['content', 'description', 'product_truth'] as $field) {
+            if (isset($page[$field])) {
+                $page[$field] = is_array($page[$field]) ? $this->scrub($page[$field], $excluded) : $this->scrub([$page[$field]], $excluded)[0];
             }
         }
         unset($page['team_knowledge']);
@@ -231,6 +217,41 @@ class ProductKnowledge
         }
 
         return [$subject, $page];
+    }
+
+    /**
+     * Literal values of excluded facts, for removing them from text a generator sees or a version keeps.
+     *
+     * @return list<string>
+     */
+    public function excludedValues(Product $product, array $truth = []): array
+    {
+        $values = [];
+        foreach ($product->facts()->where('status', 'excluded')->get() as $fact) {
+            $column = self::FACTS[$fact->key]['product'] ?? null;
+            $values[] = $fact->source_value;
+            $values[] = $fact->confirmed_value;
+            $values[] = $column && $column !== 'name' ? $product->getOriginal($column) : null;
+            $raw = $truth[$fact->key] ?? null;
+            $values[] = is_scalar($raw) && mb_strlen((string) $raw) >= 4 ? (string) $raw : null;
+        }
+
+        return array_values(array_unique(array_filter(array_map(fn ($value) => is_string($value) ? trim($value) : null, $values), fn ($value) => $value !== null && mb_strlen($value) >= 2)));
+    }
+
+    /** Remove the given literal values from every string in a nested array. */
+    public function scrub(array $data, array $values): array
+    {
+        if (! $values) {
+            return $data;
+        }
+        array_walk_recursive($data, function (&$value) use ($values) {
+            if (is_string($value)) {
+                $value = str_ireplace($values, '', $value);
+            }
+        });
+
+        return $data;
     }
 
     /** A short fingerprint of the confirmed knowledge, for generation cache keys. */

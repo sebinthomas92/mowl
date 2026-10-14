@@ -110,7 +110,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
 
             $job->update(['phase' => 'generating_pack']);
             if ($job->section) {
-                $baseContent = $job->campaignPack->versions()->where('version', $job->base_version)->value('content') ?? [];
+                $baseContent = $this->baseContent($job);
                 $page['regeneration_section'] = $job->section;
                 $page['current_content'] = $baseContent;
             }
@@ -164,7 +164,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 $nextVersion = ((int) $pack->versions()->max('version')) + 1;
                 $content = $job->section
                     ? $this->replaceSection(
-                        $pack->versions()->where('version', $job->base_version)->value('content') ?? [],
+                        $this->baseContent($job),
                         $result->content,
                         $job->section,
                     )
@@ -252,6 +252,18 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 ],
             );
         });
+    }
+
+    /** The version a section regeneration builds on, with facts excluded since then scrubbed out. */
+    private function baseContent(CampaignGenerationJob $job): array
+    {
+        $content = $job->campaignPack->versions()->where('version', $job->base_version)->value('content') ?? [];
+        if (! ProductKnowledge::available()) {
+            return $content;
+        }
+        $knowledge = app(ProductKnowledge::class);
+
+        return $knowledge->scrub($content, $knowledge->excludedValues($job->campaignPack->product, $job->sourceSnapshot?->extracted_truth ?? []));
     }
 
     private function replaceSection(array $current, array $generated, string $section): array

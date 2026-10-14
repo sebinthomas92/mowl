@@ -85,12 +85,12 @@ class ProductKnowledgeTest extends TestCase
         $this->assertSame('excluded', $facts['availability']->status);
         $this->assertSame('Desk Lamp', $product->fresh()->name);
 
-        $truth = app(ProductKnowledge::class)->overlay($product, ['name' => 'Raw', 'price' => '70', 'currency' => 'USD', 'availability' => 'InStock']);
-        $this->assertSame('Desk Lamp', $truth['name']);
-        $this->assertSame('$54.00', $truth['price']);
-        $this->assertArrayNotHasKey('currency', $truth);
-        $this->assertArrayNotHasKey('availability', $truth);
-        $this->assertArrayNotHasKey('confirmed_knowledge', $truth);
+        // The page's own truth stays as the page said it; differing confirmed values travel with team provenance.
+        [$subject, $page] = app(ProductKnowledge::class)->prepare($product->fresh(), ['product_truth' => ['name' => 'Desk Lamp', 'price' => '70', 'currency' => 'USD', 'availability' => 'InStock']]);
+        $this->assertSame('70', $page['product_truth']['price']);
+        $this->assertArrayNotHasKey('availability', $page['product_truth']);
+        $this->assertSame(['price' => '$54.00', 'description' => 'A warm desk lamp.', 'audience' => 'Home office workers'], $page['team_knowledge'], 'values the page input does not carry are team-sourced');
+        $this->assertSame('$54.00', $subject->price);
 
         $hub->call('restoreFact', 'availability');
         $this->assertSame('ok', $product->facts()->where('key', 'availability')->value('status'));
@@ -120,7 +120,7 @@ class ProductKnowledgeTest extends TestCase
         $this->assertArrayNotHasKey('description', $page);
         $this->assertStringNotContainsString('54', $page['content']);
         $this->assertStringNotContainsString('warm desk lamp', $page['content']);
-        $this->assertSame(['audience' => 'Home office workers'], $page['team_knowledge']);
+        $this->assertSame(['availability' => 'In Stock', 'audience' => 'Home office workers'], $page['team_knowledge']);
 
         $result = app(MockCampaignPackGenerator::class)->generate($subject, $product->sourceSnapshots()->first(), $page);
         $this->assertSame('Price not supplied', data_get($result->content, 'product_truth.price'));

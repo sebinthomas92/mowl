@@ -7,6 +7,7 @@ use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
 use App\Models\Workspace;
 use App\Services\CampaignGeneratorManager;
+use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
 use App\Services\ProviderCostCalculator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -158,6 +159,25 @@ class CampaignGenerationJobTest extends TestCase
         $this->assertNotSame($originalTitle, $updated->versions()->where('version', 2)->value('content')['ranked_angles'][0]['title']);
         $this->assertSame(49, $workspace->creditBalance());
         $this->assertSame('completed', $regeneration->fresh()->status);
+    }
+
+    public function test_excluding_a_fact_keeps_it_out_of_a_section_regeneration(): void
+    {
+        [$workspace, $product, , $pack, $job] = $this->generationFixture();
+        Http::fake(['93.184.216.34/*' => Http::response($this->productHtml(), 200, ['Content-Type' => 'text/html'])]);
+        (new GenerateCampaignPack($job->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
+        $this->assertStringContainsString('$89', json_encode($pack->fresh()->versions()->where('version', 1)->value('content')));
+
+        $knowledge = app(ProductKnowledge::class);
+        $knowledge->exclude($knowledge->facts($product)->firstWhere('key', 'price'));
+        $regeneration = CampaignGenerationJob::create([
+            'workspace_id' => $workspace->id, 'campaign_pack_id' => $pack->id, 'source_snapshot_id' => $pack->source_snapshot_id,
+            'section' => 'ranked_angles', 'base_version' => 1, 'credit_cost' => 0,
+        ]);
+        (new GenerateCampaignPack($regeneration->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
+
+        $this->assertStringNotContainsString('$89', json_encode($pack->fresh()->versions()->where('version', 2)->value('content')));
+        $this->assertSame('$89', $product->fresh()->price, 'excluding a fact never deletes the stored value');
     }
 
     private function generationFixture(): array

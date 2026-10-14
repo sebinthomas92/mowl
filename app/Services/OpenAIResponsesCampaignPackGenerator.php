@@ -197,6 +197,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             $page['content'] ?? '',
             json_encode($page['product_truth'] ?? []),
         ]));
+        $teamText = $this->normalize(implode("\n", array_map('strval', $page['team_knowledge'] ?? [])));
         $flaggedClaims = collect($flags)->pluck('claim')->map(fn ($claim) => $this->normalize((string) $claim));
         $linkedClaims = [];
 
@@ -216,6 +217,13 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             }
 
             $excerpt = $this->normalize((string) ($reference['excerpt'] ?? ''));
+            // Facts the agency team confirmed on the product's Knowledge tab carry their own provenance.
+            if (($reference['source'] ?? null) === 'team_confirmed' && ! empty($page['team_knowledge'])
+                && in_array($status, ['directly_supported', 'supported_paraphrased'], true) && $excerpt !== '' && str_contains($teamText, $excerpt)) {
+                $linkedClaims[(string) ($reference['id'] ?? '')] = $claim;
+
+                continue;
+            }
             if (! in_array($status, ['directly_supported', 'supported_paraphrased'], true) || ! in_array($reference['source'] ?? null, $allowedSources, true) || $excerpt === '' || ! str_contains($sourceText, $excerpt)) {
                 throw new OpenAIResponseException('openai_invalid_evidence', 'OpenAI returned evidence that is not traceable to the supplied source.', true);
             }

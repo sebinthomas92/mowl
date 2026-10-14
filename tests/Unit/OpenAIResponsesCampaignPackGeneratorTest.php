@@ -183,6 +183,32 @@ class OpenAIResponsesCampaignPackGeneratorTest extends TestCase
         $this->generate();
     }
 
+    public function test_team_confirmed_evidence_is_accepted_only_when_it_quotes_team_knowledge(): void
+    {
+        $this->configureGenerator();
+        config()->set('campaigns.openai.retry_attempts', 1);
+        $output = $this->campaignOutput();
+        $output['evidence'][0]['source'] = 'team_confirmed';
+        $output['evidence'][0]['excerpt'] = 'Home office workers';
+        Http::fake(['api.openai.com/v1/responses' => Http::response($this->responsePayload($output))]);
+        $page = ['description' => 'Everyday tote', 'content' => 'A roomy canvas tote.', 'product_truth' => ['name' => 'Canvas Tote']];
+
+        $result = app(OpenAIResponsesCampaignPackGenerator::class)->generate(
+            new Product(['name' => 'Canvas Tote', 'price' => '$89']),
+            new SourceSnapshot(['url' => 'https://example.com/tote']),
+            $page + ['team_knowledge' => ['audience' => 'Home office workers']],
+        );
+        $this->assertSame('team_confirmed', $result->evidence[0]['source']);
+        Http::assertSent(fn (Request $request) => str_contains(json_encode($request->data()), 'TEAM-CONFIRMED FACTS'));
+
+        $this->expectException(OpenAIResponseException::class);
+        app(OpenAIResponsesCampaignPackGenerator::class)->generate(
+            new Product(['name' => 'Canvas Tote', 'price' => '$89']),
+            new SourceSnapshot(['url' => 'https://example.com/tote']),
+            $page,
+        );
+    }
+
     private function configureGenerator(): void
     {
         config()->set('services.openai.api_key', 'test-key');
