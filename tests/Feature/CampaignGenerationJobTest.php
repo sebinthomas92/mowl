@@ -166,21 +166,29 @@ class CampaignGenerationJobTest extends TestCase
     {
         [$workspace, $product, , $pack, $job] = $this->generationFixture();
         Http::fake(['93.184.216.34/*' => Http::response($this->productHtml(), 200, ['Content-Type' => 'text/html'])]);
-        (new GenerateCampaignPack($job->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
-        $this->assertStringContainsString('$89', json_encode($pack->fresh()->versions()->where('version', 1)->value('content')));
-
-        // The price changes after v1 and is then excluded: v1's older $89 must still be scrubbed.
         $knowledge = app(ProductKnowledge::class);
+        $editor = User::factory()->create();
+        $knowledge->confirm($knowledge->facts($product)->firstWhere('key', 'audience'), 'Home office workers', $editor);
+        (new GenerateCampaignPack($job->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
+        $v1 = json_encode($pack->fresh()->versions()->where('version', 1)->value('content'));
+        $this->assertStringContainsString('$89', $v1);
+        $this->assertStringContainsString('Home office workers', $v1);
+
+        // Price changes after v1 and is then excluded, and a team fact is excluded too: none of v1's values may survive.
         $price = $knowledge->facts($product)->firstWhere('key', 'price');
-        $knowledge->confirm($price, '$99', User::factory()->create());
+        $knowledge->confirm($price, '$99', $editor);
         $knowledge->exclude($price->fresh());
+        $knowledge->exclude($knowledge->facts($product)->firstWhere('key', 'audience'));
         $regeneration = CampaignGenerationJob::create([
             'workspace_id' => $workspace->id, 'campaign_pack_id' => $pack->id, 'source_snapshot_id' => $pack->source_snapshot_id,
             'section' => 'ranked_angles', 'base_version' => 1, 'credit_cost' => 0,
         ]);
         (new GenerateCampaignPack($regeneration->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
 
-        $this->assertStringNotContainsString('$89', json_encode($pack->fresh()->versions()->where('version', 2)->value('content')));
+        $v2 = json_encode($pack->fresh()->versions()->where('version', 2)->value('content'));
+        $this->assertStringNotContainsString('$89', $v2);
+        $this->assertStringNotContainsString('$99', $v2);
+        $this->assertStringNotContainsString('Home office workers', $v2);
         $this->assertSame('$99', $product->fresh()->price, 'excluding a fact never deletes the stored value');
     }
 
