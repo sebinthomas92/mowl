@@ -11,7 +11,7 @@
             <nav class="tabs" aria-label="Product sections">
                 @foreach($tabs as $key => $label)
                     <a href="{{ route('products.show', [$product, 'tab' => $key]) }}" wire:navigate @class(['cur' => $tab === $key]) @if($tab === $key) aria-current="page" @endif>
-                        {{ $label }}@if($key === 'packs' && $packs->isNotEmpty()) <span class="num">· {{ $packs->count() }}</span>@endif
+                        {{ $label }}@if($key === 'packs' && $packs->isNotEmpty()) <span class="num">· {{ $packs->count() }}</span>@elseif($key === 'campaigns' && $campaigns?->isNotEmpty()) <span class="num">· {{ $campaigns->count() }}</span>@endif
                     </a>
                 @endforeach
             </nav>
@@ -35,6 +35,14 @@
                         <livewire:product-pages :product-id="$product->id" :key="'pages-'.$product->id" />
                     @else
                         <div class="empty"><strong>Pages turn on after the next database update</strong><span class="small muted">Approved content stays in the Content tab until then.</span></div>
+                    @endif
+                    @break
+                @case('campaigns')
+                @case('results')
+                    @if(\App\Services\Campaigns\CampaignPlanner::available())
+                        <livewire:product-campaigns :product-id="$product->id" :mode="$tab" :key="$tab.'-'.$product->id" />
+                    @else
+                        <div class="empty"><strong>Campaigns turn on after the next database update</strong><span class="small muted">Approved content and pages keep working in the meantime.</span></div>
                     @endif
                     @break
                 @case('hub')

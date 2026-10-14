@@ -12,6 +12,7 @@
     $navLink('campaign-packs.index', 'campaign-packs.*', 'Launch packs', 'stack-2', true),
     $navLink('brands.index', 'brands.*', 'Brands', 'building-store'),
     $navLink('library.index', 'library.*', 'Library', 'layout-grid'),
+    $navLink('campaigns.index', 'campaigns.*', 'Campaigns', 'speakerphone'),
 ])
 @php($secondary = array_filter([
     $navLink('team.index', 'team.*', 'Team', 'users'),

@@ -12,6 +12,7 @@ use App\Livewire\Auth\Login;
 use App\Livewire\Auth\Register;
 use App\Livewire\BrandEditor;
 use App\Livewire\BrandIndex;
+use App\Livewire\CampaignIndex;
 use App\Livewire\CampaignPackIndex;
 use App\Livewire\CampaignWorkspace;
 use App\Livewire\ClientReview;
@@ -70,6 +71,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/products/{product}/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'creative'])->name('products.hub-creative');
     Route::get('/library', LibraryIndex::class)->name('library.index');
     Route::get('/review', ReviewQueue::class)->name('review.index');
+    Route::get('/campaigns', CampaignIndex::class)->name('campaigns.index');
     Route::get('/campaign-packs', CampaignPackIndex::class)->name('campaign-packs.index');
     Route::get('/campaign-packs/create', CampaignWorkspace::class)->name('campaign-packs.create');
     Route::get('/campaign-packs/{pack}', CampaignWorkspace::class)->name('campaign-packs.show');

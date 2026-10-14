@@ -128,6 +128,89 @@ class WooCommerceStore implements StoreClient
         throw new StoreException('The page address redirects too many times.');
     }
 
+    /**
+     * The store's product for a Marketing Owl product: by the slug of its product page first, then by name.
+     *
+     * @param  array<int, string>  $slugs
+     * @return array{id: int, name: string}|null
+     */
+    public function findProduct(StoreConnection $store, array $slugs, string $name): ?array
+    {
+        foreach (array_unique(array_filter($slugs)) as $slug) {
+            $match = $this->products($store, ['slug' => $slug]);
+            if (count($match) === 1) {
+                return $match[0];
+            }
+        }
+        $found = $this->products($store, ['search' => $name, 'per_page' => 10]);
+        $exact = array_values(array_filter($found, fn (array $product) => mb_strtolower(trim($product['name'])) === mb_strtolower(trim($name))));
+
+        return count($exact) === 1 ? $exact[0] : (count($found) === 1 ? $found[0] : null);
+    }
+
+    /**
+     * Paid orders containing the product, by the day they were placed (store time).
+     *
+     * @return array{days: array<string, array{orders: int, revenue: float}>, currency: ?string, truncated: bool}
+     */
+    public function productOrders(StoreConnection $store, int $productId, string $from, string $to): array
+    {
+        $days = [];
+        $currency = null;
+        $pages = (int) config('campaigns.store_order_pages', 20);
+        for ($page = 1; $page <= $pages; $page++) {
+            $url = $this->endpoint($store, 'wc/v3/orders', [
+                'product' => $productId, 'after' => $from.'T00:00:00', 'before' => $to.'T23:59:59',
+                'status' => 'processing,completed', 'per_page' => 100, 'page' => $page, 'orderby' => 'date', 'order' => 'asc',
+            ]);
+            $response = $this->send(fn (PendingRequest $http) => $this->authed($http, $store)->get($url), $url);
+            if (in_array($response->status(), [401, 403], true)) {
+                throw new StoreException('The store did not allow reading orders. Connect it with a WordPress user who can manage WooCommerce (Shop manager or Administrator).', auth: true);
+            }
+            if (! $response->successful() || ! is_array($response->json())) {
+                throw $this->failure($response, 'list orders');
+            }
+            foreach ($response->json() as $order) {
+                $lines = array_filter($order['line_items'] ?? [], fn ($line) => (int) ($line['product_id'] ?? 0) === $productId);
+                $date = substr((string) ($order['date_created'] ?? ''), 0, 10);
+                if (! $lines || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                    continue;
+                }
+                $orderCurrency = is_string($order['currency'] ?? null) ? strtoupper($order['currency']) : null;
+                if ($currency && $orderCurrency && $orderCurrency !== $currency) {
+                    throw new StoreException("These orders are in more than one currency ({$currency} and {$orderCurrency}). Import a CSV in one currency instead.");
+                }
+                $currency ??= $orderCurrency;
+                $days[$date] ??= ['orders' => 0, 'revenue' => 0.0];
+                $days[$date]['orders']++;
+                $days[$date]['revenue'] += array_sum(array_map(fn ($line) => (float) ($line['total'] ?? 0), $lines));
+            }
+            if (count($response->json()) < 100 || $page >= (int) ($response->header('X-WP-TotalPages') ?: $page)) {
+                return ['days' => $days, 'currency' => $currency, 'truncated' => false];
+            }
+        }
+
+        return ['days' => $days, 'currency' => $currency, 'truncated' => true];
+    }
+
+    /** @return array<int, array{id: int, name: string}> */
+    private function products(StoreConnection $store, array $query): array
+    {
+        $url = $this->endpoint($store, 'wc/v3/products', $query);
+        $response = $this->send(fn (PendingRequest $http) => $this->authed($http, $store)->get($url), $url);
+        if (in_array($response->status(), [401, 403], true)) {
+            throw new StoreException('The store did not allow reading products. Connect it with a WordPress user who can manage WooCommerce (Shop manager or Administrator).', auth: true);
+        }
+        if ($response->status() === 404) {
+            throw new StoreException('The store has no WooCommerce REST API. Check that WooCommerce is active.');
+        }
+        if (! $response->successful() || ! is_array($response->json())) {
+            throw $this->failure($response, 'list products');
+        }
+
+        return array_values(array_map(fn ($product) => ['id' => (int) $product['id'], 'name' => (string) ($product['name'] ?? '')], array_filter($response->json(), fn ($product) => is_array($product) && isset($product['id']))));
+    }
+
     /** One request to a public address, pinned to the IP that passed the address check. */
     private function send(callable $request, string $url): Response
     {
