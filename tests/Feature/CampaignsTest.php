@@ -199,6 +199,27 @@ class CampaignsTest extends TestCase
         $this->assertSame([100, 2, 2.0, true], [$summary['visits'], $summary['orders'], $summary['conversion'], $summary['mixed']]);
     }
 
+    public function test_imports_keep_to_the_campaign_dates_and_conversion_uses_shared_days(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $campaign = $this->launched($owner, $pack, ['ends_on' => '2026-10-22']);
+        $results = app(CampaignResults::class);
+
+        $orders = $results->importCsv($campaign, "Date,Orders,Revenue (EUR)\n2026-10-18,9,900\n2026-10-20,2,200\n2026-10-21,3,300\n2026-10-25,9,900\n", 'store.csv', $owner);
+        $this->assertSame(['2026-10-20', '2026-10-21', 5, 500.0, 'EUR'], [$orders->window_start->format('Y-m-d'), $orders->window_end->format('Y-m-d'), $orders->orders, $orders->revenue, $orders->currency]);
+
+        $results->importCsv($campaign, "Date,Sessions\n2026-10-21,100\n2026-10-22,400\n", 'ga.csv', $owner);
+        $summary = $results->summary($campaign->fresh());
+        $this->assertSame(3.0, $summary['conversion'], 'Only 21 Oct is in both imports: 3 orders from 100 visits.');
+
+        try {
+            $results->importCsv($campaign, "Date,Visits\n2026-09-01,10\n", 'old.csv', $owner);
+            $this->fail('Rows outside the campaign dates should be rejected.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('None of these days fall inside', $exception->errors()['csv'][0]);
+        }
+    }
+
     public function test_campaigns_stay_inside_their_workspace(): void
     {
         [$owner, , $pack] = $this->fixture();

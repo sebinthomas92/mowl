@@ -176,7 +176,11 @@ class WooCommerceStore implements StoreClient
                 if (! $lines || ! preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
                     continue;
                 }
-                $currency ??= is_string($order['currency'] ?? null) ? strtoupper($order['currency']) : null;
+                $orderCurrency = is_string($order['currency'] ?? null) ? strtoupper($order['currency']) : null;
+                if ($currency && $orderCurrency && $orderCurrency !== $currency) {
+                    throw new StoreException("These orders are in more than one currency ({$currency} and {$orderCurrency}). Import a CSV in one currency instead.");
+                }
+                $currency ??= $orderCurrency;
                 $days[$date] ??= ['orders' => 0, 'revenue' => 0.0];
                 $days[$date]['orders']++;
                 $days[$date]['revenue'] += array_sum(array_map(fn ($line) => (float) ($line['total'] ?? 0), $lines));

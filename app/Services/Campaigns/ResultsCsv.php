@@ -41,8 +41,11 @@ class ResultsCsv
             throw $this->invalid('The file is empty.');
         }
         $delimiter = $this->delimiter($lines[0]);
-        $header = array_map(fn ($cell) => $this->normalize((string) $cell), str_getcsv($lines[0], $delimiter, '"', ''));
+        $rawHeader = str_getcsv($lines[0], $delimiter, '"', '');
+        $header = array_map(fn ($cell) => $this->normalize((string) $cell), $rawHeader);
         $columns = $this->columns($header);
+        // "Net sales (EUR)" names the currency in the heading rather than in each cell.
+        $headerCurrency = isset($columns['revenue']) ? $this->currency((string) $rawHeader[$columns['revenue']]) : null;
         if (! isset($columns['date'])) {
             throw $this->invalid('The first row needs a column called Date (or Day). Export one row per day.');
         }
@@ -85,11 +88,23 @@ class ResultsCsv
             }
             $daily[$date] = $day;
         }
+        $currency ??= $headerCurrency;
         if (count($daily) > self::MAX_DAYS) {
             throw $this->invalid('The file has more than '.self::MAX_DAYS.' days. Export the campaign window only.');
         }
         ksort($daily);
-        $daily = array_values($daily);
+        $daily = array_map(fn (array $day) => ['revenue' => $day['revenue'] === null ? null : round($day['revenue'], 2)] + $day, array_values($daily));
+
+        return self::summarize($daily) + ['currency' => $currency];
+    }
+
+    /**
+     * Totals and window of daily rows; null for a metric no row reports.
+     *
+     * @return array{daily: array, visits: ?int, orders: ?int, revenue: ?float, start: string, end: string}
+     */
+    public static function summarize(array $daily): array
+    {
         $total = function (string $metric) use ($daily) {
             $values = array_filter(array_column($daily, $metric), fn ($value) => $value !== null);
 
@@ -98,11 +113,10 @@ class ResultsCsv
         $revenue = $total('revenue');
 
         return [
-            'daily' => array_map(fn (array $day) => ['revenue' => $day['revenue'] === null ? null : round($day['revenue'], 2)] + $day, $daily),
+            'daily' => array_values($daily),
             'visits' => $total('visits'),
             'orders' => $total('orders'),
             'revenue' => $revenue === null ? null : round($revenue, 2),
-            'currency' => $currency,
             'start' => $daily[0]['date'],
             'end' => $daily[count($daily) - 1]['date'],
         ];

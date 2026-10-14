@@ -81,19 +81,17 @@ class CampaignPlanner
     /** Edit the plan. Only planned campaigns change; a launched one keeps the context it ran with. */
     public function update(Campaign $campaign, array $data): void
     {
-        $this->assertPlanned($campaign);
         if (array_key_exists('baseline', $data)) {
             $data['baseline_rate'] = self::rateIn($data['baseline']);
         }
-        $campaign->update($data);
+        $this->whilePlanned($campaign, fn (Campaign $locked) => $locked->update($data));
     }
 
     /** @param  array<int, int>  $itemIds */
     public function setDeliverables(Campaign $campaign, array $itemIds): void
     {
-        $this->assertPlanned($campaign);
         $ids = ContentItem::query()->where('product_id', $campaign->product_id)->whereIn('id', $itemIds)->pluck('id')->all();
-        DB::transaction(fn () => $this->writeDeliverables($campaign, array_values(array_filter($itemIds, fn ($id) => in_array((int) $id, $ids, true)))));
+        $this->whilePlanned($campaign, fn (Campaign $locked) => $this->writeDeliverables($locked, array_values(array_filter($itemIds, fn ($id) => in_array((int) $id, $ids, true)))));
     }
 
     /** @return array<int, array{key: string, ok: bool, label: string}> */
@@ -160,8 +158,7 @@ class CampaignPlanner
 
     public function delete(Campaign $campaign): void
     {
-        $this->assertPlanned($campaign);
-        $campaign->delete();
+        $this->whilePlanned($campaign, fn (Campaign $locked) => $locked->delete());
     }
 
     /** The newest approved version of a content item, or null when none is approved. */
@@ -220,10 +217,18 @@ class CampaignPlanner
         $campaign->refresh();
     }
 
-    private function assertPlanned(Campaign $campaign): void
+    /** Runs a plan change under a row lock, so a launch in another request can't slip in between. */
+    private function whilePlanned(Campaign $campaign, callable $change): void
     {
-        if (! $campaign->isPlanned()) {
-            throw ValidationException::withMessages(['launch' => 'A launched campaign keeps the plan it ran with. Plan a next experiment to change it.']);
+        DB::transaction(function () use ($campaign, $change) {
+            $locked = Campaign::query()->lockForUpdate()->findOrFail($campaign->id);
+            if (! $locked->isPlanned()) {
+                throw ValidationException::withMessages(['launch' => 'A launched campaign keeps the plan it ran with. Plan a next experiment to change it.']);
+            }
+            $change($locked);
+        });
+        if (Campaign::query()->whereKey($campaign->id)->exists()) {
+            $campaign->refresh();
         }
     }
 

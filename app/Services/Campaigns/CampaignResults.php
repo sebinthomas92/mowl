@@ -26,6 +26,14 @@ class CampaignResults
     {
         $this->assertLaunched($campaign);
         $parsed = $this->csv->parse($contents);
+        // Only days inside the campaign dates count; a month-long export would otherwise skew conversion.
+        $from = CarbonImmutable::parse($campaign->starts_on ?? $campaign->launched_at)->format('Y-m-d');
+        $to = $campaign->ends_on?->format('Y-m-d');
+        $inside = array_values(array_filter($parsed['daily'], fn (array $day) => $day['date'] >= $from && ($to === null || $day['date'] <= $to)));
+        if (! $inside) {
+            throw ValidationException::withMessages(['csv' => 'None of these days fall inside the campaign dates ('.CarbonImmutable::parse($from)->format('j M Y').($to ? ' to '.CarbonImmutable::parse($to)->format('j M Y') : ' onwards').').']);
+        }
+        $parsed = ResultsCsv::summarize($inside) + ['currency' => $parsed['currency']];
 
         $result = $campaign->results()->create([
             'workspace_id' => $campaign->workspace_id,
@@ -127,7 +135,17 @@ class CampaignResults
         $used = collect($from)->filter()->unique('id')->values();
         $visits = $from['visits']?->visits;
         $orders = $from['orders']?->orders;
-        $conversion = $visits && $orders !== null ? round($orders / $visits * 100, 2) : null;
+        $conversion = null;
+        if ($from['visits'] && $from['orders']) {
+            [$sessions, $sales] = [$visits, $orders];
+            if ($from['visits']->id !== $from['orders']->id) {
+                // Different imports: compare only the days both of them cover.
+                $ordersByDay = collect($from['orders']->daily)->filter(fn (array $day) => $day['orders'] !== null)->pluck('orders', 'date');
+                $common = collect($from['visits']->daily)->filter(fn (array $day) => $day['visits'] !== null && $ordersByDay->has($day['date']));
+                [$sessions, $sales] = [$common->sum('visits'), $common->sum(fn (array $day) => $ordersByDay[$day['date']])];
+            }
+            $conversion = $sessions > 0 ? round($sales / $sessions * 100, 2) : null;
+        }
         $start = $used->min(fn (CampaignResult $result) => $result->window_start->format('Y-m-d'));
         $end = $used->max(fn (CampaignResult $result) => $result->window_end->format('Y-m-d'));
         $seriesFrom = $from['visits'] ?? $from['orders'];
