@@ -20,6 +20,7 @@ use App\Services\CampaignPackSafetyValidator;
 use App\Services\ContentLibrary;
 use App\Services\ProductKnowledge;
 use App\Services\SectionRegenerator;
+use App\Support\Membership;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
@@ -28,6 +29,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url as QueryParameter;
 use Livewire\Component;
 use Livewire\WithFileUploads;
@@ -72,6 +74,7 @@ class CampaignWorkspace extends Component
     #[QueryParameter(as: 'product')]
     public ?int $productId = null;
 
+    #[Locked]
     public ?int $packId = null;
 
     public string $commentBody = '';
@@ -92,7 +95,7 @@ class CampaignWorkspace extends Component
             return;
         }
 
-        abort_unless($pack->product->brand->workspace_id === $this->currentWorkspace()->id, 404);
+        abort_unless($this->scopedPacks()->whereKey($pack->id)->exists(), 404);
         $this->packId = $pack->id;
         $this->productId = $pack->product_id;
         $this->brandId = $pack->product->brand_id;
@@ -149,9 +152,7 @@ class CampaignWorkspace extends Component
                 throw ValidationException::withMessages(['sourceUrl' => 'This workspace does not have enough pack credits.']);
             }
 
-            $product = Product::query()
-                ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-                ->findOrFail($this->productId);
+            $product = $this->scopedProducts()->findOrFail($this->productId);
             $source = $product->sourceSnapshots()->latest()->first();
             if (! $source || ! in_array($data['sourceUrl'], [$source->url, $source->canonical_url], true)) {
                 $source = SourceSnapshot::create([
@@ -269,9 +270,9 @@ class CampaignWorkspace extends Component
 
     public function approveVersion(): void
     {
-        $this->ensureOwner();
+        $this->ensureReviewer();
         $version = $this->selectedPackVersion();
-        abort_unless(in_array($version->review_status, ['draft', 'review']), 422);
+        abort_unless(in_array($version->review_status, $this->decidableStatuses()), 422);
         app(CampaignPackSafetyValidator::class)->assertApprovable($version, $version->campaignPack->sourceSnapshot);
         $version->update([
             'review_status' => 'approved',
@@ -285,12 +286,18 @@ class CampaignWorkspace extends Component
         $this->reviewNote = '';
     }
 
+    /** Owners may decide on a draft directly; reviewers only decide on what was submitted. */
+    private function decidableStatuses(): array
+    {
+        return Membership::of(auth()->user(), $this->currentWorkspace())?->isOwner() ? ['draft', 'review'] : ['review'];
+    }
+
     public function rejectVersion(): void
     {
-        $this->ensureOwner();
+        $this->ensureReviewer();
         $data = $this->validate(['reviewNote' => ['required', 'string', 'max:2000']]);
         $version = $this->selectedPackVersion();
-        abort_unless(in_array($version->review_status, ['draft', 'review']), 422);
+        abort_unless(in_array($version->review_status, $this->decidableStatuses()), 422);
         $version->update(['review_status' => 'rejected', 'reviewed_by_user_id' => auth()->id(), 'reviewed_at' => now(), 'review_note' => $data['reviewNote']]);
         $version->campaignPack->update(['status' => 'rejected']);
         $this->audit('campaign_pack_version_rejected', $version, $data['reviewNote']);
@@ -317,7 +324,7 @@ class CampaignWorkspace extends Component
 
     public function approveSource(): void
     {
-        $this->ensureOwner();
+        $this->ensureReviewer();
         $pack = $this->workspacePack();
         $pack->sourceSnapshot->update(['approved_by_user_id' => auth()->id(), 'approved_at' => now()]);
         $this->audit('source_snapshot_approved', $pack->sourceSnapshot);
@@ -407,9 +414,7 @@ class CampaignWorkspace extends Component
 
     private function workspaceProduct(int $productId): Product
     {
-        $product = Product::query()
-            ->whereHas('brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id))
-            ->find($productId);
+        $product = $this->scopedProducts()->find($productId);
         abort_unless($product, 404);
 
         return $product;
@@ -417,8 +422,7 @@ class CampaignWorkspace extends Component
 
     private function workspacePack(): CampaignPack
     {
-        return CampaignPack::query()
-            ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id))
+        return $this->scopedPacks()
             ->with('sourceSnapshot')
             ->findOrFail($this->packId);
     }
@@ -433,7 +437,32 @@ class CampaignWorkspace extends Component
 
     private function ensureOwner(): void
     {
-        abort_unless($this->currentWorkspace()->users()->whereKey(auth()->id())->wherePivot('role', 'owner')->exists(), 403);
+        abort_unless($this->membership()?->isOwner(), 403);
+    }
+
+    private function ensureReviewer(): void
+    {
+        abort_unless($this->membership()?->canReview(), 403);
+    }
+
+    private function membership(): ?Membership
+    {
+        return Membership::of(auth()->user(), $this->currentWorkspace());
+    }
+
+    /** Products of the workspace within the member's brand scope. */
+    private function scopedProducts()
+    {
+        $query = Product::query()->whereHas('brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id));
+
+        return $this->membership()?->scopeBrands($query) ?? $query->whereRaw('1 = 0');
+    }
+
+    private function scopedPacks()
+    {
+        $query = CampaignPack::query()->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id));
+
+        return $this->membership()?->scopeThroughProduct($query) ?? $query->whereRaw('1 = 0');
     }
 
     private function audit(string $event, object $subject, ?string $reason = null, array $metadata = []): void
@@ -451,9 +480,9 @@ class CampaignWorkspace extends Component
             return;
         }
 
-        $recipients = $this->currentWorkspace()->users()->whereKeyNot(auth()->id());
+        $recipients = Membership::audience($this->currentWorkspace(), $version->campaignPack?->product?->brand_id)->whereKeyNot(auth()->id());
         if ($event === 'review_requested') {
-            $recipients->wherePivot('role', 'owner');
+            $recipients->wherePivotIn('role', ['owner', 'reviewer']);
         }
 
         Notification::send($recipients->get(), new CampaignPackActivity($event, $version, auth()->user()));
@@ -504,8 +533,7 @@ class CampaignWorkspace extends Component
             $packRelations[] = 'bannerGenerationBatches.creatives.campaignPackVersion';
         }
         $pack = $this->packId
-            ? CampaignPack::query()
-                ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
+            ? $this->scopedPacks()
                 ->with($packRelations)
                 ->findOrFail($this->packId)
             : null;
@@ -548,8 +576,7 @@ class CampaignWorkspace extends Component
 
         return view('livewire.campaign-workspace', [
             'workspace' => $workspace,
-            'products' => $pack ? collect() : Product::query()
-                ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
+            'products' => $pack ? collect() : $this->scopedProducts()
                 ->with(['brand', 'mediaAssets'])->orderBy('name')->get(),
             'briefProduct' => ! $pack && $this->productId ? $this->workspaceProduct($this->productId)->load('brand') : null,
             'contentItems' => $pack && ContentLibrary::available() ? $pack->contentItems()->with('latestVersion')->orderBy('id')->get() : null,

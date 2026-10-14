@@ -11,7 +11,8 @@
                     <h1 class="display">Brands</h1>
                     <p class="muted">Voice, palette and audience flow into every product of a brand. <span class="num">{{ $brands->count() }} of {{ $brandLimit }}</span> brands used.</p>
                 </div>
-                @if($limitReached)
+                @if(! $canCreateBrands)
+                @elseif($limitReached)
                     <span class="pill ghost" aria-disabled="true" title="This workspace has reached its brand limit">Brand limit reached</span>
                 @else
                     <a class="pill pri" href="{{ route('brands.create') }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> New brand</a>
@@ -24,7 +25,7 @@
                 <div class="empty">
                     <strong class="medium">No brands yet</strong>
                     <span class="muted small">A brand holds the voice, audience and palette its products share. Add one, then add its products.</span>
-                    <a class="pill pri sm" href="{{ route('brands.create') }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> New brand</a>
+                    @if($canCreateBrands)<a class="pill pri sm" href="{{ route('brands.create') }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> New brand</a>@endif
                 </div>
             @else
                 <div class="grid">
@@ -32,7 +33,7 @@
                         <section class="card col c6 brand-card" wire:key="brand-{{ $brand->id }}">
                             <div class="row">
                                 <h2 class="display grow">{{ $brand->name }}</h2>
-                                <a class="pill ghost sm" href="{{ route('brands.edit', $brand) }}" wire:navigate aria-label="Edit {{ $brand->name }}"><i class="ti ti-pencil" aria-hidden="true"></i> Edit</a>
+                                @if($canCreate)<a class="pill ghost sm" href="{{ route('brands.edit', $brand) }}" wire:navigate aria-label="Edit {{ $brand->name }}"><i class="ti ti-pencil" aria-hidden="true"></i> Edit</a>@endif
                             </div>
                             <div>
                                 @if($profileAvailable)
@@ -52,7 +53,7 @@
                             </div>
                             <div class="row">
                                 <a class="pill ghost sm" href="{{ route('products.index', ['brand' => $brand->id]) }}" wire:navigate>View products</a>
-                                <a class="linkbtn" href="{{ route('products.create', ['brand' => $brand->id]) }}" wire:navigate>Add a product</a>
+                                @if($canCreate)<a class="linkbtn" href="{{ route('products.create', ['brand' => $brand->id]) }}" wire:navigate>Add a product</a>@endif
                             </div>
                         </section>
                     @endforeach

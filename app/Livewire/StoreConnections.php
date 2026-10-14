@@ -8,6 +8,7 @@ use App\Models\PublishAttempt;
 use App\Models\StoreConnection;
 use App\Services\Pages\StoreException;
 use App\Services\Pages\Stores\StoreClients;
+use App\Support\Membership;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -154,10 +155,15 @@ class StoreConnections extends Component
     public function render()
     {
         $workspace = $this->currentWorkspace();
+        // A brand-scoped member sees shared stores and their own brand's, never another brand's.
+        $membership = Membership::of(auth()->user(), $workspace);
+        $brandIds = $membership ? $membership->brandIds() : [];
+        $stores = StoreConnection::query()->where('workspace_id', $workspace->id)
+            ->when($brandIds !== null, fn ($query) => $query->where(fn ($query) => $query->whereNull('brand_id')->orWhereIn('brand_id', $brandIds)));
 
         return view('livewire.store-connections', [
-            'stores' => StoreConnection::query()->where('workspace_id', $workspace->id)->with('brand')->withCount('pages')->orderBy('name')->get(),
-            'brands' => $workspace->brands()->orderBy('name')->get(['id', 'name']),
+            'stores' => $stores->with('brand')->withCount('pages')->orderBy('name')->get(),
+            'brands' => $workspace->brands()->when($brandIds !== null, fn ($query) => $query->whereIn('id', $brandIds))->orderBy('name')->get(['id', 'name']),
             'isOwner' => $this->isOwner(),
         ]);
     }

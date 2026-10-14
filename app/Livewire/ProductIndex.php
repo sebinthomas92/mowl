@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
 use App\Models\Product;
+use App\Support\Membership;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -17,7 +18,8 @@ class ProductIndex extends Component
     public function render()
     {
         $workspace = $this->currentWorkspace();
-        $products = Product::query()
+        $membership = Membership::of(auth()->user(), $workspace);
+        $products = $membership->scopeBrands(Product::query())
             ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
             ->when($this->brand, fn ($query) => $query->where('brand_id', $this->brand))
             ->with(['brand', 'campaignPacks', 'sourceSnapshots'])
@@ -25,9 +27,10 @@ class ProductIndex extends Component
             ->latest()
             ->get();
 
-        $brands = $workspace->brands()->orderBy('name')->get(['id', 'name']);
+        $brands = $membership->scopeBrands($workspace->brands()->getQuery(), 'id')->orderBy('name')->get(['id', 'name']);
+        $canCreate = $membership->canCreate();
 
-        return view('livewire.product-index', compact('workspace', 'products', 'brands'))
+        return view('livewire.product-index', compact('workspace', 'products', 'brands', 'canCreate'))
             ->layout('components.layouts.app');
     }
 }

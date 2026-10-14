@@ -4,7 +4,8 @@
     $inReview = $contentItems !== null ? $contentItems->where('status', 'review')->count() : $packs->where('status', 'review')->count();
     $checkedAt = $source?->fetched_at ?? $source?->created_at;
     $stale = $checkedAt && $checkedAt->lt(now()->subDays(14));
-    $siblings = \App\Models\Product::query()
+    $heroMembership = \App\Support\Membership::of(auth()->user(), $workspace);
+    $siblings = $heroMembership->scopeBrands(\App\Models\Product::query())
         ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
         ->with('brand')->orderBy('name')->limit(30)->get();
 @endphp
@@ -52,7 +53,7 @@
                     <span wire:loading.remove wire:target="refreshSource">Refresh source</span><span wire:loading wire:target="refreshSource">Checking…</span>
                 </button>
             @endif
-            <a class="pill pri" href="{{ route('campaign-packs.create', ['product' => $product->id]) }}" wire:navigate>Create <i class="ti ti-arrow-right" aria-hidden="true"></i></a>
+            @if($canManage)<a class="pill pri" href="{{ route('campaign-packs.create', ['product' => $product->id]) }}" wire:navigate>Create <i class="ti ti-arrow-right" aria-hidden="true"></i></a>@endif
         </div>
     </div>
 </section>

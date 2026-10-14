@@ -8,6 +8,7 @@ use App\Models\CampaignPack;
 use App\Models\ContentItem;
 use App\Models\Product;
 use App\Services\ContentLibrary;
+use App\Support\Membership;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Component;
 
@@ -24,28 +25,29 @@ class GlobalSearch extends Component
 
         if (mb_strlen($term) >= 2) {
             $workspace = $this->currentWorkspace();
+            $membership = Membership::of(auth()->user(), $workspace);
             $like = '%'.addcslashes(mb_strtolower($term), '%_\\').'%';
             $matches = fn (Builder $query, string $column) => $query->whereRaw("lower({$column}) like ? escape '\\'", [$like]);
 
             $results = [
-                'Products' => Product::query()
+                'Products' => $membership->scopeBrands(Product::query())
                     ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
                     ->where(fn ($query) => $matches($query, 'products.name'))
                     ->with('brand')->orderBy('name')->limit(5)->get()
                     ->map(fn (Product $product) => ['label' => $product->name, 'meta' => $product->brand->name, 'url' => route('products.show', $product), 'icon' => 'package']),
-                'Brands' => Brand::query()
+                'Brands' => $membership->scopeBrands(Brand::query(), 'id')
                     ->where('workspace_id', $workspace->id)
                     ->where(fn ($query) => $matches($query, 'brands.name'))
                     ->withCount('products')->orderBy('name')->limit(5)->get()
                     ->map(fn (Brand $brand) => ['label' => $brand->name, 'meta' => trans_choice(':count product|:count products', $brand->products_count), 'url' => route('brands.index'), 'icon' => 'building-store']),
-                'Launch packs' => CampaignPack::query()
+                'Launch packs' => $membership->scopeThroughProduct(CampaignPack::query())
                     ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
                     ->where(fn ($query) => $matches($query, 'campaign_packs.name'))
                     ->with('product')->latest()->limit(5)->get()
                     ->map(fn (CampaignPack $pack) => ['label' => $pack->name ?: $pack->product->name, 'meta' => str($pack->status)->title(), 'url' => route('campaign-packs.show', $pack), 'icon' => 'stack-2']),
             ];
             if (ContentLibrary::available()) {
-                $results['Content'] = ContentItem::query()
+                $results['Content'] = $membership->scopeThroughProduct(ContentItem::query())
                     ->where('workspace_id', $workspace->id)
                     ->where(fn ($query) => $matches($query, 'content_items.title'))
                     ->with('product')->latest('updated_at')->limit(5)->get()

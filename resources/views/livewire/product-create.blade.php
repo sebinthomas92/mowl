@@ -81,7 +81,7 @@
                                     @foreach($brands as $option)
                                         <option value="{{ $option->id }}">{{ $option->name }}</option>
                                     @endforeach
-                                    <option value="new" @disabled($brandLimitReached)>New brand…{{ $brandLimitReached ? ' (limit reached)' : '' }}</option>
+                                    @if($canCreateBrands)<option value="new" @disabled($brandLimitReached)>New brand…{{ $brandLimitReached ? ' (limit reached)' : '' }}</option>@endif
                                 </select>
                                 @error('brandId')<span class="err" role="alert">{{ $message }}</span>@enderror
                             </div>

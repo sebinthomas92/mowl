@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\Membership;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -18,7 +19,7 @@ class Workspace extends Model
 
     public function users(): BelongsToMany
     {
-        return $this->belongsToMany(User::class, 'workspace_user')->withPivot('role')->withTimestamps();
+        return $this->belongsToMany(User::class, 'workspace_user')->withPivot(Membership::pivotColumns())->withTimestamps();
     }
 
     public function credits(): HasMany

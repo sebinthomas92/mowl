@@ -13,6 +13,7 @@ use App\Services\Pages\PageBuilder;
 use App\Services\ProductHubContentAdapter;
 use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
+use App\Support\Membership;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -271,7 +272,7 @@ class ProductHub extends Component
 
     private function canManage(): bool
     {
-        return $this->product->brand->workspace->users()->whereKey(auth()->id())->exists();
+        return (bool) Membership::of(auth()->user(), $this->product->brand->workspace_id)?->canCreate();
     }
 
     private function authorizeManager(): void

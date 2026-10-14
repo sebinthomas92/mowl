@@ -5,6 +5,7 @@ namespace App\Livewire;
 use App\Concerns\InteractsWithWorkspace;
 use App\Models\ContentItem;
 use App\Services\ContentLibrary;
+use App\Support\Membership;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -34,7 +35,7 @@ class ReviewQueue extends Component
 
     public function approve(ContentLibrary $library): void
     {
-        $this->ensureOwner();
+        $this->ensureReviewer();
         $version = $this->item()->latestVersion;
         $library->approve($version, auth()->user(), null, $this->comment ?: null);
         $this->flash = "{$version->item->title} v{$version->version} approved. Nothing was published.";
@@ -44,7 +45,7 @@ class ReviewQueue extends Component
 
     public function requestChanges(ContentLibrary $library): void
     {
-        $this->ensureOwner();
+        $this->ensureReviewer();
         $this->validate(['comment' => ['required', 'string', 'max:2000']], ['comment.required' => 'Say what should change so the author can act on it.']);
         $version = $this->item()->latestVersion;
         $library->requestChanges($version, auth()->user(), $this->comment);
@@ -55,7 +56,7 @@ class ReviewQueue extends Component
 
     public function approveSource(): void
     {
-        $this->ensureOwner();
+        $this->ensureReviewer();
         $source = $this->item()->campaignPack?->sourceSnapshot;
         abort_unless($source, 422);
         $source->update(['approved_by_user_id' => auth()->id(), 'approved_at' => now()]);
@@ -67,8 +68,7 @@ class ReviewQueue extends Component
     public function render(ContentLibrary $library)
     {
         $workspace = $this->currentWorkspace();
-        $queue = ContentItem::query()
-            ->where('workspace_id', $workspace->id)
+        $queue = $this->scoped()
             ->where('status', 'review')
             ->with(['latestVersion', 'product.brand', 'campaignPack'])
             ->orderBy('updated_at')
@@ -88,14 +88,17 @@ class ReviewQueue extends Component
             'versions' => $versions,
             'checks' => $current ? $library->checks($current) : [],
             'sourceNeedsApproval' => $source && ! $source->approved_at,
-            'recent' => ContentItem::query()->where('workspace_id', $workspace->id)->whereIn('status', ['approved', 'changes'])->latest('updated_at')->limit(5)->get(),
-            'isOwner' => $this->isOwner(),
+            'recent' => $this->scoped()->whereIn('status', ['approved', 'changes'])->latest('updated_at')->limit(5)->get(),
+            'canReview' => (bool) $this->membership()?->canReview(),
+            'roleLabel' => $this->membership()?->roleLabel(),
         ])->layout('components.layouts.app');
     }
 
     private function item(): ContentItem
     {
-        $item = ContentItem::query()->where('workspace_id', $this->currentWorkspace()->id)->with(['latestVersion', 'campaignPack.sourceSnapshot'])->find($this->itemId ?? $this->firstInQueue());
+        // Only items in the queue: a stale or hand-edited ?item= never decides on a draft or on a different item than the one shown.
+        $item = $this->scoped()->where('status', 'review')->with(['latestVersion', 'campaignPack.sourceSnapshot'])->find($this->itemId ?? $this->firstInQueue())
+            ?? $this->scoped()->where('status', 'review')->with(['latestVersion', 'campaignPack.sourceSnapshot'])->find($this->firstInQueue());
         abort_unless($item && $item->latestVersion, 404);
 
         return $item;
@@ -103,16 +106,24 @@ class ReviewQueue extends Component
 
     private function firstInQueue(): ?int
     {
-        return ContentItem::query()->where('workspace_id', $this->currentWorkspace()->id)->where('status', 'review')->orderBy('updated_at')->value('id');
+        return $this->scoped()->where('status', 'review')->orderBy('updated_at')->value('id');
     }
 
-    private function isOwner(): bool
+    /** Content in the workspace, limited to the member's brand. */
+    private function scoped()
     {
-        return $this->currentWorkspace()->users()->whereKey(auth()->id())->wherePivot('role', 'owner')->exists();
+        $query = ContentItem::query()->where('workspace_id', $this->currentWorkspace()->id);
+
+        return $this->membership()?->scopeThroughProduct($query) ?? $query->whereRaw('1 = 0');
     }
 
-    private function ensureOwner(): void
+    private function membership(): ?Membership
     {
-        abort_unless($this->isOwner(), 403);
+        return Membership::of(auth()->user(), $this->currentWorkspace());
+    }
+
+    private function ensureReviewer(): void
+    {
+        abort_unless($this->membership()?->canReview(), 403);
     }
 }

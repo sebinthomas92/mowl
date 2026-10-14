@@ -9,6 +9,7 @@
         @if(!$pack)
             @php
                 $balance = $workspace->creditBalance();
+                $canSeeCosts = (bool) \App\Support\Membership::of(auth()->user(), $workspace)?->canSeeCosts();
             @endphp
             <div class="lib-page">
             @if(! $briefProduct)
@@ -81,10 +82,10 @@
                             <div class="kv"><span>Product</span><span>{{ $briefProduct->name }}</span></div>
                             <div class="kv"><span>Inputs used</span><span>offer · audience · product page · {{ $briefProduct->brand->name }} brand voice</span></div>
                             <div class="kv"><span>Outputs</span><span>7 items, then 3 banners</span></div>
-                            <div class="kv"><span>Estimated usage</span><span class="num"><strong class="medium">{{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</strong> of {{ $balance }} left</span></div>
+                            <div class="kv"><span>Estimated usage</span><span class="num"><strong class="medium">{{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</strong>@if($canSeeCosts) of {{ $balance }} left @endif</span></div>
                             <div class="kv"><span>Expected time</span><span>About a minute · you can leave</span></div>
                         </div>
-                        @if($over)<div class="banner bad">This run needs {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }} and {{ $balance }} {{ $balance === 1 ? 'is' : 'are' }} left. Choose standard quality or add credits.</div>@endif
+                        @if($over)<div class="banner bad">@if($canSeeCosts)This run needs {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }} and {{ $balance }} {{ $balance === 1 ? 'is' : 'are' }} left. Choose standard quality or add credits.@else The workspace does not have enough credits for this run. Choose standard quality or ask the owner to add credits.@endif</div>@endif
                         <button type="submit" class="pill pri block" wire:loading.attr="disabled" wire:target="generatePack" @disabled($over)>
                             <span wire:loading.remove wire:target="generatePack">Start run · {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</span><span wire:loading wire:target="generatePack">Starting…</span>
                         </button>
@@ -130,7 +131,11 @@
             @else
             @php
                 $content = $displayContent;
-                $isOwner = $workspace->users()->whereKey(auth()->id())->wherePivot('role', 'owner')->exists();
+                $membership = \App\Support\Membership::of(auth()->user(), $workspace);
+                $isOwner = (bool) $membership?->isOwner();
+                $canReview = (bool) $membership?->canReview();
+                $canCreate = (bool) $membership?->canCreate();
+                $canSeeCosts = (bool) $membership?->canSeeCosts();
             @endphp
             <div class="pack-page" id="packs" wire:poll.5s>
                 <header class="pack-toolbar">
@@ -144,7 +149,7 @@
 
                 <section class="product-hero">
                     <div class="product-art" aria-hidden="true"><div class="art-card"><span>CAMPAIGN</span><b>{{ strtoupper(substr($pack->product->name, 0, 2)) }}</b><i></i></div></div>
-                    <div><p class="pack-number">PACK / {{ str_pad($pack->id, 4, '0', STR_PAD_LEFT) }}</p><h1>{{ $pack->product->name }}</h1><p>{{ $pack->product->brand->name }} <i>•</i> {{ $pack->product->price ?: 'Price not supplied' }} <i>•</i> Launch pack v{{ $version->version }}</p><div class="approval-line"><span>{{ $version->review_status === 'approved' ? '✓' : '•' }}</span><strong>{{ str($version->review_status)->title() }}</strong><i></i><small>{{ $version->reviewed_at ? 'Reviewed '.$version->reviewed_at->format('M j, Y') : 'Generated '.$version->created_at->format('M j, Y') }}</small><i></i><small>${{ number_format($pack->estimated_cost, 3) }} tracked cost</small></div></div>
+                    <div><p class="pack-number">PACK / {{ str_pad($pack->id, 4, '0', STR_PAD_LEFT) }}</p><h1>{{ $pack->product->name }}</h1><p>{{ $pack->product->brand->name }} <i>•</i> {{ $pack->product->price ?: 'Price not supplied' }} <i>•</i> Launch pack v{{ $version->version }}</p><div class="approval-line"><span>{{ $version->review_status === 'approved' ? '✓' : '•' }}</span><strong>{{ str($version->review_status)->title() }}</strong><i></i><small>{{ $version->reviewed_at ? 'Reviewed '.$version->reviewed_at->format('M j, Y') : 'Generated '.$version->created_at->format('M j, Y') }}</small>@if($canSeeCosts)<i></i><small>${{ number_format($pack->estimated_cost, 3) }} tracked cost</small>@endif</div></div>
                 </section>
 
                 @php
@@ -215,8 +220,8 @@
                 <section class="review-panel">
                     <div><p class="section-label">HUMAN REVIEW</p><h2>{{ $version->review_status === 'approved' ? 'This version is locked.' : 'Review before media buyers use this version.' }}</h2><p>{{ $version->review_note ?: 'Draft changes remain separate from approved versions.' }}</p></div>
                     <div class="review-actions">
-                        @if($version->review_status === 'draft')<button type="button" class="secondary-button" wire:click="requestReview">Send to review</button>@endif
-                        @if($isOwner && in_array($version->review_status, ['draft', 'review']))
+                        @if($canCreate && $version->review_status === 'draft')<button type="button" class="secondary-button" wire:click="requestReview">Send to review</button>@endif
+                        @if($canReview && in_array($version->review_status, ['draft', 'review']))
                             <input wire:model="reviewNote" aria-label="Approval or rejection note" placeholder="Review note (required to reject)">
                             <button type="button" class="secondary-button" wire:click="rejectVersion">Reject</button><button type="button" class="copy-pack" wire:click="approveVersion" @disabled($qaIssues)>{{ $qaIssues ? 'Approval blocked' : 'Approve & lock' }}</button>
                         @endif
@@ -229,7 +234,7 @@
 
                 <section class="review-panel compact-review">
                     <div><p class="section-label">SOURCE TRUTH</p><h3>{{ $pack->sourceSnapshot->approved_at ? 'Source approved '.$pack->sourceSnapshot->approved_at->format('M j, Y') : 'Source needs an owner approval' }}</h3><p>{{ $pack->sourceSnapshot->url }} · {{ $pack->product->sourceSnapshots()->count() }} source snapshots retained</p></div>
-                    @if($isOwner && ! $pack->sourceSnapshot->approved_at)<button type="button" class="secondary-button" wire:click="approveSource">Approve source truth</button>@endif
+                    @if($canReview && ! $pack->sourceSnapshot->approved_at)<button type="button" class="secondary-button" wire:click="approveSource">Approve source truth</button>@endif
                 </section>
 
                 @if($version->review_status === 'approved')

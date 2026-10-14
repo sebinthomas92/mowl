@@ -72,8 +72,8 @@ class Register extends Component
             if ($invitation) {
                 $lockedInvitation = WorkspaceInvitation::query()->lockForUpdate()->findOrFail($invitation->id);
                 abort_unless($lockedInvitation->isOpen(), 410);
-                abort_if($lockedInvitation->workspace->users()->count() >= config('campaigns.seat_limit'), 409);
-                $lockedInvitation->workspace->users()->attach($user, ['role' => $lockedInvitation->role]);
+                abort_if($lockedInvitation->role !== 'client' && $lockedInvitation->workspace->users()->wherePivot('role', '!=', 'client')->count() >= config('campaigns.seat_limit'), 409);
+                $lockedInvitation->workspace->users()->attach($user, $lockedInvitation->pivotAttributes());
                 $lockedInvitation->update(['accepted_at' => now()]);
             } else {
                 $workspace = Workspace::create(['name' => $data['workspaceName']]);
@@ -91,7 +91,7 @@ class Register extends Component
         Auth::login($user);
         session()->regenerate();
         session(['current_workspace_id' => $invitation?->workspace_id ?? $user->workspaces()->firstOrFail()->id]);
-        $this->redirect(route('campaign-packs.index'), navigate: true);
+        $this->redirect(route($invitation?->role === 'client' ? 'portal.index' : 'campaign-packs.index'), navigate: true);
     }
 
     public function render()

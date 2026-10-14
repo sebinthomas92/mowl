@@ -12,6 +12,7 @@ use App\Notifications\CampaignPackActivity;
 use App\Services\ContentLibrary;
 use App\Services\MockCampaignPackGenerator;
 use App\Services\ProductKnowledge;
+use App\Support\Membership;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -147,6 +148,22 @@ class DemoSeeder extends Seeder
         }
 
         $this->seedKnowledgeConflict($workspace);
+        $this->seedRoles($workspace);
+    }
+
+    /** A brand-scoped reviewer and a client account for Northline Goods, so every role can be tried locally. */
+    private function seedRoles(Workspace $workspace): void
+    {
+        $northline = $workspace->brands()->where('name', 'Northline Goods')->first();
+        if (! $northline || ! Membership::scopesAvailable()) {
+            return;
+        }
+        foreach ([['rhea@marketingowl.test', 'Rhea Kapoor', 'reviewer'], ['client@marketingowl.test', 'Mo Okafor', 'client']] as [$email, $name, $role]) {
+            $user = User::firstOrCreate(['email' => $email], ['name' => $name, 'password' => 'password']);
+            if (! $workspace->users()->whereKey($user->id)->exists()) {
+                $workspace->users()->attach($user, ['role' => $role, 'brand_id' => $northline->id]);
+            }
+        }
     }
 
     /** Give the first product a refreshed source whose price changed, so Knowledge shows a decision to make. */

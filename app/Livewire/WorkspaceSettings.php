@@ -5,6 +5,7 @@ namespace App\Livewire;
 use App\Concerns\InteractsWithWorkspace;
 use App\Models\Workspace;
 use App\Models\WorkspaceAuditEvent;
+use App\Support\Membership;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
 
@@ -67,6 +68,7 @@ class WorkspaceSettings extends Component
             'brandCount' => $workspace->brands()->count(),
             'creditBalance' => $workspace->creditBalance(),
             'billingConnected' => false,
+            'canSeeCosts' => (bool) Membership::of(auth()->user(), $workspace)?->canSeeCosts(),
         ])->layout('components.layouts.app');
     }
 }
