@@ -6,7 +6,7 @@
     </section>
     <section class="auth-form-panel">
         <form wire:submit="login" class="auth-form">
-            <p class="kicker">WELCOME BACK</p><h2>Enter the workspace.</h2><p>Continue building approved campaign packs.</p>
+            <p class="kicker">WELCOME BACK</p><h2>Enter the workspace.</h2><p>Continue building approved launch packs.</p>
             <label>Email address<input wire:model="email" type="email" autocomplete="email" autofocus>@error('email')<small class="error">{{ $message }}</small>@enderror</label>
             <label>Password<input wire:model="password" type="password" autocomplete="current-password">@error('password')<small class="error">{{ $message }}</small>@enderror</label>
             <label class="remember-row"><input wire:model="remember" type="checkbox"> Keep me signed in</label>

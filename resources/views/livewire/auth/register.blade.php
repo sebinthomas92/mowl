@@ -1,7 +1,7 @@
 <main class="auth-shell">
     <section class="auth-brand-panel">
         <div class="auth-lockup"><img src="/marketing-owl-logo.png" alt=""><span>Marketing<br>Owl</span></div>
-        <div class="auth-promise"><p>PAID CONCIERGE BETA</p><h1>One home for every product truth and campaign pack.</h1><span>Built for ecommerce performance agencies.</span></div>
+        <div class="auth-promise"><p>PAID CONCIERGE BETA</p><h1>One home for every product truth and launch pack.</h1><span>Built for ecommerce performance agencies.</span></div>
         <div class="auth-standard"><b>$129</b><span>per month<br>5 seats · 10 brands</span></div>
     </section>
     <section class="auth-form-panel">

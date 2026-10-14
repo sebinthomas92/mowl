@@ -1,8 +1,9 @@
-<div class="app-shell" x-data="{ mobileNav: false }">
+<div class="app-shell">
     <a class="skip-link" href="#main-content">Skip to workspace settings</a>
     @include('partials.workspace-sidebar')
-    <main class="main-panel" id="main-content">
-        <header class="mobile-header"><button type="button" @click="mobileNav = !mobileNav" :aria-expanded="mobileNav.toString()" aria-label="Toggle navigation">☰</button><div><img src="/marketing-owl-logo.png" alt=""> Marketing Owl</div><span>Beta</span></header>
+    <div class="app-main">
+        @include('partials.top-bar')
+        <main id="main-content">
         <section class="library-page settings-page">
             <header class="library-header"><div><p class="kicker">WORKSPACE CONTROL</p><h1>Settings</h1><p>Keep ownership, plan limits, and operating context clear for the people building campaigns.</p></div></header>
 
@@ -35,5 +36,6 @@
                 </section>
             </div>
         </section>
-    </main>
+        </main>
+    </div>
 </div>
