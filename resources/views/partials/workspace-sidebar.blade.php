@@ -14,11 +14,13 @@
     $navLink('brands.index', 'brands.*', 'Brands', 'building-store'),
     $navLink('library.index', 'library.*', 'Library', 'layout-grid'),
     $navLink('campaigns.index', 'campaigns.*', 'Campaigns', 'speakerphone'),
+    $navLink('workflows.index', 'workflows.*', 'Workflows', 'sparkles'),
 ])
 @php($secondary = array_filter([
     $navLink('team.index', 'team.*', 'Team', 'users'),
     $sideMembership?->canSeeCosts() ? $navLink('usage.index', 'usage.*', 'Usage', 'chart-bar') : null,
     $navLink('workspace.settings', 'workspace.settings', 'Settings', 'settings'),
+    $navLink('help.index', 'help.*', 'Help', 'help-circle'),
     $isConcierge ? $navLink('concierge.index', 'concierge.*', 'Concierge', 'lifebuoy') : null,
 ]))
 <aside class="side" aria-label="Main navigation">
