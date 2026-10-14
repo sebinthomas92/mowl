@@ -11,7 +11,8 @@ class InboxDrawer extends Component
 
     public function open(string $id): void
     {
-        $notification = $this->notifications()->findOrFail($id);
+        $notification = $this->notifications()->find($id);
+        abort_unless($notification, 404);
         $notification->markAsRead();
 
         $this->redirect($notification->data['url'] ?? route('campaign-packs.index'), navigate: true);
