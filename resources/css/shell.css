@@ -92,18 +92,6 @@ details>summary::-webkit-details-marker{display:none}
 .note-ic{width:36px;height:36px;border-radius:50%;flex:none;display:inline-flex;align-items:center;justify-content:center;background:var(--neu-bg);color:var(--neu-fg);font-size:18px}
 .note-text{display:block;margin-bottom:2px}
 
-/* Product hub keeps its channel rail; the sidebar floats beside it. */
-.product-hub-shell .side{position:fixed;left:16px;top:16px;bottom:16px;max-height:none;z-index:26}
-@media(min-width:821px) and (max-width:1180px){
-    .product-hub-shell .side{width:64px;padding:16px 10px;align-items:center}
-    .product-hub-shell .side .side-label,.product-hub-shell .side .note,.product-hub-shell .side .menu{display:none}
-    .product-hub-shell .side .side-logo{padding:0 0 12px}
-    .product-hub-shell .side .ws-switch>summary{width:var(--touch);height:var(--touch);padding:0;justify-content:center}
-    .product-hub-shell .side nav a,.product-hub-shell .side nav a.sub{width:var(--touch);padding:0;justify-content:center}
-    .product-hub-shell .side .sep{margin:10px 0;width:100%}
-}
-@media(max-width:820px){.product-hub-shell .side{display:none}}
-
 @media(max-width:900px){
     .app-shell{flex-direction:column;align-items:stretch;padding:12px;gap:12px}
     .app-shell .side{position:static;width:auto;max-height:none;padding:14px;overflow:visible}

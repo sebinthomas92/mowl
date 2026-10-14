@@ -9,6 +9,7 @@ use App\Models\CampaignGenerationJob;
 use App\Models\ProcessingCacheEntry;
 use App\Services\CampaignGeneratorManager;
 use App\Services\ProductImageImporter;
+use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
 use App\Services\ProviderCostCalculator;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -67,6 +68,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
         if (! $job->section) {
             $job->campaignPack->update(['status' => 'processing']);
         }
+        $section = $this->sectionToRegenerate($job);
 
         try {
             $page = $fetcher->fetch($job->sourceSnapshot->url);
@@ -96,10 +98,21 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 ],
             );
 
+            // Confirmed knowledge wins over the raw page; a changed source becomes a conflict to review.
+            // Excluded facts are scrubbed from every generator input, including the product record.
+            $knowledge = '';
+            $subject = $job->campaignPack->product;
+            if (ProductKnowledge::available()) {
+                $facts = app(ProductKnowledge::class);
+                $facts->syncFromSource($subject, $job->sourceSnapshot->fresh());
+                [$subject, $page] = $facts->prepare($subject, $page);
+                $knowledge = $facts->fingerprint($subject);
+            }
+
             $job->update(['phase' => 'generating_pack']);
-            if ($job->section) {
-                $baseContent = $job->campaignPack->versions()->where('version', $job->base_version)->value('content') ?? [];
-                $page['regeneration_section'] = $job->section;
+            if ($section) {
+                $baseContent = $this->baseContent($job);
+                $page['regeneration_section'] = $section;
                 $page['current_content'] = $baseContent;
             }
             $cacheKey = hash('sha256', implode(':', [
@@ -108,7 +121,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                     $job->campaignPack->product->price,
                     $job->campaignPack->product->summary,
                 ])),
-                $provider, $model ?: 'none', $job->analysis_mode, $job->section ?: 'full', $job->base_version ?: 0,
+                $provider, $model ?: 'none', $job->analysis_mode, $section ?: 'full', $section ? ($job->base_version ?: 0) : 0, $knowledge,
             ]));
             $cached = ProcessingCacheEntry::where('cache_key', $cacheKey)
                 ->where(fn ($query) => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
@@ -123,7 +136,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                     model: $model,
                 );
             } else {
-                $result = $generators->driver()->generate($job->campaignPack->product, $job->sourceSnapshot, $page);
+                $result = $generators->driver()->generate($subject, $job->sourceSnapshot, $page);
                 ProcessingCacheEntry::create([
                     'cache_key' => $cacheKey,
                     'stage' => 'campaign_pack',
@@ -147,14 +160,14 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 ? 0.018
                 : $costs->calculate($result->model ?? '', $result->inputTokens, $result->cachedInputTokens, $result->outputTokens);
 
-            DB::transaction(function () use ($job, $result, $cost, $cached): void {
+            DB::transaction(function () use ($job, $result, $cost, $cached, $section): void {
                 $pack = $job->campaignPack()->lockForUpdate()->firstOrFail();
                 $nextVersion = ((int) $pack->versions()->max('version')) + 1;
-                $content = $job->section
+                $content = $section
                     ? $this->replaceSection(
-                        $pack->versions()->where('version', $job->base_version)->value('content') ?? [],
+                        $this->baseContent($job),
                         $result->content,
-                        $job->section,
+                        $section,
                     )
                     : $result->content;
                 $versionAttributes = [
@@ -240,6 +253,36 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 ],
             );
         });
+    }
+
+    /**
+     * The section to regenerate, or null for a full regeneration. A fact excluded after the base
+     * version was written may survive in that version in forms that cannot be scrubbed reliably,
+     * so the whole pack is regenerated instead of copying the other sections forward.
+     */
+    private function sectionToRegenerate(CampaignGenerationJob $job): ?string
+    {
+        if (! $job->section || ! ProductKnowledge::available()) {
+            return $job->section;
+        }
+        $baseWrittenAt = $job->campaignPack->versions()->where('version', $job->base_version)->value('created_at');
+        $excludedSince = $job->campaignPack->product->facts()->where('status', 'excluded')
+            ->when($baseWrittenAt, fn ($query) => $query->where('updated_at', '>=', $baseWrittenAt))
+            ->exists();
+
+        return $excludedSince ? null : $job->section;
+    }
+
+    /** The version a section regeneration builds on, with excluded facts' current values scrubbed out. */
+    private function baseContent(CampaignGenerationJob $job): array
+    {
+        $content = $job->campaignPack->versions()->where('version', $job->base_version)->value('content') ?? [];
+        if (! ProductKnowledge::available()) {
+            return $content;
+        }
+        $knowledge = app(ProductKnowledge::class);
+
+        return $knowledge->scrub($content, $knowledge->excludedValues($job->campaignPack->product, $job->sourceSnapshot?->extracted_truth ?? []));
     }
 
     private function replaceSection(array $current, array $generated, string $section): array

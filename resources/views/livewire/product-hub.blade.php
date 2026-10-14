@@ -1,15 +1,47 @@
 @php($isPublic = false)
 @php($shareToken = null)
-<div class="product-hub-shell" x-data="productHub()">
-    <a class="skip-link" href="#product-hub-content">Skip to product hub</a>
+<div class="app-shell">
+    <a class="skip-link" href="#main-content">Skip to product</a>
     @include('partials.workspace-sidebar')
-    @include('product-hubs.surface')
+    <div class="app-main">
+        @include('partials.top-bar')
+        <main id="main-content" class="product-page">
+            @include('product-hubs.hero')
+
+            <nav class="tabs" aria-label="Product sections">
+                @foreach($tabs as $key => $label)
+                    <a href="{{ route('products.show', [$product, 'tab' => $key]) }}" wire:navigate @class(['cur' => $tab === $key]) @if($tab === $key) aria-current="page" @endif>
+                        {{ $label }}@if($key === 'packs' && $packs->isNotEmpty()) <span class="num">· {{ $packs->count() }}</span>@endif
+                    </a>
+                @endforeach
+            </nav>
+
+            @if(session('knowledge-status'))<div class="banner ok" role="status"><i class="ti ti-circle-check" aria-hidden="true"></i><span>{{ session('knowledge-status') }}</span></div>@endif
+            @if(session('knowledge-error'))<div class="banner bad" role="alert"><i class="ti ti-alert-triangle" aria-hidden="true"></i><span>{{ session('knowledge-error') }}</span></div>@endif
+
+            @switch($tab)
+                @case('knowledge')
+                    @include('product-hubs.tab-knowledge')
+                    @break
+                @case('content')
+                    <div class="product-hub-shell hub-embed" x-data="productHub()">
+                        @include('product-hubs.surface')
+                    </div>
+                    @break
+                @case('packs')
+                    @include('product-hubs.tab-packs')
+                    @break
+                @default
+                    @include('product-hubs.tab-overview')
+            @endswitch
+        </main>
+    </div>
 </div>
 
 @script
 <script>
     Alpine.data('productHub', () => ({
-        section: 'google_ads', campaign: 'search', copied: null, mobileNav: false,
+        section: 'overview', campaign: 'search', copied: null, mobileNav: false,
         async copy(value, key) {
             await navigator.clipboard.writeText(value);
             this.copied = key;
