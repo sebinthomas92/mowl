@@ -9,6 +9,7 @@
         @if(!$pack)
             @php
                 $balance = $workspace->creditBalance();
+                $canSeeCosts = (bool) \App\Support\Membership::of(auth()->user(), $workspace)?->canSeeCosts();
             @endphp
             <div class="lib-page">
             @if(! $briefProduct)
@@ -81,10 +82,10 @@
                             <div class="kv"><span>Product</span><span>{{ $briefProduct->name }}</span></div>
                             <div class="kv"><span>Inputs used</span><span>offer · audience · product page · {{ $briefProduct->brand->name }} brand voice</span></div>
                             <div class="kv"><span>Outputs</span><span>7 items, then 3 banners</span></div>
-                            <div class="kv"><span>Estimated usage</span><span class="num"><strong class="medium">{{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</strong> of {{ $balance }} left</span></div>
+                            <div class="kv"><span>Estimated usage</span><span class="num"><strong class="medium">{{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</strong>@if($canSeeCosts) of {{ $balance }} left @endif</span></div>
                             <div class="kv"><span>Expected time</span><span>About a minute · you can leave</span></div>
                         </div>
-                        @if($over)<div class="banner bad">This run needs {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }} and {{ $balance }} {{ $balance === 1 ? 'is' : 'are' }} left. Choose standard quality or add credits.</div>@endif
+                        @if($over)<div class="banner bad">@if($canSeeCosts)This run needs {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }} and {{ $balance }} {{ $balance === 1 ? 'is' : 'are' }} left. Choose standard quality or add credits.@else The workspace does not have enough credits for this run. Choose standard quality or ask the owner to add credits.@endif</div>@endif
                         <button type="submit" class="pill pri block" wire:loading.attr="disabled" wire:target="generatePack" @disabled($over)>
                             <span wire:loading.remove wire:target="generatePack">Start run · {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</span><span wire:loading wire:target="generatePack">Starting…</span>
                         </button>

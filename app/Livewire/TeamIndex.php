@@ -7,6 +7,7 @@ use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
 use App\Support\Membership;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
@@ -122,6 +123,12 @@ class TeamIndex extends Component
             $pivot['brand_id'] = $brandId;
         }
         $workspace->users()->updateExistingPivot($member->id, $pivot);
+        // A narrower scope takes effect in the inbox too: earlier notifications may name other brands' work.
+        $narrowed = ($role === 'client' && $member->pivot->role !== 'client')
+            || ($brandId !== null && $brandId !== (isset($member->pivot->brand_id) ? (int) $member->pivot->brand_id : null));
+        if ($narrowed && Schema::hasTable('notifications')) {
+            $member->notifications()->where('workspace_id', $workspace->id)->delete();
+        }
         $workspace->auditEvents()->create([
             'actor_user_id' => auth()->id(), 'event' => 'member_access_changed', 'subject_type' => $member::class, 'subject_id' => $member->id,
             'metadata' => ['from' => ['role' => $member->pivot->role, 'brand_id' => $member->pivot->brand_id ?? null], 'to' => $pivot],

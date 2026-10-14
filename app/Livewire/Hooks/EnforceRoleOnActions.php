@@ -32,7 +32,7 @@ class EnforceRoleOnActions extends ComponentHook
         ContentBrowser::class => ['select', 'showTab', 'filter', 'clearFilters', 'addComment'],
         CampaignWorkspace::class => ['selectVersion', 'addComment', 'approveVersion', 'rejectVersion', 'approveSource'],
         ProductHub::class => ['cancelEdit'],
-        ProductPages::class => ['showPage'],
+        ProductPages::class => ['showPage', 'verifyPending'],
         InboxDrawer::class => ['open', 'markAllRead'],
     ];
 

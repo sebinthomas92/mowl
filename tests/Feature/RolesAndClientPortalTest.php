@@ -220,6 +220,7 @@ class RolesAndClientPortalTest extends TestCase
         [$owner, $workspace, $north] = $this->workspace();
         $member = $this->member($workspace, 'member');
         $brandId = $north->product->brand_id;
+        $member->notifications()->create(['id' => (string) Str::uuid(), 'type' => 'test', 'workspace_id' => $workspace->id, 'data' => ['title' => 'Kettle Product page is live']]);
 
         Livewire::actingAs($owner)->test(TeamIndex::class)
             ->set("access.{$member->id}.role", 'reviewer')
@@ -232,6 +233,7 @@ class RolesAndClientPortalTest extends TestCase
         $membership = Membership::of($member, $workspace);
         $this->assertSame('reviewer', $membership->role);
         $this->assertSame($brandId, $membership->brandId);
+        $this->assertSame(0, $member->notifications()->count(), 'A narrower scope clears inbox entries that may name other brands.');
 
         Livewire::actingAs($member)->test(TeamIndex::class)->call('updateAccess', $owner->id)->assertForbidden();
     }
