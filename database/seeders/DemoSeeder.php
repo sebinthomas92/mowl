@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Services\MockCampaignPackGenerator;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Local demo data for designing and reviewing screens.
@@ -70,47 +71,50 @@ class DemoSeeder extends Seeder
                     continue;
                 }
 
-                $url = "{$brandData['website']}/{$slug}";
-                $truth = ['name' => $name, 'description' => $summary, 'price' => $price, 'currency' => 'USD', 'availability' => 'InStock', 'brand' => $brandName];
-                $source = SourceSnapshot::create([
-                    'product_id' => $product->id,
-                    'type' => 'url',
-                    'url' => $url,
-                    'canonical_url' => $url,
-                    'title' => $name,
-                    'content_hash' => hash('sha256', $url),
-                    'status' => 'ready',
-                    'extracted_content' => $summary,
-                    'extracted_truth' => $truth,
-                    'approved_by_user_id' => $user->id,
-                    'approved_at' => now(),
-                    'fetched_at' => now(),
-                ]);
+                // One transaction per product so an interrupted run never leaves a pack without its versions.
+                DB::transaction(function () use ($brandData, $brandName, $product, $user, $generator, $name, $price, $summary, $slug) {
+                    $url = "{$brandData['website']}/{$slug}";
+                    $truth = ['name' => $name, 'description' => $summary, 'price' => $price, 'currency' => 'USD', 'availability' => 'InStock', 'brand' => $brandName];
+                    $source = SourceSnapshot::create([
+                        'product_id' => $product->id,
+                        'type' => 'url',
+                        'url' => $url,
+                        'canonical_url' => $url,
+                        'title' => $name,
+                        'content_hash' => hash('sha256', $url),
+                        'status' => 'ready',
+                        'extracted_content' => $summary,
+                        'extracted_truth' => $truth,
+                        'approved_by_user_id' => $user->id,
+                        'approved_at' => now(),
+                        'fetched_at' => now(),
+                    ]);
 
-                $result = $generator->generate($product, $source, ['product_truth' => $truth, 'description' => $summary]);
+                    $result = $generator->generate($product, $source, ['product_truth' => $truth, 'description' => $summary]);
 
-                $pack = CampaignPack::create([
-                    'product_id' => $product->id,
-                    'source_snapshot_id' => $source->id,
-                    'name' => "{$name} launch pack",
-                    'status' => 'review',
-                    'current_version' => 2,
-                    'analysis_mode' => 'standard',
-                    'credit_cost' => 1,
-                    'estimated_cost' => 0.018,
-                ]);
+                    $pack = CampaignPack::create([
+                        'product_id' => $product->id,
+                        'source_snapshot_id' => $source->id,
+                        'name' => "{$name} launch pack",
+                        'status' => 'review',
+                        'current_version' => 2,
+                        'analysis_mode' => 'standard',
+                        'credit_cost' => 1,
+                        'estimated_cost' => 0.018,
+                    ]);
 
-                $version = fn (int $number, string $status) => [
-                    'version' => $number,
-                    'content' => $result->content,
-                    'evidence' => $result->evidence,
-                    'compliance_flags' => $result->complianceFlags,
-                    'generator' => $result->provider,
-                    'review_status' => $status,
-                ];
+                    $version = fn (int $number, string $status) => [
+                        'version' => $number,
+                        'content' => $result->content,
+                        'evidence' => $result->evidence,
+                        'compliance_flags' => $result->complianceFlags,
+                        'generator' => $result->provider,
+                        'review_status' => $status,
+                    ];
 
-                $pack->versions()->create($version(1, 'approved') + ['reviewed_by_user_id' => $user->id, 'reviewed_at' => now()]);
-                $pack->versions()->create($version(2, 'review'));
+                    $pack->versions()->create($version(1, 'approved') + ['reviewed_by_user_id' => $user->id, 'reviewed_at' => now()]);
+                    $pack->versions()->create($version(2, 'review'));
+                });
             }
         }
     }
