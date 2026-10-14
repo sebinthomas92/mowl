@@ -1,0 +1,32 @@
+/* Campaigns and Results: plan, pinned deliverables, imported results and next-experiment proposals. */
+.camp-tab{display:flex;flex-direction:column;gap:16px}
+.camp-tab .medium,.camp-index .medium{font-weight:500}
+.camp-switch{justify-content:space-between}
+.camp-actions{gap:6px}
+.camp-tags{gap:6px}
+.camp-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px}
+.camp-stats>div{display:flex;flex-direction:column;gap:2px;background:var(--surface-2);border-radius:14px;padding:12px;min-width:0}
+.camp-stats .display{font-size:26px;line-height:1.15;overflow-wrap:anywhere}
+.camp-chart{margin:0;max-width:440px}
+.camp-tab .grid{align-items:start}
+.camp-chart svg{display:block}
+.camp-thumb{width:40px;flex:none}
+.camp-thumb .thumb{width:40px;border-radius:10px;font-size:14px}
+.camp-url{word-break:break-all}
+.camp-ready{margin-top:6px}
+.ok-text{color:var(--ok-fg)}
+.camp-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.camp-form .wide{grid-column:1/-1}
+.camp-form-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.camp-items{border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:8px}
+.camp-items .lbl{font-weight:500;font-size:13px;margin-bottom:4px}
+.camp-items .opt{display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:14px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line);cursor:pointer;font-size:13px}
+.camp-items .opt:has(input:checked){box-shadow:inset 0 0 0 2px var(--ink)}
+.camp-items .opt input{accent-color:var(--accent);width:18px;height:18px;flex:none;margin:0}
+.camp-import{gap:10px;padding-top:12px;border-top:1px solid var(--line)}
+.camp-import .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.camp-proposals{gap:12px}
+.camp-proposal{background:var(--surface-2);border-radius:16px;padding:16px;gap:8px}
+.camp-index .chips{margin-bottom:4px}
+.camp-index .tbl td{vertical-align:middle}
+@media (max-width:720px){.camp-form,.camp-form-row{grid-template-columns:1fr}}
