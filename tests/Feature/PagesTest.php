@@ -30,7 +30,7 @@ class PagesTest extends TestCase
     use RefreshDatabase;
 
     /** A minimal WordPress with WooCommerce: pages and media in memory, served at their links. */
-    private array $wp = ['pages' => [], 'media' => 0, 'stale' => false, 'fail' => null, 'requests' => []];
+    private array $wp = ['pages' => [], 'media' => 0, 'stale' => false, 'fail' => null, 'timeout' => false, 'requests' => []];
 
     public function test_a_new_draft_binds_approved_content_and_unapproved_content_blocks_publishing(): void
     {
@@ -305,6 +305,41 @@ class PagesTest extends TestCase
         app(PagePublisher::class)->publish($page->fresh(), $owner);
     }
 
+    public function test_a_lost_answer_is_not_reported_as_unchanged_and_a_new_store_address_starts_over(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $page = $this->approvedPage($owner, $pack);
+        $this->fakeWordPress();
+        $store = $this->connectStore($owner);
+        $page->update(['store_connection_id' => $store->id]);
+        $publisher = app(PagePublisher::class);
+        $publisher->publish($page, $owner);
+        $this->assertSame('live', $page->fresh()->publish_state);
+
+        $this->wp['timeout'] = true;
+        $page->sections()->where('kind', 'cta')->first()->update(['settings' => ['label' => 'Buy', 'url' => 'https://example.com/buy', 'text' => '']]);
+        $page->update(['draft_version' => 2]);
+        $publisher->publish($page->fresh(), $owner);
+        $page->refresh();
+        $this->assertSame('failed', $page->publish_state);
+        $this->assertStringContainsString('may have saved the page anyway', $page->last_error);
+        $this->assertStringNotContainsString('unchanged', $page->last_error);
+        $this->wp['timeout'] = false;
+
+        $store->update(['media' => ['media-1' => ['id' => 1, 'url' => 'https://shop.test/old.png']]]);
+        Livewire::actingAs($owner)->test(StoreConnections::class)->call('open', $store->id)
+            ->set('siteUrl', 'https://moved.test')->call('save')->assertHasNoErrors();
+        $page->refresh();
+        $this->assertNull($store->fresh()->media);
+        $this->assertSame('idle', $page->publish_state);
+        $this->assertNull($page->live_version);
+        $this->assertNull($page->remote_id);
+
+        $before = count($this->wp['pages']);
+        $this->assertSame('live', $publisher->publish($page, $owner)->status);
+        $this->assertCount($before + 1, $this->wp['pages'], 'The new address gets a new page.');
+    }
+
     public function test_pages_belong_to_their_workspace(): void
     {
         [$owner, , $pack] = $this->fixture();
@@ -327,7 +362,8 @@ class PagesTest extends TestCase
     {
         Http::fake(function (Request $request) {
             $this->wp['requests'][] = $request;
-            $url = $request->url();
+            // moved.test is the same fake site under a new address.
+            $url = preg_replace('#^https://moved\.test#', 'https://shop.test', $request->url());
             $authed = $request->hasHeader('Authorization', 'Basic '.base64_encode('editor:abcdabcdabcdabcd'));
 
             if (str_starts_with($url, 'https://plain.test')) {
@@ -352,6 +388,9 @@ class PagesTest extends TestCase
 
                 return Http::response(['id' => $id, 'source_url' => "https://shop.test/wp-content/uploads/media-{$id}.png"], 201);
             }
+            if ($this->wp['timeout'] && str_contains($url, '/wp/v2/pages')) {
+                return Http::failedConnection('Operation timed out after 20001 milliseconds');
+            }
             if (preg_match('#^https://shop\.test/wp-json/wp/v2/pages(?:/(\d+))?$#', $url, $match) && $request->method() === 'POST') {
                 $id = isset($match[1]) ? (int) $match[1] : count($this->wp['pages']) + 1;
                 $previous = $this->wp['pages'][$id] ?? null;
@@ -359,7 +398,7 @@ class PagesTest extends TestCase
 
                 return Http::response(['id' => $id, 'link' => 'https://shop.test/'.$request['slug'].'/'], isset($match[1]) ? 200 : 201);
             }
-            foreach ($this->wp['pages'] as $stored) {
+            foreach (array_reverse($this->wp['pages']) as $stored) {
                 if (str_starts_with($url, 'https://shop.test/'.$stored['slug'].'/')) {
                     return Http::response('<html><body>'.($this->wp['stale'] ? $stored['previous'] : $stored['content']).'</body></html>', 200, ['Content-Type' => 'text/html']);
                 }

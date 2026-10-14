@@ -135,7 +135,7 @@ class WooCommerceStore implements StoreClient
         try {
             return $request($http);
         } catch (ConnectionException $exception) {
-            throw new StoreException('The store could not be reached: '.mb_strimwidth($exception->getMessage(), 0, 160, '…'));
+            throw new StoreException('The store could not be reached: '.mb_strimwidth($exception->getMessage(), 0, 160, '…'), unsure: true);
         }
     }
 

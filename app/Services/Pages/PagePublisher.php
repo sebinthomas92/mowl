@@ -2,6 +2,7 @@
 
 namespace App\Services\Pages;
 
+use App\Models\ContentVersion;
 use App\Models\Page;
 use App\Models\PageVersion;
 use App\Models\PublishAttempt;
@@ -106,7 +107,7 @@ class PagePublisher
             }
             $error = $error === null ? null : mb_substr($error, 0, 500);
             $locked->update(['status' => $status, 'error' => $error, 'finished_at' => now()]);
-            $latest = $page->attempts()->max('id') === $attempt->id;
+            $latest = (int) $page->attempts()->max('id') === $attempt->id;
             if ($latest) {
                 $page->update(['publish_state' => $status === 'live' ? 'live' : 'failed', 'last_error' => $error] + $pageFields);
             }
@@ -147,11 +148,18 @@ class PagePublisher
                 if ($page->live_version === $page->draft_version && $page->publish_state === 'live') {
                     throw ValidationException::withMessages(['publish' => "v{$page->draft_version} is already live."]);
                 }
-                $version = $page->versions()->where('version', $page->draft_version)->first()
-                    ?? PageVersion::create([
-                        'page_id' => $page->id, 'version' => $page->draft_version,
-                        'snapshot' => $this->builder->snapshot($page), 'created_by_user_id' => $actor->id,
+                $version = $page->versions()->where('version', $page->draft_version)->first();
+                if (! $version) {
+                    $snapshot = $this->builder->snapshot($page);
+                    // Content can change between the blocker check and the snapshot; only approved versions go out.
+                    $pinned = collect($snapshot['sections'])->pluck('item.content_version_id')->filter();
+                    if ($pinned->isNotEmpty() && ContentVersion::query()->whereIn('id', $pinned)->where('status', '!=', 'approved')->exists()) {
+                        throw ValidationException::withMessages(['publish' => 'Some content on this page changed while publishing. Check the sections, then publish again.']);
+                    }
+                    $version = PageVersion::create([
+                        'page_id' => $page->id, 'version' => $page->draft_version, 'snapshot' => $snapshot, 'created_by_user_id' => $actor->id,
                     ]);
+                }
             }
 
             $page->update(['publish_state' => 'publishing', 'last_error' => null]);
@@ -165,23 +173,37 @@ class PagePublisher
 
         $store = $page->storeConnection;
         $version = $attempt->pageVersion;
+        $writing = false;
         try {
             $client = $this->clients->for($store);
             $html = $this->renderer->page($version->snapshot, $version->version, fn (array $ref) => $this->storeImage($store, $client, $ref, $page->workspace_id));
             $attempt->update(['html' => $html]);
             // A page id only means something on the store (and address) it was created on.
             $remoteId = $page->remote_store === $store->remoteKey() ? $page->remote_id : null;
+            $writing = true;
             $remote = $client->putPage($store, $page, $remoteId, (string) ($version->snapshot['name'] ?? $page->name), $html);
-            DB::transaction(function () use ($page, $attempt, $store, $remote): void {
-                $attempt->update(['status' => 'verifying', 'remote_url' => $remote['url']]);
-                $page->update(['publish_state' => 'verifying', 'remote_id' => $remote['id'], 'remote_url' => $remote['url'], 'remote_store' => $store->remoteKey()]);
+            $current = DB::transaction(function () use ($page, $attempt, $store, $remote): bool {
+                // The attempt may have been ended meanwhile (its store removed); a late answer must not revive it.
+                $locked = PublishAttempt::query()->lockForUpdate()->find($attempt->id);
+                if ($locked?->status !== 'publishing') {
+                    return false;
+                }
+                $locked->update(['status' => 'verifying', 'remote_url' => $remote['url']]);
+                if ((int) $page->attempts()->max('id') === $attempt->id) {
+                    $page->update(['publish_state' => 'verifying', 'remote_id' => $remote['id'], 'remote_url' => $remote['url'], 'remote_store' => $store->remoteKey()]);
+                }
+
+                return true;
             });
+            if (! $current) {
+                return $attempt->fresh();
+            }
         } catch (StoreException $exception) {
-            $this->fail($page, $attempt, $store, $exception);
+            $this->fail($page, $attempt, $store, $exception, $writing && $exception->unsure);
 
             return $attempt->fresh();
         } catch (Throwable $exception) {
-            $this->fail($page, $attempt, $store, new StoreException('Publishing stopped unexpectedly. Nothing on the live page changed.'));
+            $this->fail($page, $attempt, $store, new StoreException('Publishing stopped unexpectedly.'), $writing);
             report($exception);
 
             return $attempt->fresh();
@@ -195,27 +217,48 @@ class PagePublisher
     /** Uploads an image once per store and reuses it on later publishes. */
     private function storeImage(StoreConnection $store, $client, array $ref, int $workspaceId): string
     {
-        $media = $store->media ?? [];
-        if (! isset($media[$ref['key']]['url'])) {
-            $media[$ref['key']] = $client->uploadImage($store, $ref, $workspaceId);
-            $store->update(['media' => $media]);
+        $cached = ($store->media ?? [])[$ref['key']]['url'] ?? null;
+        if ($cached) {
+            return $cached;
         }
+        $uploaded = $client->uploadImage($store, $ref, $workspaceId);
+        // Other pages may be publishing to this store too; merge into the latest map instead of replacing it.
+        DB::transaction(function () use ($store, $ref, $uploaded): void {
+            $locked = StoreConnection::query()->lockForUpdate()->findOrFail($store->id);
+            $locked->update(['media' => [$ref['key'] => $uploaded] + ($locked->media ?? [])]);
+            $store->setRawAttributes($locked->getAttributes(), true);
+        });
 
-        return $media[$ref['key']]['url'];
+        return $uploaded['url'];
     }
 
-    private function fail(Page $page, PublishAttempt $attempt, StoreConnection $store, StoreException $exception): void
+    /** @param  bool  $maybeWritten  the page was being sent when the store stopped answering */
+    private function fail(Page $page, PublishAttempt $attempt, StoreConnection $store, StoreException $exception, bool $maybeWritten = false): void
     {
-        $live = $page->live_version ? " The live page is unchanged (v{$page->live_version})." : ' Nothing was published.';
-        $error = mb_substr($exception->getMessage().$live, 0, 500);
-        DB::transaction(function () use ($page, $attempt, $store, $exception, $error): void {
-            $attempt->update(['status' => 'failed', 'error' => $error, 'finished_at' => now()]);
-            $page->update(['publish_state' => 'failed', 'last_error' => $error]);
+        $outcome = match (true) {
+            $maybeWritten => ' The store may have saved the page anyway. Check it in the store, then publish again.',
+            (bool) $page->live_version => " The live page is unchanged (v{$page->live_version}).",
+            default => ' Nothing was published.',
+        };
+        $error = mb_substr($exception->getMessage().$outcome, 0, 500);
+        $failed = DB::transaction(function () use ($page, $attempt, $store, $exception, $error): bool {
+            $locked = PublishAttempt::query()->lockForUpdate()->find($attempt->id);
+            if ($locked?->status !== 'publishing') {
+                return false;
+            }
+            $locked->update(['status' => 'failed', 'error' => $error, 'finished_at' => now()]);
+            if ((int) $page->attempts()->max('id') === $attempt->id) {
+                $page->update(['publish_state' => 'failed', 'last_error' => $error]);
+            }
             if ($exception->auth) {
                 $store->update(['status' => 'needs_attention', 'last_error' => mb_substr($exception->getMessage(), 0, 500)]);
             }
+
+            return true;
         });
-        $this->notify($page, 'publish_failed', $attempt->pageVersion->version, $attempt->user);
+        if ($failed) {
+            $this->notify($page, 'publish_failed', $attempt->pageVersion->version, $attempt->user);
+        }
     }
 
     private function authorize(Page $page, User $actor): void

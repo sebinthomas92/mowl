@@ -97,11 +97,23 @@ class StoreConnections extends Component
 
             return;
         }
-        if ($store->exists && $store->isDirty('site_url')) {
-            // Images uploaded to the old address do not exist at the new one.
-            $store->media = null;
+        $moved = $store->exists && $store->isDirty('site_url');
+        if ($moved && $store->pages()->whereIn('publish_state', ['publishing', 'verifying'])->exists()) {
+            $this->addError('siteUrl', 'A page is publishing to this store. Change the address once it finishes.');
+
+            return;
         }
-        $store->fill($result + ['status' => 'connected', 'last_error' => null, 'checked_at' => now()])->save();
+        DB::transaction(function () use ($store, $result, $moved): void {
+            if ($moved) {
+                // A new address is a different site: its pages and images have to be created there again.
+                $store->media = null;
+                $store->pages()->update([
+                    'remote_id' => null, 'remote_url' => null, 'remote_store' => null, 'live_version' => null,
+                    'publish_state' => 'idle', 'verified_at' => null, 'last_error' => null,
+                ]);
+            }
+            $store->fill($result + ['status' => 'connected', 'last_error' => null, 'checked_at' => now()])->save();
+        });
         $this->audit($this->editingId ? 'store_connection_updated' : 'store_connection_added', $store);
 
         $this->close();
