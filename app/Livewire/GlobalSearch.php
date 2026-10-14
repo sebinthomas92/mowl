@@ -5,7 +5,9 @@ namespace App\Livewire;
 use App\Concerns\InteractsWithWorkspace;
 use App\Models\Brand;
 use App\Models\CampaignPack;
+use App\Models\ContentItem;
 use App\Models\Product;
+use App\Services\ContentLibrary;
 use Illuminate\Database\Eloquent\Builder;
 use Livewire\Component;
 
@@ -42,6 +44,13 @@ class GlobalSearch extends Component
                     ->with('product')->latest()->limit(5)->get()
                     ->map(fn (CampaignPack $pack) => ['label' => $pack->name ?: $pack->product->name, 'meta' => str($pack->status)->title(), 'url' => route('campaign-packs.show', $pack), 'icon' => 'stack-2']),
             ];
+            if (ContentLibrary::available()) {
+                $results['Content'] = ContentItem::query()
+                    ->where('workspace_id', $workspace->id)
+                    ->where(fn ($query) => $matches($query, 'content_items.title'))
+                    ->with('product')->latest('updated_at')->limit(5)->get()
+                    ->map(fn (ContentItem $item) => ['label' => $item->title, 'meta' => $item->product->name.' · v'.$item->current_version, 'url' => route('products.show', [$item->product_id, 'tab' => 'content', 'item' => $item->id]), 'icon' => ['image' => 'photo', 'video' => 'movie'][$item->type] ?? 'file-text']);
+            }
             $results = array_filter($results, fn ($group) => $group->isNotEmpty());
         }
 

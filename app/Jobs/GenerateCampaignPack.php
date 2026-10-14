@@ -8,6 +8,7 @@ use App\Exceptions\VertexAIResponseException;
 use App\Models\CampaignGenerationJob;
 use App\Models\ProcessingCacheEntry;
 use App\Services\CampaignGeneratorManager;
+use App\Services\ContentLibrary;
 use App\Services\ProductImageImporter;
 use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
@@ -109,6 +110,11 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 $knowledge = $facts->fingerprint($subject);
             }
 
+            $brief = array_filter(array_intersect_key($job->campaignPack->brief ?? [], array_flip(['objective', 'offer', 'audience', 'message'])), 'filled');
+            if ($brief) {
+                $page['campaign_brief'] = $brief;
+            }
+
             $job->update(['phase' => 'generating_pack']);
             if ($section) {
                 $baseContent = $this->baseContent($job);
@@ -122,6 +128,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                     $job->campaignPack->product->summary,
                 ])),
                 $provider, $model ?: 'none', $job->analysis_mode, $section ?: 'full', $section ? ($job->base_version ?: 0) : 0, $knowledge,
+                ...($brief ? [hash('sha256', json_encode($brief))] : []),
             ]));
             $cached = ProcessingCacheEntry::where('cache_key', $cacheKey)
                 ->where(fn ($query) => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
@@ -219,6 +226,15 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             }
 
             throw $exception;
+        }
+
+        // Each output becomes its own content item. A sync failure must not fail or repeat the generation.
+        if (ContentLibrary::available()) {
+            try {
+                app(ContentLibrary::class)->syncPack($job->campaignPack->fresh());
+            } catch (Throwable $exception) {
+                report($exception);
+            }
         }
     }
 

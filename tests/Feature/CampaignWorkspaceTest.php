@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Data\GenerationResult;
 use App\Livewire\CampaignWorkspace;
-use App\Models\Brand;
 use App\Models\CampaignPack;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
@@ -14,7 +14,6 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -22,126 +21,90 @@ class CampaignWorkspaceTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_an_agency_can_generate_a_persisted_campaign_pack(): void
+    public function test_an_agency_can_generate_a_persisted_campaign_pack_from_a_brief(): void
     {
-        [$user] = $this->workspaceUser();
+        [$user, $workspace] = $this->workspaceUser();
+        $product = $workspace->brands()->create(['name' => 'Plush Republic'])->products()->create(['name' => 'Book-Shaped Kindle Stand', 'price' => 'USD 39']);
         Http::fake([
             '93.184.216.34/*' => Http::response('<html><head><title>Book-Shaped Kindle Stand</title><meta name="description" content="A stable wooden stand for e-readers."></head><body>Hands-free reading at a comfortable angle.</body></html>', 200, ['Content-Type' => 'text/html']),
         ]);
+        $pages = [];
+        $this->app->instance(MockCampaignPackGenerator::class, new class($pages) extends MockCampaignPackGenerator
+        {
+            public function __construct(private array &$pages) {}
 
-        Livewire::actingAs($user)->test(CampaignWorkspace::class)
-            ->set('brandName', 'Plush Republic')
-            ->set('brandWebsite', 'https://example.com')
-            ->call('saveBrand')
-            ->assertSet('step', 2)
-            ->set('productUrl', 'https://93.184.216.34/products/kindle-stand')
-            ->call('loadProductFromUrl')
-            ->call('saveProduct')
+            public function generate(Product $product, SourceSnapshot $source, array $page = []): GenerationResult
+            {
+                $this->pages[] = $page;
+
+                return parent::generate($product, $source, $page);
+            }
+        });
+
+        Livewire::actingAs($user)->withQueryParams(['product' => $product->id])->test(CampaignWorkspace::class)
             ->assertSet('step', 3)
-            ->assertSet('sourceUrl', 'https://93.184.216.34/products/kindle-stand')
+            ->assertSet('briefOffer', 'USD 39')
+            ->set('sourceUrl', 'https://93.184.216.34/products/kindle-stand')
+            ->set('objective', 'refresh')
+            ->set('briefMessage', 'Reading should feel effortless.')
             ->call('generatePack')
+            ->assertHasNoErrors()
             ->assertRedirect(route('campaign-packs.show', CampaignPack::firstOrFail()));
 
-        $this->actingAs($user)
-            ->get(route('campaign-packs.show', CampaignPack::firstOrFail()))
-            ->assertOk()
-            ->assertSee('Several routes explored. The strongest three lead.')
-            ->assertSee('The everyday upgrade')
-            ->assertSee('aria-label="Workspace sections"', false)
-            ->assertSee('title="Brands"', false)
-            ->assertSee('Review queue')
-            ->assertSee('QA blocked');
+        $pack = CampaignPack::with('versions')->firstOrFail();
+        $this->assertSame(['objective' => 'Refresh creative', 'offer' => 'USD 39', 'message' => 'Reading should feel effortless.'], $pack->brief);
+        $this->assertSame($pack->brief, $pages[0]['campaign_brief'] ?? null);
 
-        $this->assertDatabaseCount('brands', 1);
+        $this->actingAs($user)
+            ->get(route('campaign-packs.show', $pack))
+            ->assertOk()
+            ->assertSee('each reviewed on its own')
+            ->assertSee('Ranked angles')
+            ->assertSee('aria-label="Workspace sections"', false)
+            ->assertSee('Review queue');
+
         $this->assertDatabaseCount('products', 1);
         $this->assertDatabaseCount('source_snapshots', 1);
-        $this->assertDatabaseCount('campaign_packs', 1);
         $this->assertDatabaseCount('campaign_pack_versions', 1);
         $this->assertDatabaseCount('campaign_generation_jobs', 1);
-        $this->assertDatabaseCount('processing_cache_entries', 2);
-
-        $pack = CampaignPack::with('versions')->firstOrFail();
         $this->assertSame('mock', $pack->versions->first()->generator);
-        $this->assertSame(hash('sha256', '<html><head><title>Book-Shaped Kindle Stand</title><meta name="description" content="A stable wooden stand for e-readers."></head><body>Hands-free reading at a comfortable angle.</body></html>'), SourceSnapshot::firstOrFail()->content_hash);
-        $this->assertSame('Plush Republic', Brand::firstOrFail()->name);
-        $this->assertSame('Book-Shaped Kindle Stand', Product::firstOrFail()->name);
-        $this->assertNull(SourceSnapshot::firstOrFail()->refreshed_from_snapshot_id);
         $this->assertSame('ready', SourceSnapshot::firstOrFail()->status);
+        $this->assertSame(7, $pack->contentItems()->count());
+        $this->assertSame(49, $workspace->creditBalance());
     }
 
-    public function test_an_existing_workspace_brand_can_be_reused(): void
+    public function test_the_create_screen_lists_only_this_workspaces_products(): void
     {
         [$user, $workspace] = $this->workspaceUser();
-        $brand = $workspace->brands()->create(['name' => 'Existing Brand']);
+        $mine = $workspace->brands()->create(['name' => 'Mine'])->products()->create(['name' => 'My Lamp']);
+        $theirs = Workspace::create(['name' => 'Other'])->brands()->create(['name' => 'Theirs'])->products()->create(['name' => 'Their Lamp']);
 
         Livewire::actingAs($user)->test(CampaignWorkspace::class)
-            ->set('brandId', $brand->id)
-            ->call('useBrand')
-            ->assertSet('step', 2);
+            ->assertSee('My Lamp')
+            ->assertDontSee('Their Lamp')
+            ->call('chooseProduct', $mine->id)
+            ->assertSet('productId', $mine->id)
+            ->assertSee('Start run · 1 credit');
+
+        Livewire::actingAs($user)->test(CampaignWorkspace::class)
+            ->call('chooseProduct', $theirs->id)
+            ->assertStatus(404);
     }
 
-    public function test_product_details_are_loaded_from_a_product_page_before_saving(): void
+    public function test_deep_analysis_is_blocked_when_credits_run_short(): void
     {
         [$user, $workspace] = $this->workspaceUser();
-        $brand = $workspace->brands()->create(['name' => 'Imported Brand']);
-        Storage::fake('local');
-        $image = $this->imageBytes();
-        Http::fake([
-            '93.184.216.34/media/canvas-tote.png' => Http::response($image, 200, ['Content-Type' => 'image/png']),
-            '93.184.216.34/*' => Http::response(<<<'HTML'
-                <html><head><title>Fallback page title</title><meta property="og:image" content="/media/canvas-tote.png"><link rel="canonical" href="/products/canvas-tote"><script type="application/ld+json">{"@type":"Product","name":"Canvas Tote","description":"A roomy everyday carry tote.","image":"/media/second-choice.png","offers":{"price":"89","priceCurrency":"USD"}}</script></head><body>Product details</body></html>
-                HTML, 200, ['Content-Type' => 'text/html']),
-        ]);
+        $workspace->credits()->create(['amount' => -48, 'event' => 'pack_generation', 'description' => 'Earlier runs']);
+        $product = $workspace->brands()->create(['name' => 'Short'])->products()->create(['name' => 'Short Lamp']);
 
-        Livewire::actingAs($user)->test(CampaignWorkspace::class)
-            ->set('brandId', $brand->id)
-            ->set('step', 2)
-            ->set('productUrl', 'https://93.184.216.34/store/canvas-tote')
-            ->call('loadProductFromUrl')
-            ->assertHasNoErrors()
-            ->assertSet('productDetailsLoaded', true)
-            ->assertSet('productName', 'Canvas Tote')
-            ->assertSet('productPrice', 'USD 89')
-            ->assertSet('productSummary', 'A roomy everyday carry tote.')
-            ->assertSet('productUrl', 'https://93.184.216.34/products/canvas-tote')
-            ->call('saveProduct')
-            ->assertHasNoErrors()
-            ->assertSet('step', 3)
-            ->assertSet('sourceUrl', 'https://93.184.216.34/products/canvas-tote');
+        Livewire::actingAs($user)->withQueryParams(['product' => $product->id])->test(CampaignWorkspace::class)
+            ->set('analysisMode', 'deep')
+            ->assertSee('This run needs 3 credits and 2 are left.')
+            ->set('sourceUrl', 'https://example.com/products/short-lamp')
+            ->call('generatePack')
+            ->assertHasErrors(['sourceUrl']);
 
-        $this->assertDatabaseHas('products', [
-            'brand_id' => $brand->id,
-            'name' => 'Canvas Tote',
-            'price' => 'USD 89',
-            'summary' => 'A roomy everyday carry tote.',
-        ]);
-        $this->assertDatabaseHas('source_snapshots', [
-            'product_id' => Product::firstOrFail()->id,
-            'url' => 'https://93.184.216.34/products/canvas-tote',
-            'status' => 'ready',
-        ]);
-        $asset = Product::firstOrFail()->mediaAssets()->firstOrFail();
-        $this->assertSame('product_page', $asset->metadata['origin']);
-        $this->assertSame('https://93.184.216.34/media/canvas-tote.png', $asset->metadata['source_url']);
-        $this->assertSame(1, $asset->metadata['candidate_rank']);
-        $this->assertSame(1, Product::firstOrFail()->mediaAssets()->count());
-        Storage::disk('local')->assertExists($asset->path);
-    }
-
-    public function test_product_cannot_be_saved_without_analyzing_its_url(): void
-    {
-        [$user, $workspace] = $this->workspaceUser();
-        $brand = $workspace->brands()->create(['name' => 'Imported Brand']);
-
-        Livewire::actingAs($user)->test(CampaignWorkspace::class)
-            ->set('brandId', $brand->id)
-            ->set('step', 2)
-            ->set('productUrl', 'https://example.com/products/manual')
-            ->set('productName', 'Manually entered product')
-            ->call('saveProduct')
-            ->assertHasErrors(['productUrl']);
-
-        $this->assertDatabaseCount('products', 0);
+        $this->assertDatabaseCount('campaign_packs', 0);
     }
 
     public function test_campaign_setup_does_not_request_media_before_product_truth_is_complete(): void
@@ -194,13 +157,17 @@ class CampaignWorkspaceTest extends TestCase
         }
     }
 
-    public function test_each_setup_step_validates_required_input(): void
+    public function test_the_brief_validates_required_input(): void
     {
-        [$user] = $this->workspaceUser();
+        [$user, $workspace] = $this->workspaceUser();
 
-        Livewire::actingAs($user)->test(CampaignWorkspace::class)
-            ->call('saveBrand')
-            ->assertHasErrors(['brandName' => 'required']);
+        $product = $workspace->brands()->create(['name' => 'Valid'])->products()->create(['name' => 'Valid Lamp']);
+
+        Livewire::actingAs($user)->withQueryParams(['product' => $product->id])->test(CampaignWorkspace::class)
+            ->set('sourceUrl', '')
+            ->set('objective', 'nonsense')
+            ->call('generatePack')
+            ->assertHasErrors(['sourceUrl' => 'required', 'objective']);
     }
 
     public function test_request_processing_renders_a_signed_trigger_for_section_regeneration(): void
@@ -265,17 +232,5 @@ class CampaignWorkspaceTest extends TestCase
         ]);
 
         return [$user, $workspace];
-    }
-
-    private function imageBytes(): string
-    {
-        $image = imagecreatetruecolor(600, 800);
-        imagefill($image, 0, 0, imagecolorallocate($image, 218, 173, 115));
-        ob_start();
-        imagepng($image);
-        $bytes = ob_get_clean();
-        imagedestroy($image);
-
-        return $bytes;
     }
 }

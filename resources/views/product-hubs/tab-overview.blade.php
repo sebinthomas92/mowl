@@ -12,11 +12,20 @@
     foreach ($facts->where('status', 'missing')->reject(fn ($item) => $item->key === 'audience' && $brandAudience) as $item) {
         $attention->push(['icon' => 'circle-dashed', 'tone' => 'neu', 'text' => "{$defs[$item->key]['label']} is missing", 'label' => 'Add', 'url' => $knowledgeUrl]);
     }
-    foreach ($packs->where('status', 'review') as $pack) {
-        $attention->push(['icon' => 'eye', 'tone' => 'rev', 'text' => "Launch pack v{$pack->current_version} is waiting for review", 'label' => 'Open', 'url' => route('campaign-packs.show', $pack)]);
+    if ($contentItems !== null) {
+        foreach ($contentItems->where('status', 'review') as $item) {
+            $attention->push(['icon' => 'eye', 'tone' => 'rev', 'text' => "{$item->title} v{$item->current_version} awaits review", 'label' => 'Review', 'url' => route('review.index', ['item' => $item->id])]);
+        }
+        foreach ($contentItems->where('status', 'changes') as $item) {
+            $attention->push(['icon' => 'refresh', 'tone' => 'warn', 'text' => "Changes requested on {$item->title} v{$item->current_version}", 'label' => 'Revise', 'url' => route('products.show', [$product, 'tab' => 'content', 'item' => $item->id])]);
+        }
+    } else {
+        foreach ($packs->where('status', 'review') as $pack) {
+            $attention->push(['icon' => 'eye', 'tone' => 'rev', 'text' => "Launch pack v{$pack->current_version} is waiting for review", 'label' => 'Open', 'url' => route('campaign-packs.show', $pack)]);
+        }
     }
     if (! $version) {
-        $attention->push(['icon' => 'stack-2', 'tone' => 'neu', 'text' => 'No approved launch pack yet, so the client hub is empty', 'label' => 'Create', 'url' => route('campaign-packs.create')]);
+        $attention->push(['icon' => 'stack-2', 'tone' => 'neu', 'text' => 'No approved launch pack yet, so the client hub is empty', 'label' => 'Create', 'url' => route('campaign-packs.create', ['product' => $product->id])]);
     }
 @endphp
 <div class="grid">
@@ -66,12 +75,12 @@
         @forelse($packs->take(4) as $pack)
             @include('product-hubs.pack-row', ['pack' => $pack])
         @empty
-            <div class="empty"><strong>No launch packs yet</strong><span class="small muted">A launch pack turns this product's confirmed facts into channel-ready copy.</span><a class="pill pri sm" href="{{ route('campaign-packs.create') }}" wire:navigate>Create a launch pack</a></div>
+            <div class="empty"><strong>No launch packs yet</strong><span class="small muted">A launch pack turns this product's confirmed facts into channel-ready copy.</span><a class="pill pri sm" href="{{ route('campaign-packs.create', ['product' => $product->id]) }}" wire:navigate>Create a launch pack</a></div>
         @endforelse
     </section>
 
     <section class="card col c6">
-        <div class="row"><span class="eyebrow">Client hub</span><span class="sp"></span><a class="small" href="{{ route('products.show', [$product, 'tab' => 'content']) }}" wire:navigate>Open content</a></div>
+        <div class="row"><span class="eyebrow">Client hub</span><span class="sp"></span><a class="small" href="{{ route('products.show', [$product, 'tab' => 'hub']) }}" wire:navigate>Open client hub</a></div>
         @if($version)
             <p class="small">The hub shows approved launch pack v{{ $version->version }}, approved {{ ($version->reviewed_at ?? $version->updated_at)->diffForHumans() }}.</p>
             <div class="kv"><span>Client link</span><span>{{ $shareUrl ? 'Active' : 'Not shared' }}</span></div>

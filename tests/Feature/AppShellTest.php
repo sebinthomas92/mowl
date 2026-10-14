@@ -10,6 +10,7 @@ use App\Models\CampaignPack;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\CampaignPackActivity;
+use App\Services\ContentLibrary;
 use App\Services\MockCampaignPackGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
@@ -23,13 +24,16 @@ class AppShellTest extends TestCase
     public function test_shell_shows_launch_pack_naming_review_count_and_inbox(): void
     {
         [$owner, , $pack] = $this->fixture('Northline');
-        $pack->update(['status' => 'review']);
+        $library = app(ContentLibrary::class);
+        $library->syncPack($pack);
+        $library->submit($pack->contentItems()->where('section', 'positioning')->firstOrFail()->latestVersion, $owner);
 
         $this->actingAs($owner)->get(route('campaign-packs.index'))
             ->assertOk()
             ->assertSee('Launch packs')
             ->assertDontSee('Campaign packs')
             ->assertSee('Review queue, 1 waiting')
+            ->assertSee(route('review.index'), false)
             ->assertSee('Search products and content')
             ->assertSee('Inbox, 0 unread');
     }

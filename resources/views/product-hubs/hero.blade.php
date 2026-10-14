@@ -1,7 +1,7 @@
 @php
     $heroImage = $product->mediaAssets->first(fn ($asset) => str_starts_with((string) $asset->mime_type, 'image/') && $asset->status !== 'failed');
     $needsDecision = $facts->whereIn('status', ['conflict', 'missing'])->reject(fn ($item) => $item->key === 'audience' && $item->status === 'missing' && ($brandAudience ?? null))->count();
-    $inReview = $packs->where('status', 'review')->count();
+    $inReview = $contentItems !== null ? $contentItems->where('status', 'review')->count() : $packs->where('status', 'review')->count();
     $checkedAt = $source?->fetched_at ?? $source?->created_at;
     $stale = $checkedAt && $checkedAt->lt(now()->subDays(14));
     $siblings = \App\Models\Product::query()
@@ -40,7 +40,7 @@
                     <span class="tag"><span class="dot"></span>No source page</span>
                 @endif
                 @if($needsDecision)<a class="tag warn" href="{{ route('products.show', [$product, 'tab' => 'knowledge']) }}" wire:navigate><span class="dot"></span>{{ trans_choice(':count fact needs confirmation|:count facts need confirmation', $needsDecision) }}</a>@endif
-                @if($inReview)<span class="tag rev"><span class="dot"></span>{{ $inReview }} awaiting review</span>@endif
+                @if($inReview)<a class="tag rev" href="{{ $contentItems !== null ? route('review.index') : route('products.show', [$product, 'tab' => 'packs']) }}" wire:navigate><span class="dot"></span>{{ $inReview }} awaiting review</a>@endif
                 @if($version)<span class="tag ok"><span class="dot"></span>Approved v{{ $version->version }}</span>@endif
             </div>
         </div>
@@ -51,7 +51,7 @@
                     <span wire:loading.remove wire:target="refreshSource">Refresh source</span><span wire:loading wire:target="refreshSource">Checking…</span>
                 </button>
             @endif
-            <a class="pill pri" href="{{ route('campaign-packs.create') }}" wire:navigate>Create <i class="ti ti-arrow-right" aria-hidden="true"></i></a>
+            <a class="pill pri" href="{{ route('campaign-packs.create', ['product' => $product->id]) }}" wire:navigate>Create <i class="ti ti-arrow-right" aria-hidden="true"></i></a>
         </div>
     </div>
 </section>

@@ -7,6 +7,7 @@ use App\Models\CampaignPackVersion;
 use App\Models\Product;
 use App\Models\ProductFact;
 use App\Models\SourceSnapshot;
+use App\Services\ContentLibrary;
 use App\Services\ProductHubContentAdapter;
 use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
@@ -25,7 +26,7 @@ class ProductHub extends Component
 
     public ?string $shareUrl = null;
 
-    public const TABS = ['overview' => 'Overview', 'knowledge' => 'Knowledge', 'content' => 'Content', 'packs' => 'Launch packs'];
+    public const TABS = ['overview' => 'Overview', 'knowledge' => 'Knowledge', 'content' => 'Content', 'packs' => 'Launch packs', 'hub' => 'Client hub'];
 
     #[Url]
     public string $tab = 'overview';
@@ -219,8 +220,9 @@ class ProductHub extends Component
         $brandAudience = $knowledgeReady ? (app(ProductKnowledge::class)->brandProfile($this->product)['default_audience'] ?? null) : null;
         $packs = $this->product->campaignPacks->sortByDesc('id')->values();
         $tabs = self::TABS;
+        $contentItems = ContentLibrary::available() ? $this->product->contentItems()->get(['id', 'title', 'status', 'current_version', 'type']) : null;
 
-        return view('livewire.product-hub', compact('workspace', 'version', 'content', 'sections', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience'))
+        return view('livewire.product-hub', compact('workspace', 'version', 'content', 'sections', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience', 'contentItems'))
             ->layout('components.layouts.app');
     }
 

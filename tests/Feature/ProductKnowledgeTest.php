@@ -161,7 +161,7 @@ class ProductKnowledgeTest extends TestCase
     {
         [$owner, , $product] = $this->fixture();
 
-        foreach (['overview' => 'What it is', 'knowledge' => 'Your confirmed value', 'content' => 'Product playbook', 'packs' => 'Desk Lamp launch pack'] as $tab => $text) {
+        foreach (['overview' => 'What it is', 'knowledge' => 'Your confirmed value', 'content' => 'No content yet', 'hub' => 'Product playbook', 'packs' => 'Desk Lamp launch pack'] as $tab => $text) {
             $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => $tab]))->assertOk()->assertSee($text);
         }
         $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'nope']))->assertOk()->assertSee('What it is');

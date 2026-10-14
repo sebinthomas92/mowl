@@ -7,95 +7,92 @@
         <main id="main-content">
 
         @if(!$pack)
-            <section class="onboarding">
-                <div class="onboarding-topline">
-                    <span class="eyebrow">Campaign intelligence workspace</span>
-                    <span class="beta-pill">Paid beta · 50 credits</span>
+            @php
+                $balance = $workspace->creditBalance();
+            @endphp
+            <div class="lib-page">
+            @if(! $briefProduct)
+                <div class="pagehead">
+                    <div><div class="eyebrow">Workflow · launch pack</div><h1 class="display">Create a launch pack</h1><p class="muted">Choose the product. The brief is prefilled from its confirmed Knowledge, and nothing runs until you start it.</p></div>
+                    <a class="pill ghost" href="{{ route('products.create') }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> Add product</a>
                 </div>
-                <div class="onboarding-heading">
-                    <div>
-                        <p class="kicker">BUILD YOUR FIRST PACK</p>
-                        <h1>From product page<br>to <em>approved campaign.</em></h1>
-                        <p>Capture the truth once. Turn it into evidence-linked copy, hooks, scripts, captions, and a shot plan your media buyers can use immediately.</p>
+                @if($products->isEmpty())
+                    <div class="empty"><strong>Add a product first</strong><span class="small muted">A launch pack is built from a product's page and its confirmed facts.</span><a class="pill pri sm" href="{{ route('products.create') }}" wire:navigate>Add product</a></div>
+                @else
+                    <div class="opt-grid" role="list">
+                        @foreach($products as $option)
+                            <button type="button" role="listitem" class="opt" wire:click="chooseProduct({{ $option->id }})" wire:key="choose-{{ $option->id }}">
+                                <i class="ti ti-package" aria-hidden="true"></i>
+                                <span><strong class="medium">{{ $option->name }}</strong><br><span class="muted">{{ $option->brand->name }}{{ $option->price ? ' · '.$option->price : '' }}</span></span>
+                            </button>
+                        @endforeach
                     </div>
-                    <div class="trust-card">
-                        <span>PACK STANDARD</span>
-                        <strong>Source-linked</strong>
-                        <p>Claims stay tied to supplied evidence. Unsupported claims are flagged before approval.</p>
-                    </div>
+                @endif
+            @else
+                @php
+                    $cost = \App\Livewire\CampaignWorkspace::CREDIT_COSTS[$analysisMode] ?? 1;
+                @endphp
+                @php
+                    $over = $cost > $balance;
+                @endphp
+                <div class="row">
+                    <a class="pill ghost sm" href="{{ route('products.show', $briefProduct) }}" wire:navigate><i class="ti ti-arrow-left" aria-hidden="true"></i> {{ $briefProduct->name }}</a>
+                    <button type="button" class="linkbtn" wire:click="changeProduct">Choose another product</button>
                 </div>
-
-                <div class="setup-grid">
-                    <ol class="setup-steps" aria-label="Pack setup progress">
-                        <li class="{{ $step >= 1 ? 'active' : '' }} {{ $step > 1 ? 'done' : '' }}"><b>01</b><span><strong>Brand</strong><small>Create the knowledge owner</small></span></li>
-                        <li class="{{ $step >= 2 ? 'active' : '' }} {{ $step > 2 ? 'done' : '' }}"><b>02</b><span><strong>Product</strong><small>Name the offer</small></span></li>
-                        <li class="{{ $step >= 3 ? 'active' : '' }}"><b>03</b><span><strong>Source</strong><small>Anchor the campaign truth</small></span></li>
-                    </ol>
-
-                    <div class="form-card">
-                        @if($step === 1)
-                            @if($brands->isNotEmpty())
-                                <form wire:submit="useBrand" class="existing-brand-form">
-                                    <div class="form-heading"><span>01 / 03</span><h2>Choose a brand</h2><p>Reuse approved brand knowledge or create a new brand below.</p></div>
-                                    <label>Existing brand
-                                        <select wire:model="brandId">
-                                            <option value="">Select a brand</option>
-                                            @foreach($brands as $brand)
-                                                <option value="{{ $brand->id }}">{{ $brand->name }}</option>
-                                            @endforeach
-                                        </select>
-                                        @error('brandId')<small class="error">Choose a brand to continue.</small>@enderror
-                                    </label>
-                                    <button class="primary-button" type="submit">Use this brand <span>→</span></button>
-                                </form>
-                                <div class="form-divider"><span>OR CREATE NEW</span></div>
-                            @endif
-                            <form wire:submit="saveBrand" class="new-brand-form">
-                                @if($brands->isEmpty())
-                                <div class="form-heading"><span>01 / 03</span><h2>Create a brand</h2><p>Brands keep product knowledge and campaign history separated.</p></div>
-                                @endif
-                                <label>Brand name<input wire:model="brandName" type="text" placeholder="e.g. Plush Republic" autofocus>@error('brandName')<small class="error">{{ $message }}</small>@enderror</label>
-                                <label>Brand website <small>Optional</small><input wire:model="brandWebsite" type="url" placeholder="https://yourbrand.com">@error('brandWebsite')<small class="error">{{ $message }}</small>@enderror</label>
-                                <button class="primary-button" type="submit">Create brand <span>→</span></button>
-                            </form>
-                        @elseif($step === 2)
-                            <form wire:submit="saveProduct">
-                                <div class="form-heading"><span>02 / 03</span><h2>Add the product page</h2><p>Paste a public product URL. We’ll pull the product details for you.</p></div>
-                                <label>Product page URL<input wire:model="productUrl" type="url" placeholder="https://yourbrand.com/products/your-product" autofocus>@error('productUrl')<small class="error">{{ $message }}</small>@enderror</label>
-                                <button class="source-fetch-button" type="button" wire:click="loadProductFromUrl" wire:loading.attr="disabled" wire:target="loadProductFromUrl">
-                                    <span wire:loading.remove wire:target="loadProductFromUrl">{{ $productDetailsLoaded ? 'Refresh product details' : 'Get product details' }}</span>
-                                    <span wire:loading wire:target="loadProductFromUrl">Reading product page…</span>
-                                    <b aria-hidden="true">↗</b>
-                                </button>
-                                @if($productDetailsLoaded)
-                                    <section class="product-import-preview" aria-live="polite">
-                                        <span>PRODUCT FOUND</span>
-                                        <h3>{{ $productName }}</h3>
-                                        <div><strong>{{ $productPrice ?: 'Price not listed' }}</strong><small>{{ parse_url($productUrl, PHP_URL_HOST) }}</small></div>
-                                        <p>{{ $productSummary ?: 'No product description was available on the page.' }}</p>
-                                    </section>
-                                    <button class="primary-button" type="submit" wire:loading.attr="disabled" wire:target="saveProduct">Use this product <span>→</span></button>
-                                @endif
-                            </form>
-                        @else
-                            <form wire:submit="generatePack">
-                                <div class="form-heading"><span>03 / 03</span><h2>Add a product-page source</h2><p>The source is captured, hashed, and linked to every factual claim in the generated pack.</p></div>
-                                <label>Product page URL<input wire:model="sourceUrl" type="url" placeholder="https://yourbrand.com/products/your-product" autofocus>@error('sourceUrl')<small class="error">{{ $message }}</small>@enderror</label>
-                                <fieldset class="analysis-choice">
-                                    <legend>Analysis depth</legend>
-                                    <label><input wire:model="analysisMode" type="radio" value="standard"><span><strong>Standard pack</strong><small>Fast product truth and campaign content</small></span><b>1 credit</b></label>
-                                    <label><input wire:model="analysisMode" type="radio" value="deep"><span><strong>Premium deep analysis</strong><small>More deliberate positioning and evidence review</small></span><b>3 credits</b></label>
-                                </fieldset>
-                                <div class="pipeline-preview">
-                                    <span>PAGE</span><i></i><span>TRUTH</span><i></i><span>PACK</span>
+                <div class="pagehead">
+                    <div><div class="eyebrow">Workflow · launch pack</div><h1 class="display">Create a launch pack</h1><p class="muted">Prefilled from {{ $briefProduct->name }} knowledge. Change anything on purpose; nothing runs until you start it.</p></div>
+                </div>
+                <form class="brief-layout" wire:submit="generatePack">
+                    <div class="col brief-main">
+                        <section class="card col">
+                            <span class="eyebrow">Objective</span>
+                            <div class="opt-grid">
+                                @foreach(\App\Livewire\CampaignWorkspace::OBJECTIVES as $key => [$label, $hint])
+                                    <label class="opt"><input type="radio" name="objective" value="{{ $key }}" wire:model.live="objective"><span><strong class="medium">{{ $label }}</strong><br><span class="muted">{{ $hint }}</span></span></label>
+                                @endforeach
+                            </div>
+                        </section>
+                        <section class="card">
+                            <div class="grid add-grid">
+                                <div class="field c6"><label for="b-offer">Offer <span class="tag">From Knowledge</span></label><input id="b-offer" class="input" wire:model="briefOffer" placeholder="Price and any running offer">@error('briefOffer')<span class="err">{{ $message }}</span>@enderror</div>
+                                <div class="field c6"><label for="b-aud">Audience</label><input id="b-aud" class="input" wire:model="briefAudience" placeholder="Who this pack speaks to">@error('briefAudience')<span class="err">{{ $message }}</span>@enderror</div>
+                                <div class="field c12"><label for="b-msg">Key message <span class="muted">(optional)</span></label><input id="b-msg" class="input" wire:model="briefMessage" placeholder="One sentence the whole pack should agree on">@error('briefMessage')<span class="err">{{ $message }}</span>@enderror</div>
+                                <div class="field c12"><label for="b-src">Product page URL</label><input id="b-src" class="input" type="url" wire:model="sourceUrl" placeholder="https://yourbrand.com/products/your-product" @error('sourceUrl') aria-invalid="true" @enderror>@error('sourceUrl')<span class="err" role="alert">{{ $message }}</span>@enderror<span class="xs muted">Every factual claim is checked against this page and your confirmed Knowledge. The brief steers emphasis only; it never adds facts.</span></div>
+                            </div>
+                        </section>
+                        <section class="card col">
+                            <div class="row"><span class="eyebrow">Outputs</span><span class="sp"></span><span class="muted small">Each becomes its own item you can edit, review and approve</span></div>
+                            <div class="opt-grid">
+                                @foreach([['Positioning', 'Value proposition and audience priorities'], ['Ranked angles', 'Five angles, the strongest three recommended'], ['3 video routes', 'Hooks, timed voiceover, captions and a shot plan'], ['Offer framing', 'Value framing without invented discounts'], ['Channel copy', 'Meta, Google, email, SMS and organic social'], ['3 banners', 'Generated in Banner Studio once the pack is approved']] as [$label, $hint])
+                                    <label class="opt"><input type="checkbox" checked disabled><span><strong class="medium">{{ $label }}</strong><br><span class="muted">{{ $hint }}</span></span></label>
+                                @endforeach
+                            </div>
+                            <div class="field"><span class="small medium">Quality</span>
+                                <div class="chips" role="radiogroup" aria-label="Quality">
+                                    <button type="button" class="chip" role="radio" aria-checked="{{ $analysisMode === 'standard' ? 'true' : 'false' }}" aria-pressed="{{ $analysisMode === 'standard' ? 'true' : 'false' }}" wire:click="$set('analysisMode', 'standard')">Standard · 1 credit</button>
+                                    <button type="button" class="chip" role="radio" aria-checked="{{ $analysisMode === 'deep' ? 'true' : 'false' }}" aria-pressed="{{ $analysisMode === 'deep' ? 'true' : 'false' }}" wire:click="$set('analysisMode', 'deep')">Deep analysis · 3 credits</button>
                                 </div>
-                                <button class="primary-button" type="submit" wire:loading.attr="disabled">Generate launch pack <span wire:loading.remove>✦</span><span wire:loading>Working…</span></button>
-                                <p class="cost-note">Credits are reserved when the job is queued and returned automatically if all retries fail.</p>
-                            </form>
-                        @endif
+                            </div>
+                        </section>
                     </div>
-                </div>
-            </section>
+                    <aside class="card col brief-aside">
+                        <span class="eyebrow">Review before starting</span>
+                        <div>
+                            <div class="kv"><span>Product</span><span>{{ $briefProduct->name }}</span></div>
+                            <div class="kv"><span>Inputs used</span><span>offer · audience · product page · {{ $briefProduct->brand->name }} brand voice</span></div>
+                            <div class="kv"><span>Outputs</span><span>7 items, then 3 banners</span></div>
+                            <div class="kv"><span>Estimated usage</span><span class="num"><strong class="medium">{{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</strong> of {{ $balance }} left</span></div>
+                            <div class="kv"><span>Expected time</span><span>About a minute · you can leave</span></div>
+                        </div>
+                        @if($over)<div class="banner bad">This run needs {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }} and {{ $balance }} {{ $balance === 1 ? 'is' : 'are' }} left. Choose standard quality or add credits.</div>@endif
+                        <button type="submit" class="pill pri block" wire:loading.attr="disabled" wire:target="generatePack" @disabled($over)>
+                            <span wire:loading.remove wire:target="generatePack">Start run · {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</span><span wire:loading wire:target="generatePack">Starting…</span>
+                        </button>
+                        <span class="muted xs">Credits are reserved when the run starts and returned automatically if every retry fails.</span>
+                    </aside>
+                </form>
+            @endif
+            </div>
         @else
             @php
                 $version = $selectedVersion ? $pack->versions->firstWhere('version', $selectedVersion) : $pack->versions->sortByDesc('version')->first();
@@ -164,6 +161,43 @@
                     <div class="regeneration-banner"><span><i></i> Regenerating <strong>{{ str($activeJob->section)->replace('_', ' ')->title() }}</strong></span><small>{{ str($activeJob->phase)->replace('_', ' ')->title() }} · attempt {{ $activeJob->attempts }} / 3</small></div>
                 @endif
 
+                @if($contentItems !== null)
+                    <section class="run-page" aria-labelledby="pack-outputs-title">
+                        <div class="row">
+                            <div class="grow"><span class="eyebrow">Outputs</span><h2 id="pack-outputs-title" class="display run-title">{{ $contentItems->count() }} {{ \Illuminate\Support\Str::plural('item', $contentItems->count()) }}, each reviewed on its own</h2></div>
+                            <a class="pill ghost sm" href="{{ route('products.show', [$pack->product, 'tab' => 'content']) }}" wire:navigate>Open outputs in Content</a>
+                            @if($contentItems->where('status', 'review')->isNotEmpty())<a class="pill dark sm" href="{{ route('review.index') }}" wire:navigate>Review queue · {{ $contentItems->where('status', 'review')->count() }}</a>@endif
+                        </div>
+                        @php
+                            $approvedCount = $contentItems->where('status', 'approved')->count();
+                        @endphp
+                        <div class="card col tight-card">
+                            <div class="row small"><span>{{ $approvedCount }} of {{ $contentItems->count() }} approved</span><span class="sp"></span><span class="muted xs">When every section is approved, they are assembled into an approved launch pack version for exports, banners and the client hub.</span></div>
+                            <div class="bar" role="progressbar" aria-label="Outputs approved" aria-valuemin="0" aria-valuemax="{{ $contentItems->count() }}" aria-valuenow="{{ $approvedCount }}"><span style="width: {{ $contentItems->count() ? round($approvedCount / $contentItems->count() * 100) : 0 }}%"></span></div>
+                        </div>
+                        <div class="tw"><table class="tbl">
+                            <thead><tr><th scope="col"><span class="sr-only">Preview</span></th><th scope="col">Output</th><th scope="col">Version</th><th scope="col">State</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead>
+                            <tbody>
+                                @foreach($contentItems as $item)
+                                    <tr wire:key="pack-item-{{ $item->id }}" @class(['hl' => $item->status === 'changes'])>
+                                        <td class="run-thumb">@include('content.thumb', ['item' => $item, 'height' => 48])</td>
+                                        <td><strong class="medium">{{ $item->title }}</strong><br><span class="muted xs">{{ \Illuminate\Support\Str::singular(\App\Models\ContentItem::TYPES[$item->type] ?? $item->type) }}{{ $item->latestVersion?->note ? ' · '.$item->latestVersion->note : '' }}</span></td>
+                                        <td class="num">v{{ $item->current_version }}</td>
+                                        <td>@include('content.status-tag', ['status' => $item->status])</td>
+                                        <td>
+                                            @if($item->status === 'review')
+                                                <a class="pill ghost sm" href="{{ route('review.index', ['item' => $item->id]) }}" wire:navigate>Review</a>
+                                            @else
+                                                <a class="pill ghost sm" href="{{ route('products.show', [$pack->product, 'tab' => 'content', 'item' => $item->id]) }}" wire:navigate>Open</a>
+                                            @endif
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table></div>
+                    </section>
+                @endif
+
                 <section class="version-controls">
                     <div class="version-history"><span>VERSIONS</span>@foreach($pack->versions->sortBy('version') as $availableVersion)<button type="button" wire:click="selectVersion({{ $availableVersion->version }})" @class(['active' => $version->version === $availableVersion->version])>v{{ $availableVersion->version }}</button>@endforeach</div>
                     <form wire:submit="regenerateSection" class="regeneration-form">
@@ -177,6 +211,7 @@
                 </section>
 
                 @if($reviewFeaturesAvailable)
+                @if($contentItems === null)
                 <section class="review-panel">
                     <div><p class="section-label">HUMAN REVIEW</p><h2>{{ $version->review_status === 'approved' ? 'This version is locked.' : 'Review before media buyers use this version.' }}</h2><p>{{ $version->review_note ?: 'Draft changes remain separate from approved versions.' }}</p></div>
                     <div class="review-actions">
@@ -190,6 +225,7 @@
                     @if($shareUrl)<p class="share-result">Share link: <a href="{{ $shareUrl }}" target="_blank" rel="noopener">{{ $shareUrl }}</a></p>@endif
                     @error('reviewNote')<p class="approval-error" role="alert">{{ $message }}</p>@enderror
                 </section>
+                @endif
 
                 <section class="review-panel compact-review">
                     <div><p class="section-label">SOURCE TRUTH</p><h3>{{ $pack->sourceSnapshot->approved_at ? 'Source approved '.$pack->sourceSnapshot->approved_at->format('M j, Y') : 'Source needs an owner approval' }}</h3><p>{{ $pack->sourceSnapshot->url }} · {{ $pack->product->sourceSnapshots()->count() }} source snapshots retained</p></div>
@@ -197,13 +233,17 @@
                 </section>
 
                 @if($version->review_status === 'approved')
-                    <section class="export-panel"><span>EXPORT APPROVED VERSION</span><a href="{{ route('campaign-packs.export', [$pack, $version, 'pdf']) }}">Complete pack</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'voiceover']) }}">Voiceover sheet</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'captions']) }}">Timed captions</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'shot-plan']) }}">Shot plan</a>@foreach($shares->whereNull('revoked_at') as $share)<button type="button" wire:click="revokeShare({{ $share->id }})">Revoke share</button>@endforeach</section>
+                    <section class="export-panel"><span>EXPORT APPROVED VERSION</span><a href="{{ route('campaign-packs.export', [$pack, $version, 'pdf']) }}">Complete pack</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'voiceover']) }}">Voiceover sheet</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'captions']) }}">Timed captions</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'shot-plan']) }}">Shot plan</a>@if($contentItems !== null && $isOwner)<button type="button" wire:click="createShare">Create 7-day share link</button>@endif @foreach($shares->whereNull('revoked_at') as $share)<button type="button" wire:click="revokeShare({{ $share->id }})">Revoke share</button>@endforeach</section>
+                @if($contentItems !== null && $shareUrl)<p class="share-result">Share link: <a href="{{ $shareUrl }}" target="_blank" rel="noopener">{{ $shareUrl }}</a></p>@endif
                 @endif
 
+                @if($contentItems === null)
                 <section class="comments-panel"><div><p class="section-label">REVIEW NOTES</p><h3>{{ $version->comments->count() }} comments on this version</h3></div><form wire:submit="addComment"><input wire:model="commentSection" placeholder="Section (optional)"><textarea wire:model="commentBody" placeholder="Leave a precise review note"></textarea><button type="submit">Add note</button></form>@foreach($version->comments as $comment)<article><strong>{{ $comment->user->name }}</strong>@if($comment->section)<span>{{ $comment->section }}</span>@endif<p>{{ $comment->body }}</p></article>@endforeach</section>
+                @endif
                 @endif
 
                 <div class="pack-layout">
+                    @if($contentItems === null)
                     <aside class="chapters" aria-label="Pack chapters">
                         <p>CHAPTERS</p>
                         <a href="#overview" class="active">Overview</a>
@@ -218,6 +258,7 @@
                         <a href="#qa-approval">QA & Approval</a>
                         <a href="#versions-exports">Versions & Exports</a>
                     </aside>
+                    @endif
 
                     <article class="pack-content">
                         <section id="overview" class="direction-section workspace-overview">
@@ -245,16 +286,20 @@
                             <div class="source-links"><span>SOURCES</span>@foreach($content['product_truth']['sources'] as $sourceUrl)<a href="{{ $sourceUrl }}" target="_blank" rel="noopener noreferrer">{{ parse_url($sourceUrl, PHP_URL_HOST) ?: $sourceUrl }} ↗</a>@endforeach</div>
                         </section>
 
+                        @if($contentItems === null)
                         <section id="positioning" class="pack-section">
                             <div class="section-header"><div><span class="section-label">POSITIONING</span><h3>{{ $content['positioning']['value_proposition'] }}</h3></div><span class="approved-status">Source constrained</span></div>
                             <p class="positioning-statement">{{ $content['positioning']['brand_position'] }}</p>
                             <div class="audience-table"><div class="audience-row audience-heading"><span>AUDIENCE</span><span>NEED</span><span>BUYER MOMENT</span><span>WHY RELEVANT</span></div>@foreach($content['positioning']['audience_priorities'] as $audience)<div class="audience-row"><strong>{{ $audience['name'] }}</strong><span>{{ $audience['need'] }}</span><span>{{ $audience['buyer_moment'] }}</span><span>{{ $audience['why_relevant'] }}</span></div>@endforeach</div>
                         </section>
+                        @endif
 
+                        @if($contentItems === null)
                         <section id="ranked-angles" class="pack-section">
                             <div class="section-header"><div><span class="section-label">RANKED ANGLES</span><h3>Several routes explored. The strongest three lead.</h3></div><span class="count-badge">{{ count($content['ranked_angles']) }} ANGLES</span></div>
                             <div class="angle-table"><div class="angle-row angle-heading"><span>RANK</span><span>ANGLE</span><span>BUYER MOMENT</span><span>MAIN BENEFIT</span><span>STATUS</span></div>@foreach($content['ranked_angles'] as $angle)<article class="angle-row"><b>{{ str_pad($angle['rank'], 2, '0', STR_PAD_LEFT) }}</b><div><strong>{{ $angle['title'] }}</strong><p>{{ $angle['core_idea'] }}</p><small>{{ $angle['ranking_reason'] }}</small></div><span>{{ $angle['buyer_moment'] }}</span><span>{{ $angle['main_benefit'] }}</span><em class="angle-status {{ $angle['status'] }}">{{ $angle['status'] === 'recommended' ? 'Recommended' : 'Secondary' }}</em></article>@endforeach</div>
                         </section>
+                        @endif
 
                         @push('campaign-banner-studio')
                         @php
@@ -342,6 +387,7 @@
                         </section>
                         @endpush
 
+                        @if($contentItems === null)
                         <section id="creative-routes" class="pack-section creative-routes-section">
                             <div class="section-header"><div><span class="section-label">CREATIVE ROUTES</span><h3>Three complete stories from the top angles</h3></div><button type="button" class="section-copy" @click="navigator.clipboard.writeText(@js(json_encode($content['creative_routes'], JSON_PRETTY_PRINT))); copied = 'routes'" x-text="copied === 'routes' ? '✓ Copied routes' : '▣ Copy all routes'"></button></div>
                             <div class="route-tabs" role="tablist" aria-label="Creative routes">@foreach($content['creative_routes'] as $routeIndex => $route)<button type="button" role="tab" @click="activeRoute = {{ $routeIndex }}" :aria-selected="(activeRoute === {{ $routeIndex }}).toString()" :class="activeRoute === {{ $routeIndex }} && 'active'">Route {{ $routeIndex + 1 }} · {{ $route['name'] }}</button>@endforeach</div>
@@ -357,7 +403,9 @@
                                 </article>
                             @endforeach
                         </section>
+                        @endif
 
+                        @if($contentItems === null)
                         <section id="shot-plans" class="pack-section">
                             <div class="section-header"><div><span class="section-label">SHOT PLANS</span><h3>What the team needs to record for each route</h3></div><span class="approved-status">No existing footage assumed</span></div>
                             @foreach($content['creative_routes'] as $routeIndex => $route)
@@ -367,20 +415,25 @@
                                 </div>
                             @endforeach
                         </section>
+                        @endif
 
+                        @if($contentItems === null)
                         <section id="platform-assets" class="pack-section">
                             <div class="section-header"><div><span class="section-label">PLATFORM ASSETS</span><h3>Publish-ready copy grouped under its route</h3></div><span class="approved-status">Reels · Shorts · WhatsApp · Meta</span></div>
                             @foreach($content['creative_routes'] as $routeIndex => $route)
                                 <div class="platform-grid" x-cloak x-show="activeRoute === {{ $routeIndex }}">@foreach($route['platform_assets'] as $platform => $asset)<article><header><strong>{{ str($platform)->replace('_', ' ')->title() }}</strong><button type="button" aria-label="Copy {{ str($platform)->replace('_', ' ') }} assets" @click="navigator.clipboard.writeText(@js(json_encode($asset, JSON_PRETTY_PRINT)))">▣</button></header><small>PRIMARY COPY</small><p>{{ $asset['primary_copy'] }}</p><small>CAPTION / TITLE</small><p>{{ $asset['short_caption'] }}<br><strong>{{ $asset['title'] }}</strong></p><small>CTA</small><p>{{ $asset['cta'] }}</p>@if($asset['frames'])<small>FRAMES</small><ol>@foreach($asset['frames'] as $frame)<li>{{ $frame }}</li>@endforeach</ol>@endif</article>@endforeach</div>
                             @endforeach
                         </section>
+                        @endif
 
                         @stack('campaign-banner-studio')
 
+                        @if($contentItems === null)
                         <section id="offers" class="pack-section">
                             <div class="section-header"><div><span class="section-label">OFFERS</span><h3>Value framing without invented discounts</h3></div><span class="approved-status">Source constrained</span></div>
                             <div class="offer-list">@forelse($content['offers'] as $offer)<article><div><strong>{{ $offer['wording'] }}</strong><p>{{ $offer['audience_or_situation'] }}</p></div><div><small>WHY IT FITS</small><p>{{ $offer['brand_fit'] }}</p></div><div><small>LIMITS</small><p>{{ $offer['limitations'] }}</p></div><button type="button" aria-label="Copy offer framing" @click="navigator.clipboard.writeText(@js($offer['wording']))">▣</button></article>@empty<p>No safe offer framing was generated.</p>@endforelse</div>
                         </section>
+                        @endif
 
                         <section id="qa-approval" class="pack-section">
                             <div class="section-header"><div><span class="section-label">QA & APPROVAL</span><h3>{{ $qaIssues ? 'Approval is blocked until every issue is fixed.' : 'Claims, scripts, and captions pass deterministic checks.' }}</h3></div><span @class(['qa-status', 'passed' => !$qaIssues, 'blocked' => $qaIssues])>{{ $qaIssues ? count($qaIssues).' blocking '.Str::plural('issue', count($qaIssues)) : '✓ Ready for owner review' }}</span></div>

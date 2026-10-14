@@ -1,11 +1,14 @@
-@php($reviewCount = \App\Models\CampaignPack::query()
-    ->where('status', 'review')
-    ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-    ->count())
+@php($contentReview = \App\Services\ContentLibrary::available())
+@php($reviewCount = $contentReview
+    ? \App\Models\ContentItem::query()->where('workspace_id', $workspace->id)->where('status', 'review')->count()
+    : \App\Models\CampaignPack::query()
+        ->where('status', 'review')
+        ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
+        ->count())
 @php($user = auth()->user())
 <header class="top">
     <livewire:global-search />
-    <a class="pill ghost sm" href="{{ route('campaign-packs.index', ['status' => 'review']) }}" aria-label="Review queue, {{ $reviewCount }} waiting">Review queue <span class="count num">{{ $reviewCount }}</span></a>
+    <a class="pill ghost sm" href="{{ $contentReview ? route('review.index') : route('campaign-packs.index', ['status' => 'review']) }}" aria-label="Review queue, {{ $reviewCount }} waiting">Review queue <span class="count num">{{ $reviewCount }}</span></a>
     <livewire:inbox-drawer />
     <details class="account">
         <summary class="avatar" aria-label="Account menu for {{ $user->name }}" title="{{ $user->name }}">{{ collect(explode(' ', $user->name))->filter()->take(2)->map(fn ($part) => mb_strtoupper(mb_substr($part, 0, 1)))->implode('') }}</summary>

@@ -44,4 +44,9 @@ class Product extends Model
     {
         return $this->hasMany(ProductHubShare::class);
     }
+
+    public function contentItems(): HasMany
+    {
+        return $this->hasMany(ContentItem::class);
+    }
 }

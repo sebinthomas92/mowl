@@ -9,7 +9,12 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class CampaignPack extends Model
 {
-    protected $fillable = ['product_id', 'source_snapshot_id', 'name', 'status', 'analysis_mode', 'credit_cost', 'current_version', 'estimated_cost'];
+    protected $fillable = ['product_id', 'source_snapshot_id', 'name', 'status', 'analysis_mode', 'credit_cost', 'current_version', 'estimated_cost', 'brief'];
+
+    protected function casts(): array
+    {
+        return ['brief' => 'array'];
+    }
 
     public function product(): BelongsTo
     {
@@ -49,5 +54,10 @@ class CampaignPack extends Model
     public function latestGenerationJob(): HasOne
     {
         return $this->hasOne(CampaignGenerationJob::class)->latestOfMany();
+    }
+
+    public function contentItems(): HasMany
+    {
+        return $this->hasMany(ContentItem::class);
     }
 }
