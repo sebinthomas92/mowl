@@ -43,6 +43,12 @@ class StoreConnection extends Model
         return $this->status === 'connected';
     }
 
+    /** Identifies the store a remote page id belongs to; changes when the store address changes. */
+    public function remoteKey(): string
+    {
+        return hash('sha256', $this->id.'|'.$this->driver.'|'.rtrim(strtolower((string) $this->site_url), '/'));
+    }
+
     public function label(): string
     {
         return $this->driver === 'sandbox' ? 'Sandbox store' : ($this->has_woocommerce ? 'WooCommerce' : 'WordPress');

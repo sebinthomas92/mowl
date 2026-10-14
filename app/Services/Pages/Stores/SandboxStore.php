@@ -26,7 +26,7 @@ class SandboxStore implements StoreClient
         return ['id' => $ref['key'], 'url' => route('sandbox-store.media', [$store->api_base, $ref['key']])];
     }
 
-    public function putPage(StoreConnection $store, Page $page, ?string $remoteId, string $html): array
+    public function putPage(StoreConnection $store, Page $page, ?string $remoteId, string $title, string $html): array
     {
         return ['id' => (string) $page->id, 'url' => route('sandbox-store.page', [$store->api_base, $page->id, $page->slug])];
     }

@@ -22,7 +22,7 @@ interface StoreClient
      *
      * @return array{id: string, url: string}
      */
-    public function putPage(StoreConnection $store, Page $page, ?string $remoteId, string $html): array;
+    public function putPage(StoreConnection $store, Page $page, ?string $remoteId, string $title, string $html): array;
 
     /** The public page as a visitor would get it. */
     public function fetchPublic(StoreConnection $store, Page $page, string $url): string;

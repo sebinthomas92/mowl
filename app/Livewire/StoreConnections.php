@@ -3,9 +3,12 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use App\Models\Page;
+use App\Models\PublishAttempt;
 use App\Models\StoreConnection;
 use App\Services\Pages\StoreException;
 use App\Services\Pages\Stores\StoreClients;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
@@ -94,6 +97,10 @@ class StoreConnections extends Component
 
             return;
         }
+        if ($store->exists && $store->isDirty('site_url')) {
+            // Images uploaded to the old address do not exist at the new one.
+            $store->media = null;
+        }
         $store->fill($result + ['status' => 'connected', 'last_error' => null, 'checked_at' => now()])->save();
         $this->audit($this->editingId ? 'store_connection_updated' : 'store_connection_added', $store);
 
@@ -121,7 +128,14 @@ class StoreConnections extends Component
         $this->authorizeOwner();
         $store = $this->store($id);
         $this->audit('store_connection_removed', $store);
-        $store->delete();
+        DB::transaction(function () use ($store): void {
+            $error = "{$store->name} was removed while this page was publishing. Choose a store, then publish again.";
+            $pending = PublishAttempt::query()->where('store_connection_id', $store->id)->whereIn('status', ['publishing', 'verifying']);
+            Page::query()->whereIn('id', (clone $pending)->select('page_id'))->whereIn('publish_state', ['publishing', 'verifying'])
+                ->update(['publish_state' => 'failed', 'last_error' => $error]);
+            $pending->update(['status' => 'failed', 'error' => $error, 'finished_at' => now()]);
+            $store->delete();
+        });
         $this->flash = "{$store->name} was removed. Pages already published there stay in the store.";
     }
 

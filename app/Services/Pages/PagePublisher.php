@@ -45,11 +45,18 @@ class PagePublisher
     public function verify(Page $page): ?PublishAttempt
     {
         $attempt = $page->attempts()->where('status', 'verifying')->latest('id')->with('pageVersion')->first();
-        $store = $page->storeConnection;
-        if (! $attempt || ! $store) {
-            return $attempt;
+        if (! $attempt) {
+            return null;
         }
         $version = $attempt->pageVersion->version;
+        $store = $attempt->store_connection_id ? StoreConnection::find($attempt->store_connection_id) : null;
+        if (! $store || $store->id !== $page->storeConnection?->id) {
+            // The store was removed or swapped while this publish waited; nothing more can be checked.
+            $this->finish($page, $attempt, 'failed', 'The store this publish went to is no longer connected to the page. Choose a store, then publish again.');
+            $this->notify($page, 'publish_failed', $version, $attempt->user);
+
+            return $attempt->fresh();
+        }
 
         try {
             $served = $this->renderer->serves($this->clients->for($store)->fetchPublic($store, $page, $attempt->remote_url), $page->id, $version);
@@ -59,27 +66,53 @@ class PagePublisher
         }
 
         if ($served) {
-            DB::transaction(function () use ($page, $attempt, $version): void {
-                $attempt->update(['status' => 'live', 'finished_at' => now(), 'error' => null]);
-                $page->update(['publish_state' => 'live', 'live_version' => $version, 'verified_at' => now(), 'last_error' => null]);
-            });
-            $this->notify($page, $attempt->action === 'rollback' ? 'rolled_back' : 'published', $version, $attempt->user);
+            if ($this->finish($page, $attempt, 'live', null, ['live_version' => $version, 'verified_at' => now()])) {
+                $this->notify($page, $attempt->action === 'rollback' ? 'rolled_back' : 'published', $version, $attempt->user);
+            }
 
             return $attempt->fresh();
         }
 
-        $attempt->increment('verify_checks');
-        if ($attempt->verify_checks >= config('pages.verify_checks')) {
-            $error = "The store accepted v{$version}, but {$attempt->remote_url} still does not serve it after {$attempt->verify_checks} checks"
+        $checks = DB::transaction(function () use ($attempt): ?int {
+            $locked = PublishAttempt::query()->lockForUpdate()->find($attempt->id);
+            if ($locked?->status !== 'verifying') {
+                return null;
+            }
+            $locked->increment('verify_checks');
+
+            return $locked->verify_checks;
+        });
+        if ($checks !== null && $checks >= config('pages.verify_checks')) {
+            $error = "The store accepted v{$version}, but {$attempt->remote_url} still does not serve it after {$checks} checks"
                 .($problem ? " ({$problem})" : '').'. A cache may be holding the old page. Check the store, then publish again.';
-            DB::transaction(function () use ($page, $attempt, $error): void {
-                $attempt->update(['status' => 'unverified', 'error' => mb_substr($error, 0, 500), 'finished_at' => now()]);
-                $page->update(['publish_state' => 'failed', 'last_error' => mb_substr($error, 0, 500)]);
-            });
-            $this->notify($page, 'publish_failed', $version, $attempt->user);
+            if ($this->finish($page, $attempt, 'unverified', $error)) {
+                $this->notify($page, 'publish_failed', $version, $attempt->user);
+            }
         }
 
         return $attempt->fresh();
+    }
+
+    /**
+     * Ends a verifying attempt once. Overlapping checks (two tabs polling) cannot both finish it, and a
+     * check that started before a newer publish cannot overwrite the page's state.
+     */
+    private function finish(Page $page, PublishAttempt $attempt, string $status, ?string $error, array $pageFields = []): bool
+    {
+        return DB::transaction(function () use ($page, $attempt, $status, $error, $pageFields): bool {
+            $locked = PublishAttempt::query()->lockForUpdate()->find($attempt->id);
+            if ($locked?->status !== 'verifying') {
+                return false;
+            }
+            $error = $error === null ? null : mb_substr($error, 0, 500);
+            $locked->update(['status' => $status, 'error' => $error, 'finished_at' => now()]);
+            $latest = $page->attempts()->max('id') === $attempt->id;
+            if ($latest) {
+                $page->update(['publish_state' => $status === 'live' ? 'live' : 'failed', 'last_error' => $error] + $pageFields);
+            }
+
+            return true;
+        });
     }
 
     private function send(Page $page, User $actor, ?int $rollbackTo): PublishAttempt
@@ -93,6 +126,9 @@ class PagePublisher
             $store = $page->storeConnection;
             if (! $store) {
                 throw ValidationException::withMessages(['publish' => 'Choose a store to publish to.']);
+            }
+            if ($store->workspace_id !== $page->workspace_id || ($store->brand_id && $store->brand_id !== $page->product?->brand_id)) {
+                throw ValidationException::withMessages(['publish' => "{$store->name} belongs to another brand. Choose this product's store, then publish again."]);
             }
             if (! $store->isConnected()) {
                 throw ValidationException::withMessages(['publish' => "{$store->name} needs attention. Reconnect it in Settings, then publish again."]);
@@ -133,7 +169,13 @@ class PagePublisher
             $client = $this->clients->for($store);
             $html = $this->renderer->page($version->snapshot, $version->version, fn (array $ref) => $this->storeImage($store, $client, $ref, $page->workspace_id));
             $attempt->update(['html' => $html]);
-            $remote = $client->putPage($store, $page, $page->remote_id, $html);
+            // A page id only means something on the store (and address) it was created on.
+            $remoteId = $page->remote_store === $store->remoteKey() ? $page->remote_id : null;
+            $remote = $client->putPage($store, $page, $remoteId, (string) ($version->snapshot['name'] ?? $page->name), $html);
+            DB::transaction(function () use ($page, $attempt, $store, $remote): void {
+                $attempt->update(['status' => 'verifying', 'remote_url' => $remote['url']]);
+                $page->update(['publish_state' => 'verifying', 'remote_id' => $remote['id'], 'remote_url' => $remote['url'], 'remote_store' => $store->remoteKey()]);
+            });
         } catch (StoreException $exception) {
             $this->fail($page, $attempt, $store, $exception);
 
@@ -145,10 +187,6 @@ class PagePublisher
             return $attempt->fresh();
         }
 
-        DB::transaction(function () use ($page, $attempt, $remote): void {
-            $attempt->update(['status' => 'verifying', 'remote_url' => $remote['url']]);
-            $page->update(['publish_state' => 'verifying', 'remote_id' => $remote['id'], 'remote_url' => $remote['url']]);
-        });
         $this->audit($page, $actor, $attempt->action === 'rollback' ? 'page_rolled_back' : 'page_published', ['version' => $version->version, 'url' => $remote['url']]);
 
         return $this->verify($page->fresh()) ?? $attempt->fresh();

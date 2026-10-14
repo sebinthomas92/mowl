@@ -270,6 +270,41 @@ class PagesTest extends TestCase
         }
     }
 
+    public function test_a_page_moved_to_another_store_never_reuses_its_old_page_there(): void
+    {
+        [$owner, $workspace, $pack] = $this->fixture();
+        $page = $this->approvedPage($owner, $pack);
+        $this->fakeWordPress();
+        $first = $this->connectStore($owner);
+        $page->update(['store_connection_id' => $first->id]);
+        app(PagePublisher::class)->publish($page, $owner);
+        $this->assertSame($first->remoteKey(), $page->fresh()->remote_store);
+
+        $second = $this->connectStore($owner);
+        $this->wp['stale'] = true;
+        Livewire::actingAs($owner)->test(ProductPages::class, ['productId' => $pack->product_id])
+            ->call('chooseStore', (string) $second->id)
+            ->call('publish')
+            ->assertHasNoErrors();
+        $this->assertCount(2, $this->wp['pages'], 'The second store gets its own page, not an update of the first one.');
+        $this->assertSame('verifying', $page->fresh()->publish_state);
+
+        Livewire::actingAs($owner)->test(ProductPages::class, ['productId' => $pack->product_id])
+            ->call('chooseStore', (string) $first->id)
+            ->assertHasErrors('publish');
+        Livewire::actingAs($owner)->test(StoreConnections::class)->call('remove', $second->id);
+        $page->refresh();
+        $this->assertSame('failed', $page->publish_state);
+        $this->assertStringContainsString('was removed while this page was publishing', $page->last_error);
+        $this->assertSame(['live', 'failed'], $page->attempts()->orderBy('id')->pluck('status')->all());
+
+        $otherBrand = $workspace->brands()->create(['name' => 'Other Brand']);
+        $foreign = StoreConnection::create(['workspace_id' => $workspace->id, 'brand_id' => $otherBrand->id, 'name' => 'Other store', 'driver' => 'sandbox', 'site_url' => 'https://other.test', 'status' => 'connected']);
+        $page->update(['store_connection_id' => $foreign->id]);
+        $this->expectException(ValidationException::class);
+        app(PagePublisher::class)->publish($page->fresh(), $owner);
+    }
+
     public function test_pages_belong_to_their_workspace(): void
     {
         [$owner, , $pack] = $this->fixture();

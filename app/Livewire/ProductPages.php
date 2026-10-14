@@ -11,6 +11,7 @@ use App\Services\Pages\PageBuilder;
 use App\Services\Pages\PageImages;
 use App\Services\Pages\PagePublisher;
 use App\Services\Pages\PageRenderer;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -118,9 +119,12 @@ class ProductPages extends Component
         $page = $this->page();
         $store = $storeId === '' ? null : $builder->stores($this->product())->firstWhere('id', (int) $storeId);
         abort_if($storeId !== '' && ! $store, 404);
-        if ($page->live_version && $page->store_connection_id && $store?->id !== $page->store_connection_id) {
+        if ($page->isBusy()) {
+            throw ValidationException::withMessages(['publish' => 'Wait for the current publish to finish before changing the store.']);
+        }
+        if ($store?->id !== $page->store_connection_id && ($page->remote_id || $page->live_version)) {
             // A different store means a different page there; the next publish creates it.
-            $page->update(['store_connection_id' => $store?->id, 'remote_id' => null, 'remote_url' => null, 'live_version' => null, 'publish_state' => 'idle', 'verified_at' => null, 'last_error' => null]);
+            $page->update(['store_connection_id' => $store?->id, 'remote_id' => null, 'remote_url' => null, 'remote_store' => null, 'live_version' => null, 'publish_state' => 'idle', 'verified_at' => null, 'last_error' => null]);
         } else {
             $page->update(['store_connection_id' => $store?->id]);
         }

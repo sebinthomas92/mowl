@@ -52,7 +52,9 @@ return new class extends Migration
             $table->string('publish_state', 20)->default('idle');
             $table->string('last_error', 500)->nullable();
             $table->string('remote_id', 64)->nullable();
-            $table->string('remote_url', 500)->nullable();
+            $table->string('remote_url', 2048)->nullable();
+            // Which store (and address) remote_id belongs to, so another store never gets that id.
+            $table->string('remote_store', 64)->nullable();
             $table->timestamp('verified_at')->nullable();
             $table->foreignId('created_by_user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamps();
@@ -93,7 +95,7 @@ return new class extends Migration
             $table->string('action', 20)->default('publish');
             $table->string('status', 20);
             $table->string('error', 500)->nullable();
-            $table->string('remote_url', 500)->nullable();
+            $table->string('remote_url', 2048)->nullable();
             $table->longText('html')->nullable();
             $table->unsignedSmallInteger('verify_checks')->default(0);
             $table->foreignId('user_id')->nullable()->constrained()->nullOnDelete();

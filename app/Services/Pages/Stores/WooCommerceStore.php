@@ -80,9 +80,9 @@ class WooCommerceStore implements StoreClient
         return ['id' => (string) $response->json('id'), 'url' => (string) $response->json('source_url')];
     }
 
-    public function putPage(StoreConnection $store, Page $page, ?string $remoteId, string $html): array
+    public function putPage(StoreConnection $store, Page $page, ?string $remoteId, string $title, string $html): array
     {
-        $payload = ['title' => $page->name, 'slug' => $page->slug, 'content' => $html, 'status' => 'publish'];
+        $payload = ['title' => $title, 'slug' => $page->slug, 'content' => $html, 'status' => 'publish'];
         $response = null;
         if ($remoteId) {
             $url = $this->endpoint($store, 'wp/v2/pages/'.rawurlencode($remoteId));

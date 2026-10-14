@@ -19,7 +19,7 @@ class Page extends Model
 
     protected $fillable = [
         'workspace_id', 'product_id', 'store_connection_id', 'name', 'slug', 'headline', 'draft_version', 'live_version',
-        'publish_state', 'last_error', 'remote_id', 'remote_url', 'verified_at', 'created_by_user_id',
+        'publish_state', 'last_error', 'remote_id', 'remote_url', 'remote_store', 'verified_at', 'created_by_user_id',
     ];
 
     protected function casts(): array
