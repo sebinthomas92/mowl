@@ -1,6 +1,6 @@
 @php
     $heroImage = $product->mediaAssets->first(fn ($asset) => str_starts_with((string) $asset->mime_type, 'image/') && $asset->status !== 'failed');
-    $needsDecision = $facts->whereIn('status', ['conflict', 'missing'])->count();
+    $needsDecision = $facts->whereIn('status', ['conflict', 'missing'])->reject(fn ($item) => $item->key === 'audience' && $item->status === 'missing' && ($brandAudience ?? null))->count();
     $inReview = $packs->where('status', 'review')->count();
     $checkedAt = $source?->fetched_at ?? $source?->created_at;
     $stale = $checkedAt && $checkedAt->lt(now()->subDays(14));

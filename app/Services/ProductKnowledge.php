@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Brand;
 use App\Models\Product;
 use App\Models\ProductFact;
 use App\Models\SourceSnapshot;
@@ -204,6 +205,18 @@ class ProductKnowledge
             }
         }
 
+        // Brand defaults fill what the product leaves open. A product's own audience always wins, and an
+        // excluded audience stays excluded rather than falling back to the brand.
+        unset($page['brand_profile']);
+        $profile = $this->brandProfile($product);
+        $audience = $facts->get('audience');
+        if (isset($profile['default_audience']) && ! isset($team['audience']) && $audience?->status !== 'excluded') {
+            $team['audience'] = $profile['default_audience'];
+        }
+        if ($brandProfile = array_filter(['voice' => $profile['voice'] ?? null, 'palette' => $profile['palette'] ?? null])) {
+            $page['brand_profile'] = $brandProfile;
+        }
+
         $page['product_truth'] = $truth;
         $excluded = $this->excludedValues($product, $original);
         foreach (['content', 'description', 'product_truth'] as $field) {
@@ -257,7 +270,33 @@ class ProductKnowledge
     /** A short fingerprint of the confirmed knowledge, for generation cache keys. */
     public function fingerprint(Product $product): string
     {
-        return hash('sha256', json_encode($product->facts()->orderBy('key')->get(['key', 'confirmed_value', 'status'])->toArray()));
+        return hash('sha256', json_encode([
+            $product->facts()->orderBy('key')->get(['key', 'confirmed_value', 'status'])->toArray(),
+            $this->brandProfile($product),
+        ]));
+    }
+
+    /**
+     * The brand's audience when the product has none of its own, for showing the inherited value.
+     */
+    public function inheritedAudience(Product $product, ?ProductFact $audience): ?string
+    {
+        if ($audience && ($audience->status === 'excluded' || $audience->confirmed_value !== null)) {
+            return null;
+        }
+
+        return $this->brandProfile($product)['default_audience'] ?? null;
+    }
+
+    /** Voice, default audience and palette the product inherits from its brand. */
+    public function brandProfile(Product $product): array
+    {
+        if (! Brand::profileAvailable()) {
+            return [];
+        }
+        $brand = $product->relationLoaded('brand') ? $product->brand : $product->brand()->first();
+
+        return $brand?->profile() ?? [];
     }
 
     /** @return array<string, string> */

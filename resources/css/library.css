@@ -1,0 +1,86 @@
+/*
+ * Library pages: Brands, brand editor and Add product.
+ * Mirrors the MarketingOwl App design (.pagehead/.chips/.field/.opt) on the shared tokens.
+ */
+
+.lib-page{display:flex;flex-direction:column;gap:20px;min-width:0}
+.lib-page .eyebrow{font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--eyebrow)}
+.medium{font-weight:500}
+.self-start{align-self:flex-start}
+.break{overflow-wrap:anywhere}
+
+/* Page head */
+.pagehead{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.pagehead h1{font-size:44px;line-height:1.05;margin:6px 0 0;color:var(--ink)}
+.pagehead p{margin:6px 0 0;max-width:640px}
+
+/* Chips */
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{min-height:36px;padding:0 14px;border-radius:var(--radius-pill);border:0;background:var(--surface);box-shadow:inset 0 0 0 1px var(--line);color:var(--ink-2);font:inherit;font-size:13px;font-weight:500;cursor:pointer;transition:background-color .3s}
+.chip:hover{background:var(--surface-2);color:var(--ink)}
+.chip[aria-pressed="true"],.chip[aria-pressed="true"]:hover{background:var(--nav-cur-bg);color:var(--nav-cur-fg);box-shadow:none}
+.chip:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+/* Form fields */
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>label{font-weight:500;font-size:13px;color:var(--ink)}
+.input[aria-invalid="true"]{border-color:var(--bad-fg)}
+.input[disabled]{background:var(--surface-2);color:var(--muted)}
+select.input{appearance:auto}
+.err{color:var(--bad-fg);font-size:13px}
+.add-grid{gap:16px}
+.pill[disabled],.pill[aria-disabled="true"]{opacity:.45;cursor:not-allowed}
+
+/* Two-column form layout with a side column */
+.add-layout{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;margin:0}
+.add-main{flex:999 1 520px;min-width:0;gap:16px}
+.add-aside{flex:1 1 280px;max-width:380px;gap:16px}
+.add-aside .tip{background:var(--surface-2);box-shadow:none}
+.add-url-row{gap:8px;flex-wrap:nowrap}
+.add-url-row .input{flex:1 1 auto}
+.tw.flat{box-shadow:none;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line)}
+.add-table{min-width:640px}
+.add-table .fact-value{min-width:220px}
+.add-table .fact-value .err{display:block;margin-top:4px}
+
+/* Loading skeleton */
+.skel{height:14px;border-radius:10px;background:linear-gradient(90deg,var(--surface-2),var(--line),var(--surface-2));background-size:400px 100%;animation:shimmer 1.4s linear infinite}
+@keyframes shimmer{from{background-position:-200px 0}to{background-position:200px 0}}
+@media(prefers-reduced-motion:reduce){.skel{animation:none}}
+
+/* Brands */
+.brand-card h2{font-size:30px;line-height:1.1;margin:0;color:var(--ink);overflow-wrap:anywhere}
+.brand-card .kv>span:last-child{text-align:right;min-width:0}
+.swatches{gap:8px}
+.swatch{width:44px;height:44px;border-radius:12px;flex:none;box-shadow:inset 0 0 0 1px rgba(0,0,0,.08)}
+.swatch.sm{width:28px;height:28px;border-radius:8px}
+.palette-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.palette-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.color-pick{width:44px;height:44px;padding:0;border:0;border-radius:12px;background:none;cursor:pointer;flex:none}
+.color-pick::-webkit-color-swatch-wrapper{padding:0}
+.color-pick::-webkit-color-swatch{border:0;border-radius:12px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+.color-pick::-moz-color-swatch{border:0;border-radius:12px}
+.color-pick:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.input.hex{width:120px;font-variant-numeric:tabular-nums;text-transform:uppercase}
+.palette-err{flex-basis:100%}
+.brand-preview-band{min-height:120px;border-radius:16px;padding:18px;display:flex;align-items:flex-end;background:var(--hero);color:#fff}
+.brand-preview-band .display{font-size:28px;line-height:1.1;text-shadow:0 1px 12px rgba(0,0,0,.35);overflow-wrap:anywhere}
+
+@media(max-width:720px){
+    .pagehead h1{font-size:34px}
+    .add-aside{max-width:none}
+    .add-url-row{flex-wrap:wrap}
+    .add-url-row .pill{width:100%}
+    /* The confirm table becomes one card per fact. */
+    .add-table{min-width:0}
+    .add-table thead{display:none}
+    .add-table,.add-table tbody,.add-table tr,.add-table td,.add-table tbody th{display:block}
+    .add-table tr{display:grid;grid-template-columns:1fr auto;gap:6px 12px;padding:16px;border-top:1px solid var(--line)}
+    .add-table tbody tr:first-child{border-top:0}
+    .add-table td,.add-table tbody th{padding:0;border:0;max-width:none;width:auto}
+    .add-table .fact-name{grid-column:1}
+    .add-table td:nth-of-type(3){grid-column:2;grid-row:1}
+    .add-table .fact-source,.add-table .fact-value{grid-column:1/-1;min-width:0}
+    .add-table .fact-source::before{content:'Source says';display:block;font-size:12px;color:var(--muted)}
+    .add-table .fact-value::before{content:'Your confirmed value';display:block;font-size:12px;color:var(--muted)}
+}
