@@ -35,6 +35,11 @@ class Product extends Model
         return $this->hasMany(ProductResourceLink::class);
     }
 
+    public function facts(): HasMany
+    {
+        return $this->hasMany(ProductFact::class);
+    }
+
     public function hubShares(): HasMany
     {
         return $this->hasMany(ProductHubShare::class);

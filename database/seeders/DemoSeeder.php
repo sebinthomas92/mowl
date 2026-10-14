@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\CampaignPackActivity;
 use App\Services\MockCampaignPackGenerator;
+use App\Services\ProductKnowledge;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -128,5 +129,28 @@ class DemoSeeder extends Seeder
                 $user->notify(new CampaignPackActivity('review_requested', $review, $reviewer));
             }
         }
+
+        $this->seedKnowledgeConflict($workspace);
+    }
+
+    /** Give the first product a refreshed source whose price changed, so Knowledge shows a decision to make. */
+    private function seedKnowledgeConflict(Workspace $workspace): void
+    {
+        $product = Product::whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))->orderBy('id')->first();
+        if (! $product || ! ProductKnowledge::available() || $product->facts()->exists()) {
+            return;
+        }
+
+        $knowledge = app(ProductKnowledge::class);
+        $previous = $product->sourceSnapshots()->where('status', 'ready')->latest('id')->first();
+        $knowledge->facts($product);
+        if (! $previous) {
+            return;
+        }
+
+        $truth = ['price' => '64.00'] + $previous->extracted_truth;
+        $refreshed = $previous->replicate(['approved_by_user_id', 'approved_at']);
+        $refreshed->fill(['extracted_truth' => $truth, 'content_hash' => hash('sha256', json_encode($truth)), 'fetched_at' => now(), 'refreshed_from_snapshot_id' => $previous->id])->save();
+        $knowledge->syncFromSource($product, $refreshed);
     }
 }

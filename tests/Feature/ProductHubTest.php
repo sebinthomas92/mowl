@@ -26,7 +26,7 @@ class ProductHubTest extends TestCase
         $other->users()->attach($outsider, ['role' => 'owner']);
 
         $this->actingAs($owner)->get(route('products.index'))->assertOk()->assertSee(route('products.show', $product), false);
-        $this->actingAs($owner)->get(route('products.show', $product))->assertOk()->assertSee('Google Ads copy');
+        $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'content']))->assertOk()->assertSee('Google Ads copy');
         $this->actingAs($outsider)->get(route('products.show', $product))->assertNotFound();
     }
 
@@ -155,9 +155,9 @@ class ProductHubTest extends TestCase
     public function test_empty_state_and_campaign_history_are_honest(): void
     {
         [$owner, , $product, $pack] = $this->fixture();
-        $this->actingAs($owner)->get(route('products.show', $product))->assertOk()->assertSee('No approved marketing pack yet');
+        $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'content']))->assertOk()->assertSee('No approved marketing pack yet');
         $pack->versions()->firstOrFail()->update(['review_status' => 'approved', 'reviewed_at' => now()]);
-        $this->actingAs($owner)->get(route('products.show', $product))->assertSee($pack->name)->assertSee('Campaign history');
+        $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'content']))->assertSee($pack->name)->assertSee('Campaign history');
     }
 
     private function fixture(string $name = 'Everyday Upgrade'): array

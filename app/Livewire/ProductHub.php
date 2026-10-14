@@ -5,9 +5,15 @@ namespace App\Livewire;
 use App\Concerns\InteractsWithWorkspace;
 use App\Models\CampaignPackVersion;
 use App\Models\Product;
+use App\Models\ProductFact;
+use App\Models\SourceSnapshot;
 use App\Services\ProductHubContentAdapter;
+use App\Services\ProductKnowledge;
+use App\Services\ProductPageFetcher;
 use Illuminate\Support\Str;
+use Livewire\Attributes\Url;
 use Livewire\Component;
+use Throwable;
 
 class ProductHub extends Component
 {
@@ -18,6 +24,15 @@ class ProductHub extends Component
     public array $resourceInputs = [];
 
     public ?string $shareUrl = null;
+
+    public const TABS = ['overview' => 'Overview', 'knowledge' => 'Knowledge', 'content' => 'Content', 'packs' => 'Launch packs'];
+
+    #[Url]
+    public string $tab = 'overview';
+
+    public ?string $editing = null;
+
+    public string $factValue = '';
 
     private const RESOURCE_LABELS = [
         'product_page' => 'Product page',
@@ -90,8 +105,106 @@ class ProductHub extends Component
         $this->shareUrl = null;
     }
 
+    public function editFact(string $key): void
+    {
+        $fact = $this->fact($key);
+        $this->editing = $fact->key;
+        $this->factValue = (string) $fact->confirmed_value;
+        $this->resetValidation();
+    }
+
+    public function cancelEdit(): void
+    {
+        $this->editing = null;
+        $this->factValue = '';
+        $this->resetValidation();
+    }
+
+    public function saveFact(ProductKnowledge $knowledge): void
+    {
+        abort_unless($this->editing, 422);
+        $fact = $this->fact($this->editing);
+        $max = ProductKnowledge::FACTS[$fact->key]['max'];
+        $required = $fact->key === 'name' ? 'required' : 'nullable';
+        $this->validate(['factValue' => [$required, 'string', "max:{$max}"]], [], ['factValue' => strtolower(ProductKnowledge::FACTS[$fact->key]['label'])]);
+
+        $before = $fact->confirmed_value;
+        $knowledge->confirm($fact, $this->factValue, auth()->user());
+        $this->auditFact('product_fact_confirmed', $fact, ['before' => $before, 'after' => $fact->confirmed_value]);
+        $this->cancelEdit();
+    }
+
+    public function acceptSource(string $key, ProductKnowledge $knowledge): void
+    {
+        $fact = $this->fact($key);
+        $before = $fact->confirmed_value;
+        $knowledge->acceptSource($fact, auth()->user());
+        $this->auditFact('product_fact_source_accepted', $fact, ['before' => $before, 'after' => $fact->confirmed_value]);
+    }
+
+    public function keepConfirmed(string $key, ProductKnowledge $knowledge): void
+    {
+        $fact = $this->fact($key);
+        $knowledge->keepConfirmed($fact, auth()->user());
+        $this->auditFact('product_fact_kept', $fact, ['kept' => $fact->confirmed_value, 'source' => $fact->source_value]);
+    }
+
+    public function excludeFact(string $key, ProductKnowledge $knowledge): void
+    {
+        $fact = $this->fact($key);
+        $knowledge->exclude($fact);
+        $this->auditFact('product_fact_excluded', $fact);
+    }
+
+    public function restoreFact(string $key, ProductKnowledge $knowledge): void
+    {
+        $fact = $this->fact($key);
+        $knowledge->restore($fact);
+        $this->auditFact('product_fact_restored', $fact);
+    }
+
+    public function refreshSource(ProductPageFetcher $fetcher, ProductKnowledge $knowledge): void
+    {
+        $this->authorizeManager();
+        abort_unless(ProductKnowledge::available(), 503);
+        $previous = $this->latestSource();
+        abort_unless($previous, 422);
+
+        try {
+            $page = $fetcher->fetch($previous->canonical_url ?: $previous->url);
+        } catch (Throwable $exception) {
+            report($exception);
+            session()->flash('knowledge-error', 'We could not read the product page. Check that it is public and try again.');
+
+            return;
+        }
+
+        $snapshot = SourceSnapshot::create([
+            'product_id' => $this->product->id,
+            'type' => $previous->type,
+            'url' => $page['url'],
+            'title' => $page['title'] ?? null,
+            'canonical_url' => $page['canonical_url'] ?? null,
+            'content_hash' => $page['content_hash'],
+            'status' => 'ready',
+            'extracted_content' => $page['content'] ?? null,
+            'extracted_truth' => $page['product_truth'] ?? [],
+            'fetched_at' => now(),
+            'refreshed_from_snapshot_id' => $previous->id,
+        ]);
+        $conflicts = $knowledge->syncFromSource($this->product, $snapshot);
+        $this->auditFact('product_source_refreshed', $snapshot, ['conflicts' => $conflicts]);
+
+        session()->flash('knowledge-status', $conflicts
+            ? trans_choice('The source changed. :count fact needs your decision.|The source changed. :count facts need your decision.', count($conflicts))
+            : 'Source checked. Nothing changed.');
+    }
+
     public function render(ProductHubContentAdapter $adapter)
     {
+        if (! array_key_exists($this->tab, self::TABS)) {
+            $this->tab = 'overview';
+        }
         $workspace = $this->currentWorkspace();
         $this->product->load(['brand', 'resourceLinks', 'mediaAssets', 'campaignPacks.versions']);
         $version = $this->latestApprovedVersion();
@@ -100,7 +213,13 @@ class ProductHub extends Component
         $resourceLabels = self::RESOURCE_LABELS;
         $canManage = $this->canManage();
 
-        return view('livewire.product-hub', compact('workspace', 'version', 'content', 'sections', 'resourceLabels', 'canManage'))
+        $knowledgeReady = ProductKnowledge::available();
+        $facts = $knowledgeReady ? app(ProductKnowledge::class)->facts($this->product) : collect();
+        $source = $this->latestSource();
+        $packs = $this->product->campaignPacks->sortByDesc('id')->values();
+        $tabs = self::TABS;
+
+        return view('livewire.product-hub', compact('workspace', 'version', 'content', 'sections', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs'))
             ->layout('components.layouts.app');
     }
 
@@ -120,6 +239,27 @@ class ProductHub extends Component
             'meta_ads' => 'Meta Ads', 'google_ads' => 'Google Ads', 'email_sms' => 'Email & SMS',
             'organic_social' => 'Organic social', 'asset_links' => 'Asset links', 'campaign_history' => 'Campaign history',
         ];
+    }
+
+    private function fact(string $key): ProductFact
+    {
+        $this->authorizeManager();
+        abort_unless(ProductKnowledge::available() && array_key_exists($key, ProductKnowledge::FACTS), 404);
+
+        return $this->product->facts()->where('key', $key)->firstOrFail();
+    }
+
+    private function latestSource(): ?SourceSnapshot
+    {
+        return $this->product->sourceSnapshots()->where('status', 'ready')->latest('id')->first();
+    }
+
+    private function auditFact(string $event, object $subject, array $metadata = []): void
+    {
+        $this->product->brand->workspace->auditEvents()->create([
+            'actor_user_id' => auth()->id(), 'event' => $event, 'subject_type' => $subject::class,
+            'subject_id' => $subject->id, 'metadata' => ['product_id' => $this->product->id, 'key' => $subject->key ?? null] + $metadata,
+        ]);
     }
 
     private function canManage(): bool

@@ -19,6 +19,7 @@ use App\Services\CampaignJobDispatcher;
 use App\Services\CampaignPackContentNormalizer;
 use App\Services\CampaignPackSafetyValidator;
 use App\Services\ProductImageImporter;
+use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -221,6 +222,10 @@ class CampaignWorkspace extends Component
                 'product_id' => $product->id,
                 'source_url' => data_get($image->metadata, 'source_url'),
             ]);
+        }
+
+        if (ProductKnowledge::available()) {
+            app(ProductKnowledge::class)->syncFromSource($product, $source);
         }
 
         $this->productId = $product->id;

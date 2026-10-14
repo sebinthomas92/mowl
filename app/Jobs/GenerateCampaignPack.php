@@ -9,6 +9,7 @@ use App\Models\CampaignGenerationJob;
 use App\Models\ProcessingCacheEntry;
 use App\Services\CampaignGeneratorManager;
 use App\Services\ProductImageImporter;
+use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
 use App\Services\ProviderCostCalculator;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -96,6 +97,16 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 ],
             );
 
+            // Confirmed knowledge wins over the raw page; a changed source becomes a conflict to review.
+            $knowledge = '';
+            if (ProductKnowledge::available()) {
+                $facts = app(ProductKnowledge::class);
+                $product = $job->campaignPack->product;
+                $facts->syncFromSource($product, $job->sourceSnapshot->fresh());
+                $page['product_truth'] = $facts->overlay($product, $page['product_truth'] ?? []);
+                $knowledge = $facts->fingerprint($product);
+            }
+
             $job->update(['phase' => 'generating_pack']);
             if ($job->section) {
                 $baseContent = $job->campaignPack->versions()->where('version', $job->base_version)->value('content') ?? [];
@@ -108,7 +119,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                     $job->campaignPack->product->price,
                     $job->campaignPack->product->summary,
                 ])),
-                $provider, $model ?: 'none', $job->analysis_mode, $job->section ?: 'full', $job->base_version ?: 0,
+                $provider, $model ?: 'none', $job->analysis_mode, $job->section ?: 'full', $job->base_version ?: 0, $knowledge,
             ]));
             $cached = ProcessingCacheEntry::where('cache_key', $cacheKey)
                 ->where(fn ($query) => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))
