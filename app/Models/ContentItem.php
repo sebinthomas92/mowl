@@ -53,6 +53,11 @@ class ContentItem extends Model
         return $this->hasOne(ContentVersion::class)->ofMany('version', 'max');
     }
 
+    public function pageSections(): HasMany
+    {
+        return $this->hasMany(PageSection::class);
+    }
+
     /** A section of its launch pack, as opposed to a banner or a free-standing variation. */
     public function isPackSection(): bool
     {

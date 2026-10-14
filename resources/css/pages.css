@@ -1,0 +1,56 @@
+/* Product Pages tab: sections, device preview and the publish panel. */
+.pages-tab{display:flex;flex-direction:column;gap:16px}
+.pages-switch{justify-content:space-between}
+.pages-layout{display:flex;gap:20px;align-items:flex-start}
+.pages-sections{flex:1 1 240px;max-width:320px;padding:18px}
+.pages-preview{flex:999 1 400px;min-width:0}
+.pages-publish{flex:1 1 280px;max-width:360px;position:sticky;top:16px}
+.pages-section{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+.pages-section .row{gap:6px;flex-wrap:nowrap}
+.pages-section-tools{display:inline-flex;gap:2px;flex:none}
+.iconbtn.sm{width:28px;height:28px;box-shadow:none;background:transparent;color:var(--muted);font-size:15px}
+.iconbtn.sm:hover:not(:disabled){background:var(--surface-2);color:var(--ink)}
+.iconbtn.sm:disabled{opacity:.35;cursor:default}
+.input.input-sm{min-height:36px;padding:4px 10px;font-size:13px}
+.pages-cta{gap:8px}
+.pages-details{gap:8px;padding-top:12px;border-top:1px solid var(--line)}
+.pages-add summary{list-style:none;cursor:pointer;padding:6px 0}
+.pages-add summary::-webkit-details-marker{display:none}
+.pages-add .chips{margin-top:8px}
+.pages-store{max-width:200px}
+.pages-publish .kv{align-items:center}
+.pages-log{gap:4px}
+.warn-text{color:var(--warn-fg)}
+.pages-device{width:100%;margin:0 auto;transition:max-width .6s var(--ease)}
+.pages-device.is-tablet{max-width:560px}
+.pages-device.is-mobile{max-width:340px}
+.pv{background:var(--surface);border-radius:16px;overflow:hidden;box-shadow:inset 0 0 0 1px var(--line)}
+.pvsec{position:relative;padding:20px;border-top:1px solid var(--line)}
+.pvsec:first-child{border-top:0}
+.pvsec.block{box-shadow:inset 0 0 0 2px var(--warn-fg)}
+.pvlabel{position:absolute;top:10px;right:10px;max-width:60%}
+.pvlabel .tag{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.pv-eyebrow{margin-bottom:10px;color:var(--muted)}
+.pv-body{overflow-wrap:anywhere}
+.pv-body h1,.pv-body h2{font-family:var(--display);font-weight:350;letter-spacing:-.015em;line-height:1.1}
+.pv-body h1{font-size:32px}
+.pv-body h2{font-size:24px}
+.pv-body h3{font-size:16px;font-weight:600}
+.pv-body p,.pv-body li,.pv-body td,.pv-body th{font-size:14px;line-height:1.6}
+.pv-body table tr+tr th,.pv-body table tr+tr td{border-top:1px solid var(--line)}
+.pv-body img{max-height:420px;object-fit:cover}
+.timeline{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
+.tstep{display:flex;gap:12px;padding:8px 0;font-size:13px}
+.tdot{width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 2px var(--muted);flex:none;margin-top:3px}
+.tdot.ok{background:var(--ok-fg);box-shadow:none}
+.tdot.bad{background:var(--bad-fg);box-shadow:none}
+.tdot.cur{background:var(--rev-fg);box-shadow:none;animation:pages-pulse 1.2s ease-in-out infinite}
+@keyframes pages-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.tdot.cur{animation:none}.pages-device{transition:none}}
+@media (max-width:1100px){.pages-layout{flex-wrap:wrap}.pages-sections,.pages-publish{max-width:none;flex-basis:100%;position:static}}
+
+/* Store connections in Settings. */
+.connections-card{display:flex;flex-direction:column;gap:4px}
+.connection-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:16px;border-radius:16px;background:var(--surface-2);margin-top:8px}
+.connection-form .full{grid-column:1/-1}
+@media (max-width:720px){.connection-form{grid-template-columns:1fr}}
