@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Jobs\GenerateBannerCreative;
 use App\Livewire\CampaignWorkspace;
+use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
 use App\Models\User;
 use App\Models\Workspace;
@@ -59,6 +60,38 @@ class BannerStudioTest extends TestCase
             $this->assertStringContainsString('logos', $creative->prompt);
             $this->assertStringContainsString('watermarks', $creative->prompt);
         }
+    }
+
+    public function test_banner_processing_has_twelve_requests_and_an_independent_scheduler_budget(): void
+    {
+        [$user, $workspace, $pack] = $this->fixture();
+        $batch = app(BannerBatchCreator::class)->createIncluded($workspace, $pack, $user);
+        $batch->creatives()->update(['status' => 'completed']);
+        $creative = $batch->creatives()->firstOrFail();
+        config(['campaigns.cron_secret' => 'test-secret']);
+        $url = URL::temporarySignedRoute('banner-creatives.process', now()->addMinutes(5), ['bannerCreative' => $creative]);
+
+        for ($attempt = 0; $attempt < 12; $attempt++) {
+            $this->actingAs($user)->post($url)->assertStatus(202)->assertJson(['status' => 'completed']);
+        }
+        $this->post($url)->assertStatus(429);
+
+        $job = CampaignGenerationJob::create([
+            'workspace_id' => $workspace->id,
+            'campaign_pack_id' => $pack->id,
+            'source_snapshot_id' => $pack->source_snapshot_id,
+            'status' => 'completed',
+        ]);
+        $campaignUrl = URL::temporarySignedRoute('campaign-jobs.process', now()->addMinutes(5), ['generationJob' => $job]);
+        $this->post($campaignUrl)->assertStatus(202)->assertJson(['status' => 'completed']);
+
+        for ($attempt = 0; $attempt < 6; $attempt++) {
+            $this->withToken('test-secret')->get(route('banner-creatives.recover'))
+                ->assertOk()->assertJson(['status' => 'idle']);
+        }
+        $this->withToken('test-secret')->get(route('banner-creatives.recover'))->assertStatus(429);
+        $this->withToken('test-secret')->get(route('campaign-jobs.recover'))
+            ->assertOk()->assertJson(['status' => 'idle']);
     }
 
     public function test_request_mode_generates_private_1080_by_1350_pngs_and_downloads_are_tenant_isolated(): void

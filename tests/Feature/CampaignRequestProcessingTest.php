@@ -98,6 +98,27 @@ class CampaignRequestProcessingTest extends TestCase
         $this->assertSame('completed', $job->fresh()->status);
     }
 
+    public function test_job_and_scheduler_rate_limits_are_independent_and_still_enforced(): void
+    {
+        [$user, , $job] = $this->generationFixture();
+        $job->update(['status' => 'completed']);
+        config(['campaigns.cron_secret' => 'test-secret']);
+        $url = URL::temporarySignedRoute('campaign-jobs.process', now()->addMinute(), ['generationJob' => $job]);
+
+        for ($attempt = 0; $attempt < 6; $attempt++) {
+            $this->actingAs($user)->post($url)->assertStatus(202);
+        }
+        $this->post($url)->assertStatus(429);
+
+        for ($attempt = 0; $attempt < 6; $attempt++) {
+            $this->withToken('test-secret')->get(route('campaign-jobs.recover'))
+                ->assertOk()->assertJson(['status' => 'idle']);
+        }
+        $this->withToken('test-secret')->get(route('campaign-jobs.recover'))->assertStatus(429);
+        $this->withToken('test-secret')->get(route('banner-creatives.recover'))
+            ->assertOk()->assertJson(['status' => 'idle']);
+    }
+
     private function generationFixture(): array
     {
         $user = User::factory()->create();

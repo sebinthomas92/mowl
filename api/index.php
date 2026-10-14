@@ -1,5 +1,10 @@
 <?php
 
+use Illuminate\Foundation\Application;
+use Illuminate\Http\Request;
+
+define('LARAVEL_START', microtime(true));
+
 $storagePath = getenv('LARAVEL_STORAGE_PATH') ?: '/tmp/marketing-owl-storage';
 $bootstrapCachePath = $storagePath.'/framework/cache';
 
@@ -25,4 +30,14 @@ foreach ([
     }
 }
 
-require __DIR__.'/../public/index.php';
+if (file_exists($maintenance = $storagePath.'/framework/maintenance.php')) {
+    require $maintenance;
+}
+
+require __DIR__.'/../vendor/autoload.php';
+
+/** @var Application $app */
+$app = require __DIR__.'/../bootstrap/app.php';
+// getenv() alone does not populate the arrays Laravel consults for storage_path().
+$app->useStoragePath($storagePath);
+$app->handleRequest(Request::capture());

@@ -52,7 +52,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24
+          node-version: '22.23.2'
           cache: npm
 
       - name: Install FFmpeg
@@ -79,3 +79,22 @@ jobs:
 
       - name: Run PHP tests
         run: php artisan test
+
+      - name: Install browser for deterministic UI tests
+        run: npx @e2e-dev/web install chromium --with-deps
+
+      - name: Run disposable Laravel browser journeys
+        run: npm run test:e2e
+
+      - name: Keep browser results and evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: marketing-owl-e2e
+          path: |
+            .e2e/report.json
+            .e2e/junit.xml
+            .e2e/artifacts
+            .e2e/logs
+          if-no-files-found: warn
+          retention-days: 7

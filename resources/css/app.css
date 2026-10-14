@@ -138,3 +138,9 @@ button { cursor:pointer; }
     .campaign-workspace-shell .pack-layout{grid-template-columns:180px minmax(0,1fr)}
     .campaign-workspace-shell .pack-content{padding-left:24px}
 }
+
+/* Evidence remains readable inside the campaign column on tablets. */
+@media (max-width: 1050px) {
+    .evidence-list article { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .evidence-list a { text-align: left; }
+}
