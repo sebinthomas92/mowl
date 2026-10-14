@@ -36,6 +36,7 @@
                         @foreach($workflows as $workflow)
                             <button type="button" class="ccard" wire:key="wf-{{ $workflow['slug'] }}" aria-pressed="{{ $current && $current['slug'] === $workflow['slug'] ? 'true' : 'false' }}" wire:click="select('{{ $workflow['slug'] }}')">
                                 <span class="thumb wf-thumb" style="background:{{ $gradients[$workflow['gradient'] % 6] }}" aria-hidden="true">
+                                    @if($workflow['poster'])<img class="wf-poster" src="{{ $workflow['poster'] }}" alt="" loading="lazy" decoding="async">@endif
                                     @if($workflow['category'] === 'motion')<i class="ti ti-player-play"></i>@elseif($workflow['category'] === 'web')<i class="ti ti-browser"></i>@endif
                                     @if($workflow['length'])<span class="wf-len">{{ $workflow['length'] }}</span>@endif
                                 </span>
@@ -75,6 +76,11 @@
                                     @foreach($current['prompts'] as $index => $prompt)
                                         <details class="wf-prompt" @if($loop->first) open @endif>
                                             <summary><span class="grow medium">{{ $prompt['title'] }}</span>@if(($prompt['tier'] ?? null) === 'premium')<span class="tag rev">Premium</span>@endif<i class="ti ti-chevron-down" aria-hidden="true"></i></summary>
+                                            @if($prompt['video'] ?? null)
+                                                <video class="wf-video" src="{{ $prompt['video'] }}" @if($prompt['poster'] ?? null) poster="{{ $prompt['poster'] }}" @endif controls muted loop playsinline preload="none" aria-label="Preview of {{ $prompt['title'] }}"></video>
+                                            @elseif($prompt['poster'] ?? null)
+                                                <img class="wf-video" src="{{ $prompt['poster'] }}" alt="Preview of {{ $prompt['title'] }}" loading="lazy">
+                                            @endif
                                             <pre class="wf-body">{{ $prompt['body'] }}</pre>
                                             <button type="button" class="pill ghost sm" @click="navigator.clipboard.writeText(@js($prompt['body'])); copied = {{ $index }}; setTimeout(() => copied = null, 1600)">
                                                 <i class="ti ti-copy" aria-hidden="true"></i><span x-text="copied === {{ $index }} ? 'Copied' : 'Copy prompt'">Copy prompt</span>

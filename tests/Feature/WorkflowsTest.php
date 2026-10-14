@@ -9,6 +9,8 @@ use App\Models\Workspace;
 use App\Services\WorkflowCatalog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -183,6 +185,58 @@ MD);
         $download = $this->actingAs($user)->get(route('workflows.download', 'motionsites-landing-page'))->assertOk()->getContent();
         $this->assertStringContainsString("## Glass landing\nIntro\n### Section", $download);
         $this->assertStringContainsString('credit: From the MotionSites.ai collection', $download);
+    }
+
+    public function test_prompt_previews_are_copied_to_storage_and_served_in_ranges(): void
+    {
+        Storage::fake('previews');
+        config(['workflows.media_disk' => 'previews']);
+        $video = str_repeat('v', 5000);
+        Http::fake([
+            'cdn.example.com/hero.mp4' => Http::response($video, 200, ['Content-Type' => 'video/mp4']),
+            'cdn.example.com/hero.jpg' => Http::response('jpg', 200, ['Content-Type' => 'image/jpeg']),
+            'cdn.example.com/page.html' => Http::response('<html>', 200, ['Content-Type' => 'text/html']),
+        ]);
+        $file = $this->library.'/export.json';
+        File::put($file, json_encode([
+            ['id' => 'a1', 'title' => 'Aurora hero', 'category' => 'Hero Section', 'body' => 'Build a hero.', 'video_url' => 'https://cdn.example.com/hero.mp4', 'poster_url' => 'https://cdn.example.com/hero.jpg'],
+            ['id' => 'a2', 'title' => 'Plain hero', 'category' => 'Hero Section', 'body' => 'Build a plain hero.', 'video_url' => 'https://cdn.example.com/page.html', 'poster_url' => 'http://insecure.example.com/x.jpg'],
+        ]));
+        $this->artisan('workflows:import-prompts', ['file' => $file])->assertSuccessful();
+        [$aurora, $plain] = [LibraryPrompt::where('source_key', 'a1')->first(), LibraryPrompt::where('source_key', 'a2')->first()];
+        $this->assertNull($plain->poster_url);
+        $user = $this->member();
+
+        $hero = app(WorkflowCatalog::class)->find('motionsites-hero-section');
+        $this->assertSame(route('workflows.preview', [$aurora->id, 'poster']), $hero['poster']);
+        Livewire::actingAs($user)->withQueryParams(['workflow' => 'motionsites-hero-section'])->test(WorkflowIndex::class)
+            ->assertSee(route('workflows.preview', [$aurora->id, 'video']), false);
+
+        $this->actingAs($user)->get(route('workflows.preview', [$aurora->id, 'video']))
+            ->assertOk()->assertHeader('Content-Type', 'video/mp4')->assertHeader('Accept-Ranges', 'bytes');
+        $path = $aurora->fresh()->video_path;
+        Storage::disk('previews')->assertExists($path);
+
+        $partial = $this->actingAs($user)->withHeader('Range', 'bytes=100-199')->get(route('workflows.preview', [$aurora->id, 'video']));
+        $partial->assertStatus(206)->assertHeader('Content-Range', 'bytes 100-199/5000')->assertHeader('Content-Length', '100');
+        $this->assertSame(str_repeat('v', 100), $partial->streamedContent());
+        $this->actingAs($user)->withHeader('Range', 'bytes=9000-')->get(route('workflows.preview', [$aurora->id, 'video']))->assertStatus(416);
+        $this->flushHeaders();
+
+        // Served from the stored copy without fetching again.
+        Http::assertSentCount(1);
+        $this->actingAs($user)->get(route('workflows.preview', [$aurora->id, 'poster']))->assertOk()->assertHeader('Content-Type', 'image/jpeg');
+        $this->actingAs($user)->get(route('workflows.preview', [$plain->id, 'video']))->assertNotFound();
+        $this->actingAs($user)->get(route('workflows.preview', [$plain->id, 'poster']))->assertNotFound();
+
+        // A changed source URL drops the stored copy so it is fetched again.
+        File::put($file, json_encode([['id' => 'a1', 'title' => 'Aurora hero', 'category' => 'Hero Section', 'body' => 'Build a hero.', 'video_url' => 'https://cdn.example.com/hero-v2.mp4']]));
+        $this->artisan('workflows:import-prompts', ['file' => $file])->assertSuccessful();
+        $this->assertNull($aurora->fresh()->video_path);
+        $this->assertNull($aurora->fresh()->poster_url);
+
+        auth()->logout();
+        $this->get(route('workflows.preview', [$aurora->id, 'video']))->assertRedirect(route('login'));
     }
 
     private function member(): User

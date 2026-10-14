@@ -98,15 +98,31 @@ class WorkflowCatalog
             return collect();
         }
 
+        $columns = ['id', 'collection', 'pack', 'category', 'title', 'tier', 'position', 'credit'];
+        if (Schema::hasColumn('library_prompts', 'video_url')) {
+            $columns = [...$columns, 'video_url', 'poster_url', 'video_path', 'poster_path'];
+        }
+
         // Bodies are loaded only for the pack being shown (see withBodies()).
         return LibraryPrompt::query()
-            ->select(['id', 'collection', 'pack', 'category', 'title', 'tier', 'position', 'credit'])
+            ->select($columns)
             ->orderBy('collection')->orderBy('pack')->orderBy('position')->orderBy('id')
             ->get()
             ->groupBy(fn (LibraryPrompt $prompt) => $prompt->collection.'|'.$prompt->pack)
             ->map(function (Collection $prompts) {
                 $first = $prompts->first();
                 $premium = $prompts->where('tier', 'premium')->count();
+                $preview = fn (LibraryPrompt $prompt, string $kind) => $prompt->{$kind.'_url'} || $prompt->{$kind.'_path'}
+                    ? route('workflows.preview', [$prompt->id, $kind])
+                    : null;
+                $items = $prompts->map(fn (LibraryPrompt $prompt) => [
+                    'id' => $prompt->id,
+                    'title' => $prompt->title,
+                    'body' => null,
+                    'tier' => $prompt->tier,
+                    'video' => $preview($prompt, 'video'),
+                    'poster' => $preview($prompt, 'poster'),
+                ])->values()->all();
 
                 return $this->normalize([
                     'slug' => $first->collection.'-'.$first->pack,
@@ -116,12 +132,8 @@ class WorkflowCatalog
                     'description' => $prompts->count().' '.Str::plural('prompt', $prompts->count()).($premium ? ", {$premium} premium" : '').'.',
                     'credit' => $first->credit,
                     'source_url' => config('workflows.source_url'),
-                    'prompts' => $prompts->map(fn (LibraryPrompt $prompt) => [
-                        'id' => $prompt->id,
-                        'title' => $prompt->title,
-                        'body' => null,
-                        'tier' => $prompt->tier,
-                    ])->values()->all(),
+                    'poster' => collect($items)->pluck('poster')->filter()->first(),
+                    'prompts' => $items,
                 ]);
             })
             ->values();
@@ -193,6 +205,7 @@ class WorkflowCatalog
             'source_url' => null,
             'credit' => null,
             'action' => null,
+            'poster' => null,
             'order' => 100,
         ], $workflow, [
             'slug' => Str::slug($workflow['slug']),

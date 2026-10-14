@@ -17,6 +17,9 @@ return [
     'source_url' => 'https://prompt-showcase.pages.dev/',
     'source_name' => 'Marketing Owl prompt showcase',
 
+    // Where copies of library preview videos and posters are kept (fetched on first view).
+    'media_disk' => env('WORKFLOW_MEDIA_DISK', env('BANNER_STORAGE_DISK', env('CAMPAIGN_MEDIA_DISK', 'local'))),
+
     'categories' => [
         'motion' => 'Motion & video',
         'web' => 'Website design',

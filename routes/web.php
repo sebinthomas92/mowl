@@ -9,6 +9,7 @@ use App\Http\Controllers\ClientReviewController;
 use App\Http\Controllers\ProductHubDeliveryController;
 use App\Http\Controllers\SandboxStoreController;
 use App\Http\Controllers\WorkflowDownloadController;
+use App\Http\Controllers\WorkflowPreviewController;
 use App\Http\Controllers\WorkspaceInvitationController;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\Register;
@@ -85,6 +86,7 @@ Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::get('/campaign-packs/{pack}/banners/{bannerCreative}/download', [BannerDeliveryController::class, 'download'])->name('campaign-banners.download');
     Route::get('/workflows', WorkflowIndex::class)->name('workflows.index');
     Route::get('/workflows/{workflow}/download', WorkflowDownloadController::class)->where('workflow', '[a-z0-9-]+')->name('workflows.download');
+    Route::get('/workflows/prompts/{prompt}/{kind}', WorkflowPreviewController::class)->whereNumber('prompt')->whereIn('kind', ['video', 'poster'])->name('workflows.preview');
     Route::get('/help', HelpIndex::class)->name('help.index');
     Route::get('/team', TeamIndex::class)->name('team.index');
     Route::get('/usage', UsageIndex::class)->name('usage.index');
