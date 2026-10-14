@@ -24,6 +24,13 @@
                     @include('product-hubs.tab-knowledge')
                     @break
                 @case('content')
+                    @if(\App\Services\ContentLibrary::available())
+                        <livewire:content-browser :product-id="$product->id" :key="'content-'.$product->id" />
+                    @else
+                        <div class="empty"><strong>Content items turn on after the next database update</strong><span class="small muted">Until then, approved launch packs show in the Client hub tab.</span></div>
+                    @endif
+                    @break
+                @case('hub')
                     <div class="product-hub-shell hub-embed" x-data="productHub()">
                         @include('product-hubs.surface')
                     </div>

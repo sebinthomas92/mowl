@@ -185,6 +185,10 @@ class GoogleVertexAICampaignPackGenerator implements CampaignPackGenerator
             $parts[] = 'BRAND VOICE AND PALETTE (style guidance for tone and colour, not product facts)'."\n".json_encode($brand, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         }
 
+        if ($brief = $page['campaign_brief'] ?? null) {
+            $parts[] = 'CAMPAIGN BRIEF (the team\'s direction for angle and emphasis; never a source of product facts, prices, offers or claims)'."\n".json_encode($brief, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        }
+
         if ($section = $page['regeneration_section'] ?? null) {
             $parts[] = "REGENERATION REQUEST\nCreate a materially different {$section} section while preserving every other section's meaning. Avoid unsupported claims and repetition.";
             $parts[] = 'CURRENT CAMPAIGN PACK'."\n".json_encode($page['current_content'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);

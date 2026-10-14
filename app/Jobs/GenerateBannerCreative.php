@@ -7,6 +7,7 @@ use App\Models\BannerCreative;
 use App\Services\BannerBatchStatus;
 use App\Services\BannerComposer;
 use App\Services\BannerGeneratorManager;
+use App\Services\ContentLibrary;
 use App\Services\ProviderCostCalculator;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -116,6 +117,21 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
             $batchStatus->refresh($creative->batch->fresh());
 
             throw $exception;
+        }
+
+        $this->syncContent($creative);
+    }
+
+    /** The finished banner becomes a content item; a sync failure must not fail the banner. */
+    private function syncContent(BannerCreative $creative): void
+    {
+        if (! ContentLibrary::available()) {
+            return;
+        }
+        try {
+            app(ContentLibrary::class)->syncPack($creative->campaignPack->fresh());
+        } catch (Throwable $exception) {
+            report($exception);
         }
     }
 

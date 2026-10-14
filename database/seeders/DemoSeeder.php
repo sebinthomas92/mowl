@@ -9,6 +9,7 @@ use App\Models\SourceSnapshot;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\CampaignPackActivity;
+use App\Services\ContentLibrary;
 use App\Services\MockCampaignPackGenerator;
 use App\Services\ProductKnowledge;
 use Illuminate\Database\Seeder;
@@ -132,6 +133,16 @@ class DemoSeeder extends Seeder
 
                 // Seed the inbox: the teammate asked for a review of each v2.
                 $user->notify(new CampaignPackActivity('review_requested', $review, $reviewer));
+
+                // Split the pack into content items and put a revised positioning in the review queue.
+                if (ContentLibrary::available()) {
+                    $library = app(ContentLibrary::class);
+                    $library->syncPack($review->campaignPack);
+                    $positioning = $review->campaignPack->contentItems()->where('section', 'positioning')->first();
+                    if ($positioning && $positioning->status === 'approved') {
+                        $library->submit($library->revise($positioning, $reviewer), $reviewer);
+                    }
+                }
             }
         }
 

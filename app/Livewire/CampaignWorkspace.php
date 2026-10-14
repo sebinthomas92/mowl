@@ -4,7 +4,6 @@ namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
 use App\Models\BannerCreative;
-use App\Models\Brand;
 use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
 use App\Models\CampaignPackShare;
@@ -18,9 +17,9 @@ use App\Services\BannerJobDispatcher;
 use App\Services\CampaignJobDispatcher;
 use App\Services\CampaignPackContentNormalizer;
 use App\Services\CampaignPackSafetyValidator;
-use App\Services\ProductImageImporter;
+use App\Services\ContentLibrary;
 use App\Services\ProductKnowledge;
-use App\Services\ProductPageFetcher;
+use App\Services\SectionRegenerator;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
@@ -29,32 +28,32 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Livewire\Attributes\Url as QueryParameter;
 use Livewire\Component;
 use Livewire\WithFileUploads;
-use Throwable;
 
 class CampaignWorkspace extends Component
 {
     use InteractsWithWorkspace;
     use WithFileUploads;
 
+    public const OBJECTIVES = [
+        'launch' => ['Launch an offer', 'A new or refreshed offer'],
+        'refresh' => ['Refresh creative', 'A new angle on the same offer'],
+        'explain' => ['Explain the product', 'Education-first content'],
+    ];
+
+    public const CREDIT_COSTS = ['standard' => 1, 'deep' => 3];
+
     public int $step = 1;
 
-    public string $brandName = '';
+    public string $objective = 'launch';
 
-    public string $brandWebsite = '';
+    public string $briefOffer = '';
 
-    public string $productName = '';
+    public string $briefAudience = '';
 
-    public string $productPrice = '';
-
-    public string $productSummary = '';
-
-    public string $productUrl = '';
-
-    public string $loadedProductUrl = '';
-
-    public bool $productDetailsLoaded = false;
+    public string $briefMessage = '';
 
     public string $sourceUrl = '';
 
@@ -70,6 +69,7 @@ class CampaignWorkspace extends Component
 
     public ?int $brandId = null;
 
+    #[QueryParameter(as: 'product')]
     public ?int $productId = null;
 
     public ?int $packId = null;
@@ -85,6 +85,10 @@ class CampaignWorkspace extends Component
     public function mount(?CampaignPack $pack = null): void
     {
         if (! $pack?->exists) {
+            if ($this->productId) {
+                $this->chooseProduct($this->productId);
+            }
+
             return;
         }
 
@@ -96,141 +100,27 @@ class CampaignWorkspace extends Component
         $this->step = 4;
     }
 
-    public function useBrand(): void
+    /** Prefills the brief from confirmed Knowledge so nothing is retyped. */
+    public function chooseProduct(int $productId): void
     {
-        $data = $this->validate(['brandId' => ['required', 'integer']]);
-        Brand::query()
-            ->where('workspace_id', $this->currentWorkspace()->id)
-            ->findOrFail($data['brandId']);
-
-        $this->step = 2;
-    }
-
-    public function saveBrand(): void
-    {
-        $data = $this->validate([
-            'brandName' => ['required', 'string', 'max:120'],
-            'brandWebsite' => ['nullable', 'url', 'max:255'],
-        ]);
-
-        $workspace = $this->currentWorkspace();
-        if ($workspace->brands()->count() >= config('campaigns.brand_limit')) {
-            throw ValidationException::withMessages(['brandName' => 'This workspace has reached its beta brand limit.']);
-        }
-        $brand = $workspace->brands()->create([
-            'name' => $data['brandName'],
-            'website' => $data['brandWebsite'] ?: null,
-        ]);
-
-        $this->brandId = $brand->id;
-        $this->step = 2;
-    }
-
-    public function loadProductFromUrl(ProductPageFetcher $fetcher): void
-    {
-        $data = $this->validate([
-            'productUrl' => ['required', 'url:http,https', 'max:2000'],
-        ]);
-
-        try {
-            $page = $fetcher->fetch($data['productUrl']);
-        } catch (Throwable $exception) {
-            report($exception);
-
-            throw ValidationException::withMessages([
-                'productUrl' => 'We could not read product details from that URL. Check that the page is public and try again.',
-            ]);
-        }
-
-        $truth = $page['product_truth'] ?? [];
-        $name = trim((string) ($truth['name'] ?? $page['title'] ?? ''));
-        if ($name === '') {
-            throw ValidationException::withMessages([
-                'productUrl' => 'We could not find a product name on that page.',
-            ]);
-        }
-
-        $resolvedUrl = (string) ($page['canonical_url'] ?? $page['url'] ?? $data['productUrl']);
-        $price = trim(implode(' ', array_filter([
-            $truth['currency'] ?? null,
-            $truth['price'] ?? null,
-        ], fn ($value) => $value !== null && $value !== '')));
-
-        $this->productName = mb_substr($name, 0, 160);
-        $this->productPrice = mb_substr($price, 0, 40);
-        $this->productSummary = mb_substr(trim((string) ($truth['description'] ?? $page['description'] ?? '')), 0, 1000);
-        $this->productUrl = $resolvedUrl;
-        $this->loadedProductUrl = $resolvedUrl;
-        $this->sourceUrl = $resolvedUrl;
-        $this->productDetailsLoaded = true;
-    }
-
-    public function saveProduct(ProductPageFetcher $fetcher, ProductImageImporter $imageImporter): void
-    {
-        abort_unless($this->brandId, 422);
-        $data = $this->validate([
-            'productUrl' => ['required', 'url:http,https', 'max:2000'],
-            'productName' => ['required', 'string', 'max:160'],
-            'productPrice' => ['nullable', 'string', 'max:40'],
-            'productSummary' => ['nullable', 'string', 'max:1000'],
-        ]);
-        if ($this->loadedProductUrl === '' || ! hash_equals($this->loadedProductUrl, $data['productUrl'])) {
-            throw ValidationException::withMessages([
-                'productUrl' => 'Analyze this product page before continuing.',
-            ]);
-        }
-
-        $brand = Brand::query()
-            ->where('workspace_id', $this->currentWorkspace()->id)
-            ->findOrFail($this->brandId);
-
-        try {
-            $page = $fetcher->fetch($data['productUrl']);
-        } catch (Throwable $exception) {
-            report($exception);
-
-            throw ValidationException::withMessages([
-                'productUrl' => 'We could not capture Product Truth from that URL. Check that the page is public and try again.',
-            ]);
-        }
-
-        [$product, $source] = DB::transaction(function () use ($brand, $data, $page): array {
-            $product = Product::create([
-                'brand_id' => $brand->id,
-                'name' => $data['productName'],
-                'price' => $data['productPrice'] ?: null,
-                'summary' => $data['productSummary'] ?: null,
-            ]);
-            $source = SourceSnapshot::create([
-                'product_id' => $product->id,
-                'url' => $page['url'],
-                'title' => $page['title'],
-                'canonical_url' => $page['canonical_url'],
-                'content_hash' => $page['content_hash'],
-                'status' => 'ready',
-                'extracted_content' => $page['content'],
-                'extracted_truth' => $page['product_truth'],
-                'fetched_at' => now(),
-            ]);
-
-            return [$product, $source];
-        });
-
-        $image = $imageImporter->importFirst($product, $source, $page['images'] ?? []);
-        if ($image) {
-            $this->audit('product_image_auto_imported', $image, null, [
-                'product_id' => $product->id,
-                'source_url' => data_get($image->metadata, 'source_url'),
-            ]);
-        }
-
-        if (ProductKnowledge::available()) {
-            app(ProductKnowledge::class)->syncFromSource($product, $source);
-        }
-
+        $product = $this->workspaceProduct($productId);
         $this->productId = $product->id;
-        $this->sourceUrl = $page['canonical_url'];
+        $this->brandId = $product->brand_id;
+        $source = $product->sourceSnapshots()->where('status', 'ready')->latest('id')->first() ?? $product->sourceSnapshots()->latest('id')->first();
+        $this->sourceUrl = (string) ($source?->canonical_url ?: $source?->url);
+
+        $facts = ProductKnowledge::available() ? $product->facts()->where('status', 'ok')->pluck('confirmed_value', 'key') : collect();
+        $this->briefOffer = mb_substr(trim((string) ($facts['price'] ?? $product->price)), 0, 200);
+        $profile = ProductKnowledge::available() ? app(ProductKnowledge::class)->brandProfile($product) : [];
+        $this->briefAudience = mb_substr(trim((string) ($facts['audience'] ?? $profile['default_audience'] ?? '')), 0, 300);
         $this->step = 3;
+        $this->resetValidation();
+    }
+
+    public function changeProduct(): void
+    {
+        $this->productId = null;
+        $this->step = 1;
     }
 
     public function generatePack(CampaignJobDispatcher $dispatcher): void
@@ -239,11 +129,21 @@ class CampaignWorkspace extends Component
         $data = $this->validate([
             'sourceUrl' => ['required', 'url:http,https', 'max:2000'],
             'analysisMode' => ['required', 'in:standard,deep'],
-        ]);
+            'objective' => ['required', 'in:'.implode(',', array_keys(self::OBJECTIVES))],
+            'briefOffer' => ['nullable', 'string', 'max:200'],
+            'briefAudience' => ['nullable', 'string', 'max:300'],
+            'briefMessage' => ['nullable', 'string', 'max:300'],
+        ], [], ['sourceUrl' => 'product page URL', 'briefOffer' => 'offer', 'briefAudience' => 'audience', 'briefMessage' => 'key message']);
         $workspace = $this->currentWorkspace();
-        $creditCost = $data['analysisMode'] === 'deep' ? 3 : 1;
+        $creditCost = self::CREDIT_COSTS[$data['analysisMode']];
+        $brief = array_filter([
+            'objective' => self::OBJECTIVES[$data['objective']][0],
+            'offer' => trim((string) $data['briefOffer']),
+            'audience' => trim((string) $data['briefAudience']),
+            'message' => trim((string) $data['briefMessage']),
+        ], 'filled');
 
-        [$pack, $generationJob] = DB::transaction(function () use ($data, $workspace, $creditCost): array {
+        [$pack, $generationJob] = DB::transaction(function () use ($data, $workspace, $creditCost, $brief): array {
             $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
             if ($lockedWorkspace->creditBalance() < $creditCost) {
                 throw ValidationException::withMessages(['sourceUrl' => 'This workspace does not have enough pack credits.']);
@@ -272,7 +172,7 @@ class CampaignWorkspace extends Component
                 'credit_cost' => $creditCost,
                 'current_version' => 0,
                 'estimated_cost' => 0,
-            ]);
+            ] + (Schema::hasColumn('campaign_packs', 'brief') ? ['brief' => $brief] : []));
 
             $generationJob = CampaignGenerationJob::create([
                 'workspace_id' => $workspace->id,
@@ -336,63 +236,13 @@ class CampaignWorkspace extends Component
         $dispatcher->dispatch($job->id);
     }
 
-    public function regenerateSection(CampaignJobDispatcher $dispatcher): void
+    public function regenerateSection(SectionRegenerator $regenerator): void
     {
         $data = $this->validate([
-            'regenerationSection' => ['required', 'in:positioning,ranked_angles,creative_routes,offers'],
+            'regenerationSection' => ['required', 'in:'.implode(',', SectionRegenerator::SECTIONS)],
         ]);
-        $workspace = $this->currentWorkspace();
-        $pack = CampaignPack::query()
-            ->whereHas('product.brand', fn ($query) => $query->where('workspace_id', $workspace->id))
-            ->findOrFail($this->packId);
-        abort_unless($pack->status === 'approved' && $pack->current_version > 0, 422);
-
-        $job = DB::transaction(function () use ($workspace, $pack, $data): CampaignGenerationJob {
-            $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
-            $lockedPack = CampaignPack::query()->lockForUpdate()->findOrFail($pack->id);
-            abort_unless($lockedPack->status === 'approved' && $lockedPack->current_version > 0, 422);
-            abort_if(
-                $lockedPack->generationJobs()->whereIn('status', ['queued', 'processing', 'retrying'])->exists(),
-                422,
-                'A generation job is already running.',
-            );
-
-            $includedUsed = $lockedPack->generationJobs()
-                ->whereNotNull('section')
-                ->where('status', 'completed')
-                ->where('created_at', '<=', $lockedPack->created_at->copy()->addDay())
-                ->count();
-            $included = now()->lte($lockedPack->created_at->copy()->addDay()) && $includedUsed < 3;
-            $creditCost = $included ? 0 : 1;
-            if ($creditCost > 0 && $lockedWorkspace->creditBalance() < $creditCost) {
-                throw ValidationException::withMessages(['regenerationSection' => 'This workspace does not have enough credits for another regeneration.']);
-            }
-
-            $job = CampaignGenerationJob::create([
-                'workspace_id' => $workspace->id,
-                'campaign_pack_id' => $lockedPack->id,
-                'source_snapshot_id' => $lockedPack->source_snapshot_id,
-                'analysis_mode' => $lockedPack->analysis_mode,
-                'section' => $data['regenerationSection'],
-                'base_version' => $lockedPack->current_version,
-                'credit_cost' => $creditCost,
-            ]);
-
-            if ($creditCost > 0) {
-                $workspace->credits()->create([
-                    'campaign_pack_id' => $lockedPack->id,
-                    'campaign_generation_job_id' => $job->id,
-                    'amount' => -$creditCost,
-                    'event' => 'section_regeneration',
-                    'description' => 'Regenerated '.$data['regenerationSection'].' section',
-                    'metadata' => ['section' => $data['regenerationSection']],
-                ]);
-            }
-
-            return $job;
-        });
-
-        $dispatcher->dispatch($job->id);
+        $pack = $this->workspacePack();
+        $job = $regenerator->request($this->currentWorkspace(), $pack, $data['regenerationSection']);
         $this->selectedVersion = null;
         $this->audit('campaign_pack_regeneration_requested', $pack, null, ['section' => $data['regenerationSection'], 'generation_job_id' => $job->id]);
     }
@@ -555,6 +405,16 @@ class CampaignWorkspace extends Component
         $this->audit('banner_included_slots_retried', $batch);
     }
 
+    private function workspaceProduct(int $productId): Product
+    {
+        $product = Product::query()
+            ->whereHas('brand', fn ($query) => $query->where('workspace_id', $this->currentWorkspace()->id))
+            ->find($productId);
+        abort_unless($product, 404);
+
+        return $product;
+    }
+
     private function workspacePack(): CampaignPack
     {
         return CampaignPack::query()
@@ -688,14 +548,16 @@ class CampaignWorkspace extends Component
 
         return view('livewire.campaign-workspace', [
             'workspace' => $workspace,
-            'brands' => $workspace->brands()->orderBy('name')->get(),
+            'products' => $pack ? collect() : Product::query()
+                ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
+                ->with(['brand', 'mediaAssets'])->orderBy('name')->get(),
+            'briefProduct' => ! $pack && $this->productId ? $this->workspaceProduct($this->productId)->load('brand') : null,
+            'contentItems' => $pack && ContentLibrary::available() ? $pack->contentItems()->with('latestVersion')->orderBy('id')->get() : null,
             'pack' => $pack,
             'processJobUrl' => $pack?->latestGenerationJob && config('campaigns.processing_mode') === 'request'
                 ? URL::temporarySignedRoute('campaign-jobs.process', now()->addMinutes(30), ['generationJob' => $pack->latestGenerationJob])
                 : null,
-            'includedRegenerationsRemaining' => $pack
-                ? max(0, 3 - $pack->generationJobs()->whereNotNull('section')->where('status', 'completed')->where('created_at', '<=', $pack->created_at->copy()->addDay())->count())
-                : 3,
+            'includedRegenerationsRemaining' => $pack ? app(SectionRegenerator::class)->includedRemaining($pack) : 3,
             'reviewFeaturesAvailable' => $reviewFeaturesAvailable,
             'bannerStudioAvailable' => $bannerStudioAvailable,
             'bannerProductImage' => $pack?->product?->mediaAssets()
