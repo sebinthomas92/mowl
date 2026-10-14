@@ -74,7 +74,7 @@
                                 <div class="wf-prompts">
                                     @foreach($current['prompts'] as $index => $prompt)
                                         <details class="wf-prompt" @if($loop->first) open @endif>
-                                            <summary><span class="grow medium">{{ $prompt['title'] }}</span><i class="ti ti-chevron-down" aria-hidden="true"></i></summary>
+                                            <summary><span class="grow medium">{{ $prompt['title'] }}</span>@if(($prompt['tier'] ?? null) === 'premium')<span class="tag rev">Premium</span>@endif<i class="ti ti-chevron-down" aria-hidden="true"></i></summary>
                                             <pre class="wf-body">{{ $prompt['body'] }}</pre>
                                             <button type="button" class="pill ghost sm" @click="navigator.clipboard.writeText(@js($prompt['body'])); copied = {{ $index }}; setTimeout(() => copied = null, 1600)">
                                                 <i class="ti ti-copy" aria-hidden="true"></i><span x-text="copied === {{ $index }} ? 'Copied' : 'Copy prompt'">Copy prompt</span>
@@ -82,6 +82,7 @@
                                         </details>
                                     @endforeach
                                 </div>
+                                @if($current['credit'])<span class="muted xs">{{ $current['credit'] }}</span>@endif
                                 @if($current['source_url'])<a class="linkbtn" href="{{ $current['source_url'] }}" target="_blank" rel="noopener">See it on the prompt showcase</a>@endif
                             @endif
                             <span class="muted xs">Running opens the brief and credit review first. A download or copy does not use credits.</span>

@@ -32,6 +32,7 @@ class WorkflowIndex extends Component
         $all = $catalog->all();
         $list = $this->category === 'all' ? $all : $all->where('category', $this->category)->values();
         $current = $catalog->find($this->selected) ?? $list->first() ?? $all->first();
+        $current = $current ? $catalog->withBodies($current) : null;
 
         return view('livewire.workflow-index', [
             'workspace' => $this->currentWorkspace(),
