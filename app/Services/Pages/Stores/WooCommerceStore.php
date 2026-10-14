@@ -46,7 +46,11 @@ class WooCommerceStore implements StoreClient
         $store->api_base = $apiBase;
         $response = $this->send(fn (PendingRequest $http) => $this->authed($http, $store)->get($this->endpoint($store, 'wp/v2/users/me', ['context' => 'edit'])), $apiBase);
         if (in_array($response->status(), [401, 403], true)) {
-            throw new StoreException('WordPress rejected the username or application password.', auth: true);
+            // WordPress 5.6+ lists the auth methods it accepts; an empty list means application passwords are off.
+            if (isset($index['authentication']) && empty($index['authentication']['application-passwords'])) {
+                throw new StoreException('This site has application passwords switched off. WordPress only allows them on https:// sites, and some security plugins turn them off. Switch them on, then try again.', auth: true);
+            }
+            throw new StoreException('WordPress rejected the username or application password. Use an application password from Users, then Profile, not your login password.', auth: true);
         }
         if (! $response->successful()) {
             throw $this->failure($response, 'check the connection');

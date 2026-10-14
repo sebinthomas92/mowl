@@ -246,8 +246,10 @@ class PagesTest extends TestCase
 
         $form()->set('secret', 'wrong')->call('save')->assertHasErrors('secret')->assertSee('WordPress rejected the username or application password.');
         $form()->set('siteUrl', 'https://plain.test')->set('secret', 'abcd abcd abcd abcd')->call('save')->assertHasErrors('siteUrl')->assertSee('does not look like a WordPress site');
+        $form()->set('siteUrl', 'https://locked.test')->set('secret', 'abcd abcd abcd abcd')->call('save')->assertHasErrors('secret')->assertSee('application passwords switched off');
         $this->assertSame(0, StoreConnection::query()->count());
 
+        $form()->assertSee('wp-admin/profile.php#application-passwords-section', false);
         $form()->set('secret', 'abcd abcd abcd abcd')->call('save')->assertHasNoErrors();
         $store = StoreConnection::query()->sole();
         $this->assertTrue($store->has_woocommerce);
@@ -368,6 +370,12 @@ class PagesTest extends TestCase
 
             if (str_starts_with($url, 'https://plain.test')) {
                 return Http::response('<html>Not WordPress</html>', 200, ['Content-Type' => 'text/html']);
+            }
+            if ($url === 'https://locked.test/wp-json/') {
+                return Http::response(['name' => 'Locked', 'namespaces' => ['wp/v2'], 'authentication' => []]);
+            }
+            if (str_starts_with($url, 'https://locked.test/')) {
+                return Http::response(['code' => 'rest_not_logged_in'], 401);
             }
             if ($url === 'https://shop.test/wp-json/') {
                 return Http::response(['name' => 'Shop', 'namespaces' => ['oembed/1.0', 'wp/v2', 'wc/v3']]);
