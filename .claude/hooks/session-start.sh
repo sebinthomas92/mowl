@@ -1,0 +1,34 @@
+#!/bin/bash
+# Prepares a Claude Code cloud session to run the app locally:
+# PHP + JS dependencies, a sqlite database with demo data, and built assets.
+# Sign in at http://127.0.0.1:8000 as demo@marketingowl.test / password
+# after `php artisan serve`.
+set -euo pipefail
+
+[ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
+cd "$CLAUDE_PROJECT_DIR"
+
+# composer.lock targets PHP 8.4; cloud images may ship 8.3. Resolve a
+# compatible vendor tree locally and keep the committed lock untouched.
+if ! composer install --no-interaction --prefer-dist --no-progress; then
+    composer update -W --no-interaction --prefer-dist --no-progress
+    git checkout -- composer.lock
+fi
+
+npm ci --no-audit --no-fund
+
+if [ ! -f .env ]; then
+    cp .env.example .env
+    php artisan key:generate --no-interaction
+fi
+for bin in ffmpeg ffprobe; do
+    key=$(echo "$bin" | tr '[:lower:]' '[:upper:]')_PATH
+    path=$(command -v "$bin" || true)
+    [ -n "$path" ] && sed -i "s#^${key}=.*#${key}=${path}#" .env
+done
+
+touch database/database.sqlite
+php artisan migrate --force --no-interaction
+php artisan db:seed --class=DemoSeeder --force --no-interaction
+
+npm run build
