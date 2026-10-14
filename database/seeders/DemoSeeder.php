@@ -30,12 +30,11 @@ class DemoSeeder extends Seeder
         $workspace = Workspace::firstOrCreate(['name' => 'Hollow Lane Studio']);
         if (! $workspace->users()->whereKey($user->id)->exists()) {
             $workspace->users()->attach($user, ['role' => 'owner']);
-            $workspace->credits()->create([
-                'amount' => config('campaigns.monthly_credits'),
-                'event' => 'beta_allocation',
-                'description' => 'Initial beta pack credits',
-            ]);
         }
+        $workspace->credits()->firstOrCreate(
+            ['event' => 'beta_allocation'],
+            ['amount' => config('campaigns.monthly_credits'), 'description' => 'Initial beta pack credits'],
+        );
 
         $catalog = [
             'Northline Goods' => [

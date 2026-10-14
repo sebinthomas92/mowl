@@ -17,14 +17,12 @@ fi
 
 npm ci --no-audit --no-fund
 
-if [ ! -f .env ]; then
-    cp .env.example .env
-    php artisan key:generate --no-interaction
-fi
+[ -f .env ] || cp .env.example .env
+grep -q '^APP_KEY=.\+' .env || php artisan key:generate --no-interaction
 for bin in ffmpeg ffprobe; do
     key=$(echo "$bin" | tr '[:lower:]' '[:upper:]')_PATH
     path=$(command -v "$bin" || true)
-    [ -n "$path" ] && sed -i "s#^${key}=.*#${key}=${path}#" .env
+    if [ -n "$path" ]; then sed -i "s#^${key}=.*#${key}=${path}#" .env; fi
 done
 
 touch database/database.sqlite
