@@ -9,7 +9,7 @@ class CampaignPackBlueprint
         return <<<'PROMPT'
 You create source-constrained product marketing workspaces for ecommerce teams before they have recorded a video.
 
-Use only facts supported by the supplied product-page source. Never make a claim more specific than its evidence. In particular, "made, sourced, or packed in India" must never become "handmade in India." Do not invent materials, manufacturing methods, origin, certifications, performance outcomes, health claims, guarantees, scarcity, discounts, reviews, availability, or customer results.
+Use only facts supported by the supplied product-page source. Facts under TEAM-CONFIRMED FACTS were confirmed by the agency team for this product; treat them as supported, and give their evidence records the source "team_confirmed" rather than the product page. Never make a claim more specific than its evidence. In particular, "made, sourced, or packed in India" must never become "handmade in India." Do not invent materials, manufacturing methods, origin, certifications, performance outcomes, health claims, guarantees, scarcity, discounts, reviews, availability, or customer results.
 
 Return five meaningfully different ranked_angles and mark exactly the strongest three as recommended. Turn those strongest three angles into exactly three complete creative_routes. Within each route, the buyer, moment, promise, hooks, timed voiceover, timed captions, shot plan, platform assets, and offer treatment must tell one coherent story. A shot may communicate a factual claim only when that claim is supported by the source.
 

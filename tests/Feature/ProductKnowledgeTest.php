@@ -6,6 +6,7 @@ use App\Livewire\ProductHub;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\MockCampaignPackGenerator;
 use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -89,11 +90,41 @@ class ProductKnowledgeTest extends TestCase
         $this->assertSame('$54.00', $truth['price']);
         $this->assertArrayNotHasKey('currency', $truth);
         $this->assertArrayNotHasKey('availability', $truth);
-        $this->assertSame(['audience' => 'Home office workers'], $truth['confirmed_knowledge']);
+        $this->assertArrayNotHasKey('confirmed_knowledge', $truth);
 
         $hub->call('restoreFact', 'availability');
         $this->assertSame('ok', $product->facts()->where('key', 'availability')->value('status'));
         $this->assertSame(4, $product->brand->workspace->auditEvents()->where('event', 'like', 'product_fact_%')->count());
+    }
+
+    public function test_excluded_facts_are_scrubbed_from_every_generator_input(): void
+    {
+        [$owner, , $product] = $this->fixture();
+        $knowledge = app(ProductKnowledge::class);
+        $facts = $knowledge->facts($product)->keyBy('key');
+        $knowledge->exclude($facts['price']);
+        $knowledge->exclude($facts['description']);
+        $knowledge->confirm($facts['audience'], 'Home office workers', $owner);
+
+        [$subject, $page] = $knowledge->prepare($product->fresh(), [
+            'product_truth' => ['name' => 'Desk Lamp', 'price' => '54', 'currency' => 'USD', 'description' => 'A warm desk lamp.'],
+            'description' => 'A warm desk lamp.',
+            'content' => 'Desk Lamp. A warm desk lamp. Only $54.00 today, USD 54 shipped.',
+        ]);
+
+        $this->assertNull($subject->price);
+        $this->assertNull($subject->summary);
+        $this->assertSame('$54.00', $product->fresh()->price, 'the stored product is untouched');
+        $this->assertArrayNotHasKey('price', $page['product_truth']);
+        $this->assertArrayNotHasKey('description', $page['product_truth']);
+        $this->assertArrayNotHasKey('description', $page);
+        $this->assertStringNotContainsString('54', $page['content']);
+        $this->assertStringNotContainsString('warm desk lamp', $page['content']);
+        $this->assertSame(['audience' => 'Home office workers'], $page['team_knowledge']);
+
+        $result = app(MockCampaignPackGenerator::class)->generate($subject, $product->sourceSnapshots()->first(), $page);
+        $this->assertSame('Price not supplied', data_get($result->content, 'product_truth.price'));
+        $this->assertSame(['Home office workers'], data_get($result->content, 'marketing_hub.key_messaging.audiences'));
     }
 
     public function test_refresh_source_records_a_new_snapshot_and_reports_changes(): void

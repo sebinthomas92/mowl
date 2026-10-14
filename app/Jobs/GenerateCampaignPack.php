@@ -98,13 +98,14 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             );
 
             // Confirmed knowledge wins over the raw page; a changed source becomes a conflict to review.
+            // Excluded facts are scrubbed from every generator input, including the product record.
             $knowledge = '';
+            $subject = $job->campaignPack->product;
             if (ProductKnowledge::available()) {
                 $facts = app(ProductKnowledge::class);
-                $product = $job->campaignPack->product;
-                $facts->syncFromSource($product, $job->sourceSnapshot->fresh());
-                $page['product_truth'] = $facts->overlay($product, $page['product_truth'] ?? []);
-                $knowledge = $facts->fingerprint($product);
+                $facts->syncFromSource($subject, $job->sourceSnapshot->fresh());
+                [$subject, $page] = $facts->prepare($subject, $page);
+                $knowledge = $facts->fingerprint($subject);
             }
 
             $job->update(['phase' => 'generating_pack']);
@@ -134,7 +135,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                     model: $model,
                 );
             } else {
-                $result = $generators->driver()->generate($job->campaignPack->product, $job->sourceSnapshot, $page);
+                $result = $generators->driver()->generate($subject, $job->sourceSnapshot, $page);
                 ProcessingCacheEntry::create([
                     'cache_key' => $cacheKey,
                     'stage' => 'campaign_pack',

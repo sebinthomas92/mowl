@@ -15,6 +15,10 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
         $fact = trim((string) (data_get($page, 'product_truth.description') ?: data_get($page, 'description') ?: $product->summary ?: $name));
         $fact = mb_substr($fact, 0, 280);
         $claimId = 'claim-1';
+        // Team-confirmed knowledge from the product's Knowledge tab.
+        $lines = fn (string $key) => array_values(array_filter(array_map('trim', preg_split('/\R/', (string) data_get($page, "team_knowledge.{$key}")))));
+        $benefits = $lines('benefits');
+        $audiences = $lines('audience');
 
         $angles = [
             $this->angle(1, 'The everyday upgrade', 'Make the product feel like a useful improvement to a familiar routine.', 'Routine-led shoppers', 'While comparing practical options', 'A more considered everyday choice', $claimId, 'recommended'),
@@ -34,7 +38,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
                 'price' => $product->price ?: 'Price not supplied',
                 'availability' => data_get($page, 'product_truth.availability') ?: 'Not confirmed',
                 'verified_facts' => [['statement' => $fact, 'claim_id' => $claimId]],
-                'supported_benefits' => ['A product story grounded in the supplied page'],
+                'supported_benefits' => $benefits ?: ['A product story grounded in the supplied page'],
                 'offers_and_trust_signals' => [],
                 'brand_context' => [$product->brand?->name ?: 'Brand context not supplied'],
                 'missing_information' => array_values(array_filter([
@@ -53,7 +57,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
                     ['name' => 'Careful researchers', 'need' => 'Visible, verifiable details', 'buyer_moment' => 'Checking whether the product fits', 'why_relevant' => 'They respond to proof rather than broad claims.'],
                 ],
             ],
-            'marketing_hub' => $this->marketingHub($product, $source, $fact),
+            'marketing_hub' => $this->marketingHub($product, $source, $fact, $audiences),
             'ranked_angles' => $angles,
             'creative_routes' => [
                 $this->route('route-1', 'Everyday upgrade', 1, $name, 'Routine-led shoppers', 'Setting up a familiar part of the day', 'Warm and practical'),
@@ -207,7 +211,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
         return $content;
     }
 
-    private function marketingHub(Product $product, SourceSnapshot $source, string $fact): array
+    private function marketingHub(Product $product, SourceSnapshot $source, string $fact, array $audiences = []): array
     {
         $name = $product->name;
         $headlines = ["Meet {$name}", 'See the useful details', 'A clearer everyday choice', 'Built for the real moment', 'Explore the product'];
@@ -226,7 +230,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
             'product_details' => ['name' => $name, 'price' => $product->price ?: 'Price not supplied', 'summary' => $product->summary ?: $fact, 'source_url' => $source->url, 'facts' => [$fact]],
             'key_messaging' => [
                 'value_proposition' => "Make {$name} easy to understand through a useful, source-grounded product story.",
-                'audiences' => ['Intent-led shoppers', 'Careful researchers'],
+                'audiences' => $audiences ?: ['Intent-led shoppers', 'Careful researchers'],
                 'proof_points' => [$fact],
                 'tone' => 'Clear, considered, and practical',
             ],

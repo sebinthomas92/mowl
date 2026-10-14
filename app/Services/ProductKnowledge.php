@@ -163,11 +163,10 @@ class ProductKnowledge
     public function overlay(Product $product, array $truth): array
     {
         $facts = $product->facts()->get()->keyBy('key');
-        $confirmed = [];
 
         foreach (self::FACTS as $key => $definition) {
             $fact = $facts->get($key);
-            if (! $fact) {
+            if (! $fact || ! $definition['sourced']) {
                 continue;
             }
             if ($fact->status === 'excluded') {
@@ -178,24 +177,60 @@ class ProductKnowledge
 
                 continue;
             }
-            if ($fact->confirmed_value === null) {
-                continue;
-            }
-            if ($definition['sourced']) {
+            if ($fact->confirmed_value !== null) {
                 $truth[$key] = $fact->confirmed_value;
                 if ($key === 'price') {
                     unset($truth['currency']);
                 }
-            } else {
-                $confirmed[$key] = $fact->confirmed_value;
             }
         }
 
-        if ($confirmed) {
-            $truth['confirmed_knowledge'] = $confirmed;
+        return $truth;
+    }
+
+    /**
+     * Everything a generator receives, with confirmed knowledge applied and excluded facts scrubbed
+     * from every input: the product record, the structured truth, the page description and the raw text.
+     *
+     * @return array{0: Product, 1: array}
+     */
+    public function prepare(Product $product, array $page): array
+    {
+        $facts = $product->facts()->get()->keyBy('key');
+        $rawTruth = $page['product_truth'] ?? [];
+        $page['product_truth'] = $this->overlay($product, $rawTruth);
+        $subject = clone $product;
+
+        foreach ($facts->where('status', 'excluded') as $fact) {
+            $column = self::FACTS[$fact->key]['product'] ?? null;
+            if ($column && $column !== 'name') {
+                $subject->setAttribute($column, null);
+            }
+            if ($fact->key === 'description') {
+                unset($page['description']);
+            }
+            $values = array_filter([$fact->source_value, $fact->confirmed_value, is_scalar($rawTruth[$fact->key] ?? null) && mb_strlen((string) $rawTruth[$fact->key]) >= 4 ? (string) $rawTruth[$fact->key] : null, $fact->key === 'price' ? $product->price : null, $fact->key === 'description' ? $product->summary : null],
+                fn ($value) => is_string($value) && mb_strlen(trim($value)) >= 2);
+            foreach (['content', 'description'] as $field) {
+                if (isset($page[$field]) && is_string($page[$field])) {
+                    $page[$field] = str_ireplace(array_map('trim', $values), '', $page[$field]);
+                }
+            }
         }
 
-        return $truth;
+        $team = [];
+        foreach (self::FACTS as $key => $definition) {
+            $fact = $facts->get($key);
+            if (! $definition['sourced'] && $fact && $fact->status !== 'excluded' && $fact->confirmed_value !== null) {
+                $team[$key] = $fact->confirmed_value;
+            }
+        }
+        unset($page['team_knowledge']);
+        if ($team) {
+            $page['team_knowledge'] = $team;
+        }
+
+        return [$subject, $page];
     }
 
     /** A short fingerprint of the confirmed knowledge, for generation cache keys. */
