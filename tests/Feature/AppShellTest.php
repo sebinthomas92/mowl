@@ -12,6 +12,7 @@ use App\Models\Workspace;
 use App\Notifications\CampaignPackActivity;
 use App\Services\MockCampaignPackGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -115,6 +116,15 @@ class AppShellTest extends TestCase
 
         $foreign = $owner->notifications()->where('workspace_id', $otherWorkspace->id)->value('id');
         $inbox->call('open', $foreign)->assertNotFound();
+    }
+
+    public function test_pages_and_reviews_still_work_before_the_notifications_migration_runs(): void
+    {
+        [$owner, , $pack] = $this->fixture('Northline');
+        Schema::drop('notifications');
+
+        $this->actingAs($owner)->get(route('campaign-packs.index'))->assertOk()->assertSee('Inbox, 0 unread');
+        Livewire::actingAs($owner)->test(CampaignWorkspace::class, ['pack' => $pack])->call('requestReview')->assertOk();
     }
 
     private function fixture(string $prefix): array

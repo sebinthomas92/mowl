@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use Illuminate\Support\Facades\Schema;
 use Livewire\Component;
 
 class InboxDrawer extends Component
@@ -25,6 +26,11 @@ class InboxDrawer extends Component
 
     public function render()
     {
+        // Production migrations run as a separate step; keep pages up until the table exists.
+        if (! Schema::hasTable('notifications')) {
+            return view('livewire.inbox-drawer', ['items' => collect(), 'unread' => 0]);
+        }
+
         return view('livewire.inbox-drawer', [
             'items' => $this->notifications()->latest()->limit(30)->get(),
             'unread' => $this->notifications()->whereNull('read_at')->count(),

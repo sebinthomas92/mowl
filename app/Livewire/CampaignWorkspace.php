@@ -582,6 +582,10 @@ class CampaignWorkspace extends Component
     /** Review requests go to owners (they approve); everything else goes to the whole workspace. */
     private function notifyWorkspace(string $event, CampaignPackVersion $version): void
     {
+        if (! Schema::hasTable('notifications')) {
+            return;
+        }
+
         $recipients = $this->currentWorkspace()->users()->whereKeyNot(auth()->id());
         if ($event === 'review_requested') {
             $recipients->wherePivot('role', 'owner');
