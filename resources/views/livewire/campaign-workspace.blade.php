@@ -1,13 +1,10 @@
-<div class="app-shell campaign-workspace-shell" x-data="{ mobileNav: false, copied: '', bannerConfirm: false, activeRoute: 0 }">
+<div class="app-shell campaign-workspace-shell" x-data="{ copied: '', bannerConfirm: false, activeRoute: 0 }">
     <a class="skip-link" href="#main-content">Skip to campaign workspace</a>
     @include('partials.workspace-sidebar')
 
-    <main class="main-panel" id="main-content">
-        <header class="mobile-header">
-            <button type="button" @click="mobileNav = !mobileNav" :aria-expanded="mobileNav.toString()" aria-label="Toggle navigation">☰</button>
-            <div><img src="/marketing-owl-logo.png" alt=""> Marketing Owl</div>
-            <span>Beta</span>
-        </header>
+    <div class="app-main">
+        @include('partials.top-bar')
+        <main id="main-content">
 
         @if(!$pack)
             <section class="onboarding">
@@ -92,7 +89,7 @@
                                 <div class="pipeline-preview">
                                     <span>PAGE</span><i></i><span>TRUTH</span><i></i><span>PACK</span>
                                 </div>
-                                <button class="primary-button" type="submit" wire:loading.attr="disabled">Generate campaign pack <span wire:loading.remove>✦</span><span wire:loading>Working…</span></button>
+                                <button class="primary-button" type="submit" wire:loading.attr="disabled">Generate launch pack <span wire:loading.remove>✦</span><span wire:loading>Working…</span></button>
                                 <p class="cost-note">Credits are reserved when the job is queued and returned automatically if all retries fail.</p>
                             </form>
                         @endif
@@ -113,11 +110,11 @@
                         x-data
                         x-init="fetch(@js($processJobUrl), { method: 'POST', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content, 'Accept': 'application/json' } }).finally(() => $wire.$refresh())"
                     @endif>
-                    <div class="processing-breadcrumbs"><a href="{{ route('campaign-packs.index') }}">Campaign packs</a><span>›</span><strong>{{ $pack->product->name }}</strong></div>
+                    <div class="processing-breadcrumbs"><a href="{{ route('campaign-packs.index') }}">Launch packs</a><span>›</span><strong>{{ $pack->product->name }}</strong></div>
                     <div class="processing-console">
                         <div class="processing-mark"><span>{{ strtoupper(substr($pack->product->name, 0, 2)) }}</span></div>
                         <p class="kicker">CAMPAIGN JOB / {{ str_pad($job?->id ?? 0, 4, '0', STR_PAD_LEFT) }}</p>
-                        <h1>{{ $pack->status === 'failed' ? 'Generation needs attention.' : 'Building the campaign pack.' }}</h1>
+                        <h1>{{ $pack->status === 'failed' ? 'Generation needs attention.' : 'Building the launch pack.' }}</h1>
                         <p>{{ $pack->status === 'failed' ? 'The job exhausted its automatic retries. Your credits were returned.' : 'The source is being captured, normalized, checked, and transformed into evidence-linked campaign content.' }}</p>
                         <div class="processing-steps">
                             @foreach(['fetching_source' => 'Refresh Product Truth', 'generating_pack' => 'Rank angles and build routes', 'complete' => 'Validate and save version'] as $phase => $label)
@@ -140,7 +137,7 @@
             @endphp
             <div class="pack-page" id="packs" wire:poll.5s>
                 <header class="pack-toolbar">
-                    <div class="breadcrumbs"><span>{{ $pack->product->brand->name }}</span><b>›</b><span>{{ $pack->product->name }}</span><b>›</b><strong>Campaign Pack v{{ $version->version }}</strong></div>
+                    <div class="breadcrumbs"><span>{{ $pack->product->brand->name }}</span><b>›</b><span>{{ $pack->product->name }}</span><b>›</b><strong>Launch pack v{{ $version->version }}</strong></div>
                     <div class="toolbar-actions">
                         <span @class(['verified-chip', 'qa-blocked-chip' => $qaIssues])>{{ $qaIssues ? '✕ QA blocked' : '✓ Claims and timing checked' }}</span>
                         <button type="button" class="secondary-button" wire:click="startAnother">＋ New pack</button>
@@ -150,7 +147,7 @@
 
                 <section class="product-hero">
                     <div class="product-art" aria-hidden="true"><div class="art-card"><span>CAMPAIGN</span><b>{{ strtoupper(substr($pack->product->name, 0, 2)) }}</b><i></i></div></div>
-                    <div><p class="pack-number">PACK / {{ str_pad($pack->id, 4, '0', STR_PAD_LEFT) }}</p><h1>{{ $pack->product->name }}</h1><p>{{ $pack->product->brand->name }} <i>•</i> {{ $pack->product->price ?: 'Price not supplied' }} <i>•</i> Campaign Pack v{{ $version->version }}</p><div class="approval-line"><span>{{ $version->review_status === 'approved' ? '✓' : '•' }}</span><strong>{{ str($version->review_status)->title() }}</strong><i></i><small>{{ $version->reviewed_at ? 'Reviewed '.$version->reviewed_at->format('M j, Y') : 'Generated '.$version->created_at->format('M j, Y') }}</small><i></i><small>${{ number_format($pack->estimated_cost, 3) }} tracked cost</small></div></div>
+                    <div><p class="pack-number">PACK / {{ str_pad($pack->id, 4, '0', STR_PAD_LEFT) }}</p><h1>{{ $pack->product->name }}</h1><p>{{ $pack->product->brand->name }} <i>•</i> {{ $pack->product->price ?: 'Price not supplied' }} <i>•</i> Launch pack v{{ $version->version }}</p><div class="approval-line"><span>{{ $version->review_status === 'approved' ? '✓' : '•' }}</span><strong>{{ str($version->review_status)->title() }}</strong><i></i><small>{{ $version->reviewed_at ? 'Reviewed '.$version->reviewed_at->format('M j, Y') : 'Generated '.$version->created_at->format('M j, Y') }}</small><i></i><small>${{ number_format($pack->estimated_cost, 3) }} tracked cost</small></div></div>
                 </section>
 
                 @php
@@ -278,7 +275,7 @@
                             @if(!$bannerStudioAvailable)
                                 <div class="banner-locked"><span>◇</span><div><strong>Banner Studio is not enabled</strong><p>Enable the feature in campaign configuration before generating creative.</p></div></div>
                             @elseif($pack->status !== 'approved' || !$currentPackVersion || $currentPackVersion->review_status !== 'approved')
-                                <div class="banner-locked"><span>⌁</span><div><strong>Approve the current version to unlock banners</strong><p>Banner copy is taken verbatim from the approved campaign pack, so draft and review versions stay locked.</p></div></div>
+                                <div class="banner-locked"><span>⌁</span><div><strong>Approve the current version to unlock banners</strong><p>Banner copy is taken verbatim from the approved launch pack, so draft and review versions stay locked.</p></div></div>
                             @else
                                 <div class="banner-setup-grid">
                                     <div class="banner-setup-card">
@@ -401,12 +398,13 @@
                         <section id="versions-exports" class="pack-section versions-export-section">
                             <div class="section-header"><div><span class="section-label">VERSIONS & EXPORTS</span><h3>Approved history and production sheets</h3></div><span class="approved-status">Current v{{ $version->version }} · {{ str($version->review_status)->title() }}</span></div>
                             <div class="version-list">@foreach($pack->versions->sortByDesc('version') as $packVersion)<button type="button" wire:click="selectVersion({{ $packVersion->version }})" @class(['active' => $packVersion->version === $version->version])><span>v{{ $packVersion->version }}</span><strong>{{ str($packVersion->review_status)->title() }}</strong><small>{{ $packVersion->created_at->format('M j, Y') }}</small>@if($packVersion->review_status === 'approved')<em>✓ Approved version</em>@endif</button>@endforeach</div>
-                            <div class="workspace-exports"><button type="button" @click="navigator.clipboard.writeText(@js(json_encode($content, JSON_PRETTY_PRINT)))">▣ Copy complete Campaign Pack</button>@if($version->review_status === 'approved')<a href="{{ route('campaign-packs.export', [$pack, $version, 'pdf']) }}">Complete pack</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'voiceover']) }}">Voiceover sheet</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'captions']) }}">Timed caption sheet</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'shot-plan']) }}">Shot plan</a>@else<span>Approve this version to unlock file exports.</span>@endif</div>
+                            <div class="workspace-exports"><button type="button" @click="navigator.clipboard.writeText(@js(json_encode($content, JSON_PRETTY_PRINT)))">▣ Copy complete launch pack</button>@if($version->review_status === 'approved')<a href="{{ route('campaign-packs.export', [$pack, $version, 'pdf']) }}">Complete pack</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'voiceover']) }}">Voiceover sheet</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'captions']) }}">Timed caption sheet</a><a href="{{ route('campaign-packs.export', [$pack, $version, 'shot-plan']) }}">Shot plan</a>@else<span>Approve this version to unlock file exports.</span>@endif</div>
                         </section>
                     </article>
                 </div>
             </div>
             @endif
         @endif
-    </main>
+        </main>
+    </div>
 </div>

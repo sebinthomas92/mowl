@@ -12,6 +12,7 @@ use App\Models\CampaignPackVersion;
 use App\Models\CampaignPackVersionComment;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
+use App\Notifications\CampaignPackActivity;
 use App\Services\BannerBatchCreator;
 use App\Services\BannerJobDispatcher;
 use App\Services\CampaignJobDispatcher;
@@ -21,6 +22,7 @@ use App\Services\ProductImageImporter;
 use App\Services\ProductPageFetcher;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
@@ -259,7 +261,7 @@ class CampaignWorkspace extends Component
             $pack = CampaignPack::create([
                 'product_id' => $product->id,
                 'source_snapshot_id' => $source->id,
-                'name' => "{$product->name} Campaign Pack",
+                'name' => "{$product->name} launch pack",
                 'status' => 'queued',
                 'analysis_mode' => $data['analysisMode'],
                 'credit_cost' => $creditCost,
@@ -279,7 +281,7 @@ class CampaignWorkspace extends Component
                 'campaign_generation_job_id' => $generationJob->id,
                 'amount' => -$creditCost,
                 'event' => 'pack_generation',
-                'description' => ucfirst($data['analysisMode']).' campaign pack generation',
+                'description' => ucfirst($data['analysisMode']).' launch pack generation',
             ]);
 
             return [$pack, $generationJob];
@@ -319,7 +321,7 @@ class CampaignWorkspace extends Component
                 'campaign_generation_job_id' => $job->id,
                 'amount' => -$lockedPack->credit_cost,
                 'event' => 'generation_retry',
-                'description' => 'Campaign pack generation retry',
+                'description' => 'Launch pack generation retry',
             ]);
             $lockedPack->update(['status' => 'queued']);
 
@@ -407,6 +409,7 @@ class CampaignWorkspace extends Component
         $version->update(['review_status' => 'review']);
         $version->campaignPack->update(['status' => 'review']);
         $this->audit('campaign_pack_review_requested', $version);
+        $this->notifyWorkspace('review_requested', $version);
     }
 
     public function approveVersion(): void
@@ -423,6 +426,7 @@ class CampaignWorkspace extends Component
         ]);
         $version->campaignPack->update(['status' => 'approved']);
         $this->audit('campaign_pack_version_approved', $version, $this->reviewNote ?: null);
+        $this->notifyWorkspace('approved', $version);
         $this->reviewNote = '';
     }
 
@@ -435,6 +439,7 @@ class CampaignWorkspace extends Component
         $version->update(['review_status' => 'rejected', 'reviewed_by_user_id' => auth()->id(), 'reviewed_at' => now(), 'review_note' => $data['reviewNote']]);
         $version->campaignPack->update(['status' => 'rejected']);
         $this->audit('campaign_pack_version_rejected', $version, $data['reviewNote']);
+        $this->notifyWorkspace('rejected', $version);
         $this->reviewNote = '';
     }
 
@@ -450,6 +455,7 @@ class CampaignWorkspace extends Component
             'body' => $data['commentBody'],
         ]);
         $this->audit('campaign_pack_comment_added', $version, null, ['section' => $data['commentSection'] ?: null]);
+        $this->notifyWorkspace('commented', $version);
         $this->commentBody = '';
         $this->commentSection = '';
     }
@@ -571,6 +577,21 @@ class CampaignWorkspace extends Component
             'actor_user_id' => auth()->id(), 'event' => $event, 'subject_type' => $subject::class,
             'subject_id' => $subject->id, 'reason' => $reason, 'metadata' => $metadata,
         ]);
+    }
+
+    /** Review requests go to owners (they approve); everything else goes to the whole workspace. */
+    private function notifyWorkspace(string $event, CampaignPackVersion $version): void
+    {
+        if (! Schema::hasTable('notifications')) {
+            return;
+        }
+
+        $recipients = $this->currentWorkspace()->users()->whereKeyNot(auth()->id());
+        if ($event === 'review_requested') {
+            $recipients->wherePivot('role', 'owner');
+        }
+
+        Notification::send($recipients->get(), new CampaignPackActivity($event, $version, auth()->user()));
     }
 
     public function startAnother(): void

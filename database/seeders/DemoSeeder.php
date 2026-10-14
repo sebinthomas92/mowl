@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\SourceSnapshot;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Notifications\CampaignPackActivity;
 use App\Services\MockCampaignPackGenerator;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
@@ -30,6 +31,13 @@ class DemoSeeder extends Seeder
         $workspace = Workspace::firstOrCreate(['name' => 'Hollow Lane Studio']);
         if (! $workspace->users()->whereKey($user->id)->exists()) {
             $workspace->users()->attach($user, ['role' => 'owner']);
+        }
+        $reviewer = User::firstOrCreate(
+            ['email' => 'priya@marketingowl.test'],
+            ['name' => 'Priya Raman', 'password' => 'password'],
+        );
+        if (! $workspace->users()->whereKey($reviewer->id)->exists()) {
+            $workspace->users()->attach($reviewer, ['role' => 'member']);
         }
         $workspace->credits()->firstOrCreate(
             ['event' => 'beta_allocation'],
@@ -71,7 +79,7 @@ class DemoSeeder extends Seeder
                 }
 
                 // One transaction per product so an interrupted run never leaves a pack without its versions.
-                DB::transaction(function () use ($brandData, $brandName, $product, $user, $generator, $name, $price, $summary, $slug) {
+                $review = DB::transaction(function () use ($brandData, $brandName, $product, $user, $generator, $name, $price, $summary, $slug) {
                     $url = "{$brandData['website']}/{$slug}";
                     $truth = ['name' => $name, 'description' => $summary, 'price' => $price, 'currency' => 'USD', 'availability' => 'InStock', 'brand' => $brandName];
                     $source = SourceSnapshot::create([
@@ -112,8 +120,12 @@ class DemoSeeder extends Seeder
                     ];
 
                     $pack->versions()->create($version(1, 'approved') + ['reviewed_by_user_id' => $user->id, 'reviewed_at' => now()]);
-                    $pack->versions()->create($version(2, 'review'));
+
+                    return $pack->versions()->create($version(2, 'review'));
                 });
+
+                // Seed the inbox: the teammate asked for a review of each v2.
+                $user->notify(new CampaignPackActivity('review_requested', $review, $reviewer));
             }
         }
     }

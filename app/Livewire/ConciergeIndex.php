@@ -200,7 +200,7 @@ class ConciergeIndex extends Component
             'discovery_complete' => 'Confirm agency goals and campaign cadence',
             'team_invited' => 'Invite the working media-buying team',
             'first_product_ready' => 'Validate the first product source and truth',
-            'first_pack_reviewed' => 'Review the first campaign pack together',
+            'first_pack_reviewed' => 'Review the first launch pack together',
         ];
     }
 

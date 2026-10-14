@@ -1,8 +1,9 @@
-<div class="app-shell" x-data="{ mobileNav: false }">
+<div class="app-shell">
     <a class="skip-link" href="#main-content">Skip to team</a>
     @include('partials.workspace-sidebar')
-    <main class="main-panel" id="main-content">
-        <header class="mobile-header"><button type="button" @click="mobileNav = !mobileNav" :aria-expanded="mobileNav.toString()" aria-label="Toggle navigation">☰</button><div><img src="/marketing-owl-logo.png" alt=""> Marketing Owl</div><span>Beta</span></header>
+    <div class="app-main">
+        @include('partials.top-bar')
+        <main id="main-content">
         <section class="library-page team-page">
             <header class="library-header"><div><p class="kicker">WORKSPACE ACCESS</p><h1>Team</h1><p>Five deliberate seats. Every member works from the same approved product truth.</p></div><div class="seat-counter"><strong>{{ $members->count() + $invitations->count() }}</strong><span>of {{ $seatLimit }} seats<br>assigned</span></div></header>
 
@@ -43,9 +44,10 @@
                     @else
                         <div class="owner-only"><strong>Owner action</strong><p>Only the workspace owner can reserve or remove seats.</p></div>
                     @endif
-                    <div class="seat-policy"><span>01</span><p><strong>Five seats included</strong>No unlimited-seat plan in the beta.</p></div><div class="seat-policy"><span>02</span><p><strong>Member role</strong>Members can build and copy campaign packs.</p></div>
+                    <div class="seat-policy"><span>01</span><p><strong>Five seats included</strong>No unlimited-seat plan in the beta.</p></div><div class="seat-policy"><span>02</span><p><strong>Member role</strong>Members can build and copy launch packs.</p></div>
                 </section>
             </div>
         </section>
-    </main>
+        </main>
+    </div>
 </div>

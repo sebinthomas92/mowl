@@ -10,7 +10,7 @@
 </head>
 <body>
 <main class="wrap">
-    <p class="k">MARKETING OWL · APPROVED CAMPAIGN PACK</p>
+    <p class="k">MARKETING OWL · APPROVED LAUNCH PACK</p>
     <h1>{{ $content['product_truth']['name'] }}</h1>
     <p>{{ $content['overview']['summary'] }}</p>
     <p class="meta">Version {{ $version->version }} · approved {{ $version->reviewed_at?->format('M j, Y') }}</p>

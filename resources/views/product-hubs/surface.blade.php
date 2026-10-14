@@ -64,7 +64,7 @@
             <i class="ti ti-file-off"></i>
             <p>CLIENT HUB</p>
             <h1>No approved marketing pack yet</h1>
-            <span>This hub will publish automatically when a campaign-pack version is approved.</span>
+            <span>This hub will publish automatically when a launch pack version is approved.</span>
             @unless($isPublic)<a href="{{ route('campaign-packs.create') }}">Open campaign workspace <i class="ti ti-arrow-right"></i></a>@endunless
         </section>
     @else
