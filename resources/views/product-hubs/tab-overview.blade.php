@@ -89,4 +89,16 @@
             <p class="small muted">The hub publishes automatically when a launch pack version is approved. Drafts never appear here.</p>
         @endif
     </section>
+
+    @if($campaigns !== null)
+        <section class="card c12">
+            <div class="row"><span class="eyebrow">Campaigns</span><span class="sp"></span><a class="small" href="{{ route('products.show', [$product, 'tab' => 'campaigns']) }}" wire:navigate>Campaigns and results</a></div>
+            @forelse($campaigns->take(4) as $item)
+                @php([$tone, $label] = \App\Models\Campaign::STATUSES[$item->status])
+                <div class="li"><span class="tag {{ $tone }}"><span class="dot"></span>{{ $label }}</span><span class="grow"><strong class="medium">{{ $item->name }}</strong>@if($item->dateRange()) <span class="muted">· {{ $item->dateRange() }}</span>@endif</span><span class="muted small">{{ $item->results_count ? 'Results imported' : ($item->status === 'planned' ? 'Not launched' : 'Waiting for results') }}</span><a class="pill ghost sm" href="{{ route('products.show', [$product, 'tab' => 'campaigns', 'campaign' => $item->id]) }}" wire:navigate>Open</a></div>
+            @empty
+                <div class="li"><span class="muted small grow">No campaigns yet. A campaign references exact approved versions.</span><a class="pill ghost sm" href="{{ route('products.show', [$product, 'tab' => 'campaigns']) }}" wire:navigate>Plan a campaign</a></div>
+            @endforelse
+        </section>
+    @endif
 </div>

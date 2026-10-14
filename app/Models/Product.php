@@ -50,6 +50,11 @@ class Product extends Model
         return $this->hasMany(ContentItem::class);
     }
 
+    public function campaigns(): HasMany
+    {
+        return $this->hasMany(Campaign::class);
+    }
+
     public function pages(): HasMany
     {
         return $this->hasMany(Page::class);
