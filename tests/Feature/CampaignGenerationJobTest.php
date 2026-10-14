@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Jobs\GenerateCampaignPack;
 use App\Models\CampaignGenerationJob;
 use App\Models\CampaignPack;
+use App\Models\User;
 use App\Models\Workspace;
 use App\Services\CampaignGeneratorManager;
 use App\Services\ProductKnowledge;
@@ -168,8 +169,11 @@ class CampaignGenerationJobTest extends TestCase
         (new GenerateCampaignPack($job->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
         $this->assertStringContainsString('$89', json_encode($pack->fresh()->versions()->where('version', 1)->value('content')));
 
+        // The price changes after v1 and is then excluded: v1's older $89 must still be scrubbed.
         $knowledge = app(ProductKnowledge::class);
-        $knowledge->exclude($knowledge->facts($product)->firstWhere('key', 'price'));
+        $price = $knowledge->facts($product)->firstWhere('key', 'price');
+        $knowledge->confirm($price, '$99', User::factory()->create());
+        $knowledge->exclude($price->fresh());
         $regeneration = CampaignGenerationJob::create([
             'workspace_id' => $workspace->id, 'campaign_pack_id' => $pack->id, 'source_snapshot_id' => $pack->source_snapshot_id,
             'section' => 'ranked_angles', 'base_version' => 1, 'credit_cost' => 0,
@@ -177,7 +181,7 @@ class CampaignGenerationJobTest extends TestCase
         (new GenerateCampaignPack($regeneration->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
 
         $this->assertStringNotContainsString('$89', json_encode($pack->fresh()->versions()->where('version', 2)->value('content')));
-        $this->assertSame('$89', $product->fresh()->price, 'excluding a fact never deletes the stored value');
+        $this->assertSame('$99', $product->fresh()->price, 'excluding a fact never deletes the stored value');
     }
 
     private function generationFixture(): array

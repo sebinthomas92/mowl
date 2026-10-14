@@ -262,8 +262,29 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             return $content;
         }
         $knowledge = app(ProductKnowledge::class);
+        $product = $job->campaignPack->product;
+        $values = $knowledge->excludedValues($product, $job->sourceSnapshot?->extracted_truth ?? []);
+        if (! $values) {
+            return $content;
+        }
 
-        return $knowledge->scrub($content, $knowledge->excludedValues($job->campaignPack->product, $job->sourceSnapshot?->extracted_truth ?? []));
+        // The base may carry older values of an excluded fact than the ones Knowledge holds now,
+        // so also scrub whatever the base itself recorded for that fact.
+        $paths = [
+            'price' => ['product_truth.price', 'marketing_hub.product_details.price'],
+            'description' => ['marketing_hub.product_details.summary'],
+            'availability' => ['product_truth.availability'],
+        ];
+        foreach ($product->facts()->where('status', 'excluded')->pluck('key') as $key) {
+            foreach ($paths[$key] ?? [] as $path) {
+                $value = data_get($content, $path);
+                if (is_string($value) && mb_strlen(trim($value)) >= 2 && ! in_array($value, ['Price not supplied', 'Not confirmed'], true)) {
+                    $values[] = trim($value);
+                }
+            }
+        }
+
+        return $knowledge->scrub($content, array_values(array_unique($values)));
     }
 
     private function replaceSection(array $current, array $generated, string $section): array
