@@ -25,6 +25,12 @@
                     @php
                         $def = $defs[$item->key];
                         [$tone, $label] = $statusTag[$item->status] ?? ['', ucfirst($item->status)];
+                        $inherits = $item->key === 'audience' && $brandAudience && $item->status === 'missing';
+                        $overrides = $item->key === 'audience' && $brandAudience && $item->status === 'ok' && $item->confirmed_value !== null
+                            && mb_strtolower(trim($item->confirmed_value)) !== mb_strtolower(trim($brandAudience));
+                        if ($inherits) {
+                            [$tone, $label] = ['', 'From brand'];
+                        }
                     @endphp
                     <tr wire:key="fact-{{ $item->key }}" @class(['hl' => $item->status === 'conflict', 'is-excluded' => $item->status === 'excluded'])>
                         <th scope="row" class="fact-name">{{ $def['label'] }}@unless($def['sourced'])<span class="xs muted">Added by your team</span>@endunless</th>
@@ -48,6 +54,10 @@
                             @elseif($item->confirmed_value !== null)
                                 <span class="clamp">{{ $item->confirmed_value }}</span>
                                 @if($item->confirmedBy)<span class="xs muted">Confirmed by {{ $item->confirmedBy->name }} {{ $item->confirmed_at?->diffForHumans() }}</span>@endif
+                                @if($overrides)<span class="xs muted">Overrides the {{ $product->brand->name }} default: {{ $brandAudience }}</span>@endif
+                            @elseif($inherits)
+                                <span class="clamp">{{ $brandAudience }}</span>
+                                <span class="xs muted">Inherited from the brand {{ $product->brand->name }}; add a value to override it for this product.</span>
                             @else
                                 <span class="muted">Not set</span>
                             @endif

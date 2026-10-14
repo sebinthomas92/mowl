@@ -8,7 +8,8 @@
     foreach ($facts->where('status', 'conflict') as $item) {
         $attention->push(['icon' => 'alert-triangle', 'tone' => 'warn', 'text' => "{$defs[$item->key]['label']} changed on the source", 'label' => 'Review', 'url' => $knowledgeUrl]);
     }
-    foreach ($facts->where('status', 'missing') as $item) {
+    // An audience the brand supplies is not missing.
+    foreach ($facts->where('status', 'missing')->reject(fn ($item) => $item->key === 'audience' && $brandAudience) as $item) {
         $attention->push(['icon' => 'circle-dashed', 'tone' => 'neu', 'text' => "{$defs[$item->key]['label']} is missing", 'label' => 'Add', 'url' => $knowledgeUrl]);
     }
     foreach ($packs->where('status', 'review') as $pack) {
@@ -23,7 +24,7 @@
         <div class="row"><span class="eyebrow">What it is</span><span class="sp"></span>@if($knowledgeReady)<a class="small" href="{{ $knowledgeUrl }}" wire:navigate>Edit in Knowledge</a>@endif</div>
         <p class="display lede">{{ $fact('description')?->status === 'excluded' ? '' : ($fact('description')?->confirmed_value ?: $product->summary ?: 'Add a one-line description in Knowledge.') }}</p>
         <div class="facts-mini">
-            @foreach(['price' => $product->price, 'audience' => null, 'availability' => null] as $key => $fallback)
+            @foreach(['price' => $product->price, 'audience' => $brandAudience, 'availability' => null] as $key => $fallback)
                 @php($item = $fact($key))
                 <div><span class="muted small">{{ $defs[$key]['label'] }}</span>
                     @if($item?->status === 'excluded')<span class="muted">Excluded</span>

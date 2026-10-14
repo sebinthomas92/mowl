@@ -216,10 +216,11 @@ class ProductHub extends Component
         $knowledgeReady = ProductKnowledge::available();
         $facts = $knowledgeReady ? app(ProductKnowledge::class)->facts($this->product) : collect();
         $source = $this->latestSource();
+        $brandAudience = $knowledgeReady ? (app(ProductKnowledge::class)->brandProfile($this->product)['default_audience'] ?? null) : null;
         $packs = $this->product->campaignPacks->sortByDesc('id')->values();
         $tabs = self::TABS;
 
-        return view('livewire.product-hub', compact('workspace', 'version', 'content', 'sections', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs'))
+        return view('livewire.product-hub', compact('workspace', 'version', 'content', 'sections', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience'))
             ->layout('components.layouts.app');
     }
 

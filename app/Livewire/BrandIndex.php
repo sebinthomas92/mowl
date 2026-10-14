@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Concerns\InteractsWithWorkspace;
+use App\Models\Brand;
 use Livewire\Component;
 
 class BrandIndex extends Component
@@ -15,7 +16,9 @@ class BrandIndex extends Component
 
         return view('livewire.brand-index', [
             'workspace' => $workspace,
-            'brands' => $workspace->brands()->withCount(['products'])->latest()->get(),
+            'brands' => $workspace->brands()->withCount(['products'])->orderBy('name')->get(),
+            'brandLimit' => (int) config('campaigns.brand_limit'),
+            'profileAvailable' => Brand::profileAvailable(),
         ])->layout('components.layouts.app');
     }
 }

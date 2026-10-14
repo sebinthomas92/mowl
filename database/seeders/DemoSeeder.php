@@ -48,6 +48,7 @@ class DemoSeeder extends Seeder
         $catalog = [
             'Northline Goods' => [
                 'website' => 'https://demo.northlinegoods.example',
+                'profile' => ['voice' => 'Calm, practical, a little dry. Short sentences.', 'default_audience' => 'Home office workers', 'palette' => ['#1F3A34', '#E9E1D3', '#C7643A']],
                 'products' => [
                     ['Fold Reading Stand', '$54.00', 'A foldable stand for books and tablets up to 12". Six angles, folds flat for travel.', 'fold-reading-stand'],
                     ['Trail Bottle 750', '$32.00', 'Insulated 750 ml bottle that keeps drinks cold for 24 hours.', 'trail-bottle'],
@@ -55,6 +56,7 @@ class DemoSeeder extends Seeder
             ],
             'Kettle & Co.' => [
                 'website' => 'https://demo.kettleco.example',
+                'profile' => ['voice' => 'Warm and playful, never cute.', 'default_audience' => 'Students and makers', 'palette' => ['#3B2E5A', '#F4E7D4', '#E3A23B']],
                 'products' => [
                     ['Desk Lamp Mini', '$45.00', 'Compact LED desk lamp with three warmth settings.', 'desk-lamp-mini'],
                 ],
@@ -68,6 +70,9 @@ class DemoSeeder extends Seeder
                 ['workspace_id' => $workspace->id, 'name' => $brandName],
                 ['website' => $brandData['website']],
             );
+            if (Brand::profileAvailable() && ! $brand->voice) {
+                $brand->update($brandData['profile'] + ['primary_color' => $brandData['profile']['palette'][0]]);
+            }
 
             foreach ($brandData['products'] as [$name, $price, $summary, $slug]) {
                 $product = Product::firstOrCreate(
