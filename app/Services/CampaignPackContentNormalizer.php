@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Product;
 use App\Models\SourceSnapshot;
+use App\Support\VoiceoverTiming;
 
 class CampaignPackContentNormalizer
 {
@@ -31,7 +32,7 @@ class CampaignPackContentNormalizer
             $start = $index * 4;
             $end = $start + 4;
             $text = (string) ($line['line'] ?? '');
-            $words = str_word_count($text);
+            $words = VoiceoverTiming::words($text);
 
             return [
                 'start_seconds' => $start,

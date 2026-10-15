@@ -42,7 +42,7 @@
         @if($body['voiceover'] ?? [])
             <span class="eyebrow">Timed voiceover</span>
             @foreach($body['voiceover'] as $line)
-                <div class="timed"><time class="num">{{ $time($line['start_seconds'] ?? 0) }}–{{ $time($line['end_seconds'] ?? 0) }}s</time><span>{{ $line['line'] ?? '' }}<br><span class="xs muted">{{ $line['word_count'] ?? 0 }} words · {{ $line['pace_wpm'] ?? 0 }} wpm</span></span></div>
+                <div class="timed"><time class="num">{{ $time($line['start_seconds'] ?? 0) }}–{{ $time($line['end_seconds'] ?? 0) }}s</time><span>{{ $line['line'] ?? '' }}<br><span class="xs muted">{{ \App\Support\VoiceoverTiming::words($line['line'] ?? '') }} words · {{ \App\Support\VoiceoverTiming::pace($line) ?? 0 }} wpm</span></span></div>
             @endforeach
         @endif
         @if($body['captions'] ?? [])

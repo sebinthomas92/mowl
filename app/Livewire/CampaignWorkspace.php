@@ -21,6 +21,7 @@ use App\Services\ContentLibrary;
 use App\Services\ProductKnowledge;
 use App\Services\SectionRegenerator;
 use App\Support\Membership;
+use App\Support\VoiceoverTiming;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
@@ -627,7 +628,7 @@ class CampaignWorkspace extends Component
             ? ($this->selectedVersion ? $pack->versions->firstWhere('version', $this->selectedVersion) : $pack->versions->sortByDesc('version')->first())
             : null;
         $displayContent = $selectedPackVersion
-            ? app(CampaignPackContentNormalizer::class)->normalize($selectedPackVersion->content ?? [], $pack->product, $pack->sourceSnapshot)
+            ? VoiceoverTiming::refreshContent(app(CampaignPackContentNormalizer::class)->normalize($selectedPackVersion->content ?? [], $pack->product, $pack->sourceSnapshot))
             : [];
         $isLatestVersion = $selectedPackVersion && $selectedPackVersion->version === $pack->versions->max('version');
         // The latest version is checked as its outputs read now, so edits saved on an output count.

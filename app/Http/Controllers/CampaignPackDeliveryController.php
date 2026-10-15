@@ -6,6 +6,7 @@ use App\Models\CampaignPack;
 use App\Models\CampaignPackShare;
 use App\Models\CampaignPackVersion;
 use App\Services\CampaignPackContentNormalizer;
+use App\Support\VoiceoverTiming;
 use Illuminate\Http\Response;
 
 class CampaignPackDeliveryController extends Controller
@@ -18,7 +19,7 @@ class CampaignPackDeliveryController extends Controller
             ->firstOrFail();
         $version = $share->version;
         abort_unless($version->review_status === 'approved', 404);
-        $content = $normalizer->normalize($version->content, $version->campaignPack->product, $version->campaignPack->sourceSnapshot);
+        $content = VoiceoverTiming::refreshContent($normalizer->normalize($version->content, $version->campaignPack->product, $version->campaignPack->sourceSnapshot));
 
         return response()->view('campaign-packs.share', compact('version', 'content'));
     }
@@ -32,7 +33,7 @@ class CampaignPackDeliveryController extends Controller
             'actor_user_id' => auth()->id(), 'event' => 'campaign_pack_exported', 'subject_type' => CampaignPackVersion::class,
             'subject_id' => $version->id, 'metadata' => ['format' => $format],
         ]);
-        $content = $normalizer->normalize($version->content, $pack->product, $pack->sourceSnapshot);
+        $content = VoiceoverTiming::refreshContent($normalizer->normalize($version->content, $pack->product, $pack->sourceSnapshot));
         $text = $this->text($version, $content);
         $filename = str($pack->name)->slug().'-v'.$version->version;
 
