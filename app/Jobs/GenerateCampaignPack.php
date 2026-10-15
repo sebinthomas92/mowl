@@ -8,6 +8,7 @@ use App\Exceptions\VertexAIResponseException;
 use App\Models\CampaignGenerationJob;
 use App\Models\ProcessingCacheEntry;
 use App\Services\CampaignGeneratorManager;
+use App\Services\CampaignPackFinalizer;
 use App\Services\ContentLibrary;
 use App\Services\ProductImageImporter;
 use App\Services\ProductKnowledge;
@@ -170,13 +171,13 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             DB::transaction(function () use ($job, $result, $cost, $cached, $section): void {
                 $pack = $job->campaignPack()->lockForUpdate()->firstOrFail();
                 $nextVersion = ((int) $pack->versions()->max('version')) + 1;
-                $content = $section
+                $content = app(CampaignPackFinalizer::class)->finalize($section
                     ? $this->replaceSection(
                         $this->baseContent($job),
                         $result->content,
                         $section,
                     )
-                    : $result->content;
+                    : $result->content);
                 $versionAttributes = [
                     'version' => $nextVersion,
                     'content' => $content,
