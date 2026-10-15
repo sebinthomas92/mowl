@@ -250,6 +250,45 @@ class CampaignWorkspace extends Component
         $this->audit('campaign_pack_regeneration_requested', $pack, null, ['section' => $data['regenerationSection'], 'generation_job_id' => $job->id]);
     }
 
+    /**
+     * The one-click QA fix: takes an unsupported term out of one line and saves the result as a new
+     * draft pack version. Only a term the checks still flag on the latest version can be removed,
+     * and removing words never adds a claim.
+     */
+    public function removeUnsupportedWording(string $path, string $term): void
+    {
+        abort_unless($this->membership()?->canCreate(), 403);
+        $pack = $this->workspacePack();
+
+        $version = DB::transaction(function () use ($pack, $path, $term): CampaignPackVersion {
+            $lockedPack = CampaignPack::query()->lockForUpdate()->findOrFail($pack->id);
+            abort_if($lockedPack->generationJobs()->whereIn('status', ['queued', 'processing', 'retrying'])->exists(), 422);
+            $latest = $lockedPack->versions()->orderByDesc('version')->firstOrFail();
+            abort_if($latest->review_status === 'approved', 422);
+            $content = app(CampaignPackContentNormalizer::class)->normalize($latest->content ?? [], $pack->product, $pack->sourceSnapshot);
+            $flagged = collect(app(CampaignPackSafetyValidator::class)->issues($content, $latest->evidence ?? [], $latest->compliance_flags ?? [], $pack->sourceSnapshot))
+                ->contains(fn (array $issue) => ($issue['path'] ?? null) === $path && ($issue['term'] ?? null) === $term);
+            abort_unless($flagged, 422);
+            $text = data_get($content, $path);
+            $fixed = is_string($text) ? CampaignPackSafetyValidator::withoutTerm($text, $term) : null;
+            abort_unless($fixed !== null, 422);
+            data_set($content, $path, $fixed);
+
+            $version = $lockedPack->versions()->create([
+                'version' => $latest->version + 1, 'content' => $content, 'evidence' => $latest->evidence,
+                'compliance_flags' => $latest->compliance_flags, 'generator' => 'qa_fix', 'review_status' => 'draft',
+                'review_note' => "Removed unsupported “{$term}” from: {$text}",
+            ]);
+            $lockedPack->update(['current_version' => $version->version, 'status' => 'draft']);
+
+            return $version;
+        });
+
+        $this->selectedVersion = null;
+        $this->audit('campaign_pack_wording_removed', $version, null, ['path' => $path, 'term' => $term]);
+        app(ContentLibrary::class)->syncPack($pack->fresh());
+    }
+
     public function selectVersion(int $version): void
     {
         $pack = CampaignPack::query()
@@ -576,12 +615,34 @@ class CampaignWorkspace extends Component
             )
             : [];
 
+        $contentItems = $pack && ContentLibrary::available() ? $pack->contentItems()->with('latestVersion')->orderBy('id')->get() : null;
+        $isLatestVersion = $selectedPackVersion && $selectedPackVersion->version === $pack->versions->max('version');
+        $canFix = $isLatestVersion && $selectedPackVersion->review_status !== 'approved'
+            && ! in_array($pack->latestGenerationJob?->status, ['queued', 'processing', 'retrying'], true)
+            && $this->membership()?->canCreate();
+        $qaIssues = array_map(function (array $issue) use ($pack, $displayContent, $contentItems, $canFix): array {
+            if (! isset($issue['path'])) {
+                return $issue;
+            }
+            $location = app(ContentLibrary::class)->locate($displayContent, $issue['path']);
+            $item = $location ? $contentItems?->firstWhere('section', $location['section']) : null;
+            $parts = explode('.', $issue['path']);
+            if ($item) {
+                $parts = [Str::before($item->title, ' · '), ...array_slice($parts, str_starts_with($location['section'], 'creative_routes.') ? 2 : 1)];
+            }
+            $issue['where'] = collect($parts)->map(fn ($part) => is_numeric($part) ? '#'.($part + 1) : (string) Str::of($part)->replace('_', ' ')->ucfirst())->implode(' › ');
+            $issue['edit_url'] = $item ? route('products.show', array_filter(['product' => $pack->product_id, 'tab' => 'content', 'item' => $item->id, 'field' => $location['field'] ?: null])) : null;
+            $issue['fixed'] = $canFix && isset($issue['term']) ? CampaignPackSafetyValidator::withoutTerm($issue['text'], $issue['term']) : null;
+
+            return $issue;
+        }, $qaIssues);
+
         return view('livewire.campaign-workspace', [
             'workspace' => $workspace,
             'products' => $pack ? collect() : $this->scopedProducts()
                 ->with(['brand', 'mediaAssets'])->orderBy('name')->get(),
             'briefProduct' => ! $pack && $this->productId ? $this->workspaceProduct($this->productId)->load('brand') : null,
-            'contentItems' => $pack && ContentLibrary::available() ? $pack->contentItems()->with('latestVersion')->orderBy('id')->get() : null,
+            'contentItems' => $contentItems,
             'pack' => $pack,
             'processJobUrl' => $pack?->latestGenerationJob && config('campaigns.processing_mode') === 'request'
                 ? URL::temporarySignedRoute('campaign-jobs.process', now()->addMinutes(30), ['generationJob' => $pack->latestGenerationJob])

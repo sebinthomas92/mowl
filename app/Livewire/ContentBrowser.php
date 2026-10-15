@@ -43,6 +43,10 @@ class ContentBrowser extends Component
     #[Url(as: 'q')]
     public string $search = '';
 
+    /** An edit field to open and highlight, set by links from the launch pack QA list. */
+    #[Url(as: 'field')]
+    public ?string $focusField = null;
+
     public string $detailTab = 'preview';
 
     public array $picked = [];
@@ -67,11 +71,15 @@ class ContentBrowser extends Component
             abort_unless($this->product(), 404);
         }
         app(ContentLibrary::class)->syncWorkspace($this->currentWorkspace(), $this->product());
+        if ($this->itemId && $this->focusField && $this->scopedItems()->whereKey($this->itemId)->exists() && $this->membership()?->canCreate()) {
+            $this->showTab('edit');
+        }
     }
 
     public function select(int $id): void
     {
         $this->itemId = $this->item($id)->id;
+        $this->focusField = null;
         $this->detailTab = 'preview';
         $this->commentBody = '';
         $this->flash = null;
