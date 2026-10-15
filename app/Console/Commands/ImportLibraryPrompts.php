@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
  * Loads a licensed prompt collection (JSON array) into library_prompts.
  *
  * Each entry needs `title` and `body`; `id`, `category` (the source's own section, used as the pack),
- * `tags` (containing "premium" or "free"), `credit` (falls back to --credit), `source_url`, `video_url` and `poster_url` are optional. Re-running updates entries
+ * `tags` (containing "premium" or "free"), `library_category` (falls back to --category), `credit` (falls back to --credit), `source_url`, `video_url` and `poster_url` are optional. Re-running updates entries
  * by id and removes ones the file no longer has.
  */
 class ImportLibraryPrompts extends Command
@@ -20,6 +20,7 @@ class ImportLibraryPrompts extends Command
     protected $signature = 'workflows:import-prompts
         {file : Path to the JSON export}
         {--collection=motionsites : Key that groups this collection}
+        {--category=web : Library category for every entry; library_category on an entry wins}
         {--credit=From the MotionSites.ai collection, licensed for Marketing Owl : Attribution shown with every prompt}';
 
     protected $description = 'Import a licensed prompt collection into the Workflows prompt library';
@@ -34,12 +35,18 @@ class ImportLibraryPrompts extends Command
         }
 
         $collection = Str::slug($this->option('collection'));
+        $categories = array_keys((array) config('workflows.categories'));
+        if (! in_array($this->option('category'), $categories, true)) {
+            $this->error('The category must be one of: '.implode(', ', $categories).'.');
+
+            return self::FAILURE;
+        }
         $positions = [];
         $keys = [];
 
         $previews = Schema::hasColumn('library_prompts', 'video_url');
 
-        DB::transaction(function () use ($entries, $collection, $previews, &$positions, &$keys) {
+        DB::transaction(function () use ($entries, $collection, $categories, $previews, &$positions, &$keys) {
             foreach ($entries as $index => $entry) {
                 $title = trim((string) ($entry['title'] ?? ''));
                 $body = trim((string) ($entry['body'] ?? ''));
@@ -54,7 +61,7 @@ class ImportLibraryPrompts extends Command
                 $prompt = LibraryPrompt::firstOrNew(['collection' => $collection, 'source_key' => $key]);
                 $prompt->fill([
                     'pack' => Str::limit($pack, 117),
-                    'category' => 'web',
+                    'category' => in_array($entry['library_category'] ?? null, $categories, true) ? $entry['library_category'] : $this->option('category'),
                     'title' => Str::limit($title, 197),
                     'body' => $body,
                     'tier' => in_array('premium', $tags, true) ? 'premium' : 'free',

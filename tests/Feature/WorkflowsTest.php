@@ -171,6 +171,10 @@ MD);
         $this->assertSame(1, LibraryPrompt::count());
         $this->assertSame('free', LibraryPrompt::first()->tier);
         $this->assertSame('Prompt by @ana', LibraryPrompt::first()->credit);
+        File::put($file, json_encode([['id' => 'm1', 'title' => 'Orbit', 'category' => 'UI motion', 'body' => 'Animate.', 'library_category' => 'animation'], ['id' => 'm2', 'title' => 'Reel', 'category' => 'Reels', 'body' => 'Render.']]));
+        $this->artisan('workflows:import-prompts', ['file' => $file, '--collection' => 'opus-videos', '--category' => 'motion'])->assertSuccessful();
+        $this->assertSame(['animation', 'motion'], LibraryPrompt::where('collection', 'opus-videos')->orderBy('source_key')->pluck('category')->all());
+        $this->artisan('workflows:import-prompts', ['file' => $file, '--category' => 'nope'])->assertFailed();
         $this->artisan('workflows:import-prompts', ['file' => $this->library.'/missing.json'])->assertFailed();
     }
 
@@ -326,6 +330,10 @@ MD);
         $this->actingAs($user)->get(route('workflows.preview', [$prompt->id, 'poster']))->assertRedirect('https://media.example.com/cara.webp');
         $this->assertSame(LibraryPreviews::REMOTE, $prompt->fresh()->poster_path);
 
+        LibraryPrompt::where('source_key', 'dev')->update(['credit' => 'Prompt by @cara']);
+        $pack = app(WorkflowCatalog::class)->find('opus-videos-ui-motion-animations');
+        $this->assertStringContainsString('awesome-opus5-5-videos', $pack['credit']);
+        $this->assertSame('Prompt by @cara', $pack['prompts'][0]['credit']);
         Livewire::actingAs($user)->withQueryParams(['workflow' => 'opus-videos-ui-motion-animations'])->test(WorkflowIndex::class)
             ->assertSee('Prompt by @cara')
             ->assertDontSee('javascript:', false);

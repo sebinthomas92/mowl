@@ -131,7 +131,8 @@ class WorkflowCatalog
                     'title' => $prompt->title,
                     'body' => null,
                     'tier' => $prompt->tier,
-                    'credit' => $sharedCredit ? null : $prompt->credit,
+                    // A collection credit sits on the pack, so each prompt keeps its creator's credit beside it.
+                    'credit' => $sharedCredit && empty($collection['credit']) ? null : $prompt->credit,
                     'source_url' => LibraryPreviews::safeUrl($prompt->source_url),
                     'video' => $preview($prompt, 'video'),
                     'poster' => $preview($prompt, 'poster'),
@@ -143,7 +144,7 @@ class WorkflowCatalog
                     'category' => $first->category,
                     'availability' => 'download',
                     'description' => $prompts->count().' '.Str::plural('prompt', $prompts->count()).($premium ? ", {$premium} premium" : '').'.',
-                    'credit' => $sharedCredit ?? ($collection['credit'] ?? null),
+                    'credit' => ($collection['credit'] ?? null) ?: $sharedCredit,
                     'source_url' => $collection['source_url'] ?? config('workflows.source_url'),
                     'source_label' => $collection['source_label'] ?? null,
                     'poster' => collect($items)->pluck('poster')->filter()->first(),
