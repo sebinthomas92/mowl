@@ -162,6 +162,14 @@ class ContentItemsTest extends TestCase
         $library->saveDraft($version->fresh(), ['value_proposition' => 'Now only ₹899.']);
         $this->assertSame('Price 899 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
 
+        // The struck-out amount stated as the price is still a wrong price.
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Was great value. Now only ₹750.']);
+        $this->assertSame('Price 750 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Free shipping, ₹750 only.']);
+        $this->assertSame('Price 750 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Get it for ₹750 MRP, now ₹699, free shipping on orders over ₹499.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+
         // A page that never shows the product's price ties no other amount on it to the product.
         $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand. Was ₹899. You may also like: Cloud Organiser ₹750', 'extracted_truth' => []]);
         $library->saveDraft($version->fresh(), ['value_proposition' => 'Now ₹899.']);

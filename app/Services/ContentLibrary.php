@@ -376,7 +376,10 @@ class ContentLibrary
                 ->map(fn (string $supported) => $this->number(explode(' ', $supported, 2)[1] ?? ''))
                 ->reject(fn (string $amount) => $amount === $pagePrice && ! in_array($amount, $confirmed, true))
                 ->all();
-            $wrong = collect($mentioned)->reject(fn ($amount) => in_array($amount, [...$confirmed, ...$nearby], true))->first();
+            $wrong = collect($this->pricesInContext($text))
+                ->reject(fn (array $found) => in_array($found[0], $confirmed, true)
+                    || (in_array($found[0], $nearby, true) && $this->isNotTheCurrentPrice($found[1], $found[2])))
+                ->pluck(0)->first();
             $checks[] = ['ok' => $wrong === null, 'blocking' => true, 'label' => $wrong === null
                 ? "Price matches confirmed Knowledge ({$price})"
                 : "Price {$wrong} differs from confirmed Knowledge ({$price})"];
@@ -684,6 +687,33 @@ class ContentLibrary
         preg_match_all('/(?:[$€£₹]|\b(?:USD|EUR|GBP|INR|Rs\.?))\s?(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s?(?:USD|EUR|GBP|INR)\b/u', $text, $matches, PREG_SET_ORDER);
 
         return array_values(array_unique(array_map(fn (array $match) => $this->number($match[1] !== '' ? $match[1] : ($match[2] ?? '')), $matches)));
+    }
+
+    /**
+     * Each price in the text with the words just before and after it.
+     *
+     * @return list<array{0: string, 1: string, 2: string}>
+     */
+    private function pricesInContext(string $text): array
+    {
+        preg_match_all('/(?:[$€£₹]|\b(?:USD|EUR|GBP|INR|Rs\.?))\s?(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s?(?:USD|EUR|GBP|INR)\b/u', $text, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+
+        return array_map(function (array $match) use ($text): array {
+            [$whole, $offset] = $match[0];
+            $amount = ($match[1][1] ?? -1) >= 0 ? $match[1][0] : ($match[2][0] ?? '');
+            // Byte offsets, so mb_strcut keeps the windows valid UTF-8. Only the same clause counts:
+            // a sentence break or "now" starts a new claim.
+            $before = preg_split('/[.!?;\n]\s|\bnow\b/iu', mb_strcut($text, max(0, $offset - 40), min(40, $offset)));
+
+            return [$this->number($amount), (string) end($before), mb_strcut($text, $offset + strlen($whole), 12)];
+        }, $matches);
+    }
+
+    /** Whether the wording marks an amount as an old price, a threshold or a saving rather than the price. */
+    private function isNotTheCurrentPrice(string $before, string $after): bool
+    {
+        return preg_match('/\b(?:was|m\.?r\.?p\.?|down from|instead of|regular(?:ly)?|list price|original(?:ly)?|over|above|orders?|shipping|save|saving)[\s:]*$/iu', $before) === 1
+            || preg_match('/^[\s:]*(?:m\.?r\.?p|off)\b/iu', $after) === 1;
     }
 
     private function number(string $value): string
