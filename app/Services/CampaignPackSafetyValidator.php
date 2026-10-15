@@ -16,6 +16,13 @@ class CampaignPackSafetyValidator
     /** How far (in bytes of page text) an amount may sit from the product's own price and still be about it. */
     private const PRICE_BLOCK_BYTES = 400;
 
+    /** Words before and after an amount that mark it as something other than the current price. */
+    private const PRICE_ROLES = [
+        'old' => ['was|m\\.?r\\.?p\\.?|down from|instead of|regular(?:ly)?|list price|original(?:ly)?|struck', 'm\\.?r\\.?p'],
+        'threshold' => ['over|above|orders?|shipping|delivery|exceed(?:s|ing)?|threshold(?: of)?|minimum(?: of)?', 'threshold|minimum|and above|or more'],
+        'saving' => ['save|saving', 'off'],
+    ];
+
     private const CURRENCY_CODES = ['INR', 'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'SGD', 'AED', 'NZD', 'CHF', 'CNY', 'HKD', 'SAR', 'MYR', 'ZAR', 'SEK', 'NOK', 'DKK', 'BRL', 'MXN', 'IDR', 'THB', 'PHP', 'KRW', 'QAR', 'NPR', 'LKR', 'BDT', 'PKR'];
 
     private const UNSAFE_STATUSES = [
@@ -237,15 +244,49 @@ class CampaignPackSafetyValidator
     }
 
     /**
-     * Amounts the page shows within reach of an occurrence of the product's own price (a struck-out
-     * MRP, a free-shipping threshold). Empty when the page never shows the product's price, since
-     * then nothing ties any amount on it to this product.
+     * Amounts the page shows within reach of an occurrence of the product's own price, each with what
+     * the page says it is: a struck-out old price, an order threshold or a saving. Amounts nothing marks
+     * are left out, and so is everything when the page never shows the product's price, since then
+     * nothing ties any amount on it to this product.
      *
-     * @return list<string>
+     * @return array<string, list<string>>
      */
     public function pricesBesideProductPrice(SourceSnapshot $source): array
     {
-        return array_values(array_unique(array_column($this->pagePrices($source)[1] ?? [], 0)));
+        [$onPage, $anchored, $own] = $this->pagePrices($source);
+        $page = (string) $source->extracted_content;
+        $roles = [];
+        foreach ($anchored ?? [] as [$price, $offset, $length]) {
+            $end = $offset + $length;
+            // A struck-out price sits right before the product's own one, as in "₹750₹699".
+            $next = collect($onPage)->first(fn (array $found) => $found[1] >= $end && $found[1] <= $end + 2);
+            $role = $next && $this->matchesAny($next[0], $own) && ! $this->matchesAny($price, $own)
+                ? 'old'
+                : $this->priceRole(mb_strcut($page, max(0, $offset - 40), min(40, $offset)), mb_strcut($page, $end, 16));
+            if ($role) {
+                $roles[$price] = array_values(array_unique([...$roles[$price] ?? [], $role]));
+            }
+        }
+
+        return $roles;
+    }
+
+    /**
+     * What the words beside an amount make it: "old" (was, MRP), "threshold" (free shipping over) or
+     * "saving" (save, off). Null when nothing marks it, as for a current price. Only the same clause
+     * counts: a line or sentence break, or "now", starts a new claim.
+     */
+    public function priceRole(string $before, string $after): ?string
+    {
+        $parts = preg_split('/[.!?;]\s|\n|\bnow\b/iu', $before) ?: [''];
+        $before = (string) end($parts);
+        foreach (self::PRICE_ROLES as $role => [$lead, $trail]) {
+            if (preg_match('/\b(?:'.$lead.')[\s:(]*$/iu', $before) === 1 || preg_match('/^[\s:(]*(?:'.$trail.')(?![\p{L}])/iu', $after) === 1) {
+                return $role;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -362,8 +403,8 @@ class CampaignPackSafetyValidator
         preg_match_all('/'.$number.'\\s?(rupees|'.$codes.')(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
 
         return [
-            ...array_map(fn (array $match) => [$this->currency($match[1][0], $known).' '.$this->amount($match[2][0]), $match[0][1]], $before),
-            ...array_map(fn (array $match) => [$this->currency($match[2][0], $known).' '.$this->amount($match[1][0]), $match[0][1]], $after),
+            ...array_map(fn (array $match) => [$this->currency($match[1][0], $known).' '.$this->amount($match[2][0]), $match[0][1], strlen($match[0][0])], $before),
+            ...array_map(fn (array $match) => [$this->currency($match[2][0], $known).' '.$this->amount($match[1][0]), $match[0][1], strlen($match[0][0])], $after),
         ];
     }
 

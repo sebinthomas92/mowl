@@ -367,18 +367,24 @@ class ContentLibrary
         if ($price && $mentioned) {
             $confirmed = $this->prices($price) ?: [$this->number($price)];
             // Other amounts the page shows beside the product's price (a struck-out MRP, a free-shipping
-            // threshold) are not claims about the price. The page's own price is not one of them when
-            // it disagrees with the confirmed one: that disagreement is what this check is for. A page
-            // that never shows the product's price ties no amount to it, so none is exempt.
+            // threshold) are not claims about the price when the copy says the same thing about them the
+            // page does. The page's own price is not one of them when it disagrees with the confirmed
+            // one: that disagreement is what this check is for.
             $source = $item->campaignPack?->sourceSnapshot;
+            $validator = app(CampaignPackSafetyValidator::class);
             $pagePrice = filled($source?->extracted_truth['price'] ?? null) ? $this->number((string) $source->extracted_truth['price']) : null;
-            $nearby = collect($source ? app(CampaignPackSafetyValidator::class)->pricesBesideProductPrice($source) : [])
-                ->map(fn (string $supported) => $this->number(explode(' ', $supported, 2)[1] ?? ''))
-                ->reject(fn (string $amount) => $amount === $pagePrice && ! in_array($amount, $confirmed, true))
-                ->all();
-            $wrong = collect($this->pricesInContext($text))
+            $roles = [];
+            foreach ($source ? $validator->pricesBesideProductPrice($source) : [] as $supported => $pageRoles) {
+                $amount = $this->number(explode(' ', $supported, 2)[1] ?? '');
+                if ($amount !== $pagePrice || in_array($amount, $confirmed, true)) {
+                    $roles[$amount] = [...$roles[$amount] ?? [], ...$pageRoles];
+                }
+            }
+            // Field by field, so wording ending one field never describes an amount starting the next.
+            $wrong = collect($this->strings($version->body))
+                ->flatMap(fn (string $field) => $this->pricesInContext($field))
                 ->reject(fn (array $found) => in_array($found[0], $confirmed, true)
-                    || (in_array($found[0], $nearby, true) && $this->isNotTheCurrentPrice($found[1], $found[2])))
+                    || in_array($validator->priceRole($found[1], $found[2]), $roles[$found[0]] ?? [], true))
                 ->pluck(0)->first();
             $checks[] = ['ok' => $wrong === null, 'blocking' => true, 'label' => $wrong === null
                 ? "Price matches confirmed Knowledge ({$price})"
@@ -698,22 +704,13 @@ class ContentLibrary
     {
         preg_match_all('/(?:[$€£₹]|\b(?:USD|EUR|GBP|INR|Rs\.?))\s?(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s?(?:USD|EUR|GBP|INR)\b/u', $text, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
 
+        // Byte offsets, so mb_strcut keeps the windows valid UTF-8.
         return array_map(function (array $match) use ($text): array {
             [$whole, $offset] = $match[0];
             $amount = ($match[1][1] ?? -1) >= 0 ? $match[1][0] : ($match[2][0] ?? '');
-            // Byte offsets, so mb_strcut keeps the windows valid UTF-8. Only the same clause counts:
-            // a sentence break or "now" starts a new claim.
-            $before = preg_split('/[.!?;\n]\s|\bnow\b/iu', mb_strcut($text, max(0, $offset - 40), min(40, $offset)));
 
-            return [$this->number($amount), (string) end($before), mb_strcut($text, $offset + strlen($whole), 12)];
+            return [$this->number($amount), mb_strcut($text, max(0, $offset - 40), min(40, $offset)), mb_strcut($text, $offset + strlen($whole), 16)];
         }, $matches);
-    }
-
-    /** Whether the wording marks an amount as an old price, a threshold or a saving rather than the price. */
-    private function isNotTheCurrentPrice(string $before, string $after): bool
-    {
-        return preg_match('/\b(?:was|m\.?r\.?p\.?|down from|instead of|regular(?:ly)?|list price|original(?:ly)?|over|above|orders?|shipping|save|saving|exceed(?:s|ing)?|threshold(?: of)?|minimum(?: of)?)[\s:]*$/iu', $before) === 1
-            || preg_match('/^[\s:]*(?:m\.?r\.?p|off|threshold|minimum|and above|or more)\b/iu', $after) === 1;
     }
 
     private function number(string $value): string

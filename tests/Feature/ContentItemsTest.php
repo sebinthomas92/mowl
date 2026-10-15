@@ -169,6 +169,16 @@ class ContentItemsTest extends TestCase
         $this->assertSame('Price 750 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
         $library->saveDraft($version->fresh(), ['value_proposition' => 'Get it for ₹750 MRP, now ₹699, free shipping on orders over ₹499.']);
         $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+        // The copy must say what the page says about the amount, within one field.
+        foreach (['Free shipping over ₹750.', 'Save ₹750 today.', 'Was ₹499, now ₹699.'] as $wrong) {
+            $library->saveDraft($version->fresh(), ['value_proposition' => $wrong]);
+            $this->assertFalse($priceCheck()['ok'], $wrong);
+        }
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Free shipping', 'brand_position' => '₹750 only']);
+        $this->assertSame('Price 750 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
+        $library->saveDraft($version->fresh(), ['value_proposition' => '₹750 (MRP), now ₹699.', 'brand_position' => 'Quiet design for readers.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+
         // Wording from a live pack.
         $library->saveDraft($version->fresh(), ['value_proposition' => 'Launch price of INR 699.00 with complimentary shipping (order value exceeds INR 499 threshold). The price of INR 699.00 exceeds the complimentary shipping threshold of INR 499.00. Free delivery over INR 499.']);
         $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
