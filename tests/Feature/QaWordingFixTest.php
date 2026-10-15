@@ -94,6 +94,27 @@ class QaWordingFixTest extends TestCase
         $this->assertSame('Sturdy build', data_get($latest->content, $path));
     }
 
+    public function test_timed_lines_and_reviewers_get_no_edit_shortcuts(): void
+    {
+        [$owner, $pack, $workspace] = $this->fixture(function (array $content) {
+            $content['creative_routes'][1]['voiceover'][0]['line'] = 'Guaranteed to fit every reader';
+            $content['creative_routes'][2]['platform_assets']['meta_ads']['primary_copy'] = '7-day returns guaranteed';
+
+            return $content;
+        });
+
+        $issues = collect(Livewire::actingAs($owner)->test(CampaignWorkspace::class, ['pack' => $pack])->viewData('qaIssues'));
+        $voiceover = $issues->firstWhere('path', 'creative_routes.1.voiceover.0.line');
+        $this->assertNull($voiceover['fixed']);
+        $this->assertStringNotContainsString('field=', $voiceover['edit_url']);
+        $this->assertCount(2, $issues->where('message', '7-day returns guaranteed is more specific than the approved evidence.'));
+
+        $reviewer = User::factory()->create();
+        $workspace->users()->attach($reviewer, ['role' => 'reviewer']);
+        $issues = collect(Livewire::actingAs($reviewer)->test(CampaignWorkspace::class, ['pack' => $pack])->viewData('qaIssues'));
+        $this->assertNull($issues->firstWhere('path', self::PATH)['edit_url']);
+    }
+
     public function test_only_a_flagged_term_on_the_latest_version_can_be_removed(): void
     {
         [$owner, $pack, $workspace] = $this->fixture();
@@ -132,6 +153,8 @@ class QaWordingFixTest extends TestCase
         $this->assertNull(CampaignPackSafetyValidator::withoutTerm('Handmade in Jaipur', 'made in'));
         $this->assertNull(CampaignPackSafetyValidator::withoutTerm('Guaranteed', 'guaranteed'));
         $this->assertNull(CampaignPackSafetyValidator::withoutTerm('Naturally bright', 'natural'));
+        $this->assertNull(CampaignPackSafetyValidator::withoutTerm('Not guaranteed.', 'guaranteed'));
+        $this->assertNull(CampaignPackSafetyValidator::withoutTerm('Returns are not guaranteed', 'guaranteed'));
         $this->assertSame('Shop the stand', CampaignPackSafetyValidator::withoutTerm('Shop the cruelty‑free stand', 'cruelty-free'));
     }
 

@@ -269,6 +269,7 @@ class CampaignWorkspace extends Component
         $flagged = collect(app(CampaignPackSafetyValidator::class)->issues($content, $latest->evidence ?? [], $latest->compliance_flags ?? [], $pack->sourceSnapshot))
             ->contains(fn (array $issue) => ($issue['path'] ?? null) === $path && ($issue['term'] ?? null) === $term);
         abort_unless($flagged, 422);
+        abort_if((bool) preg_match('/^creative_routes\.\d+\.(voiceover|captions|shot_plan)\./', $path), 422);
         $text = data_get($content, $path);
         $fixed = is_string($text) ? CampaignPackSafetyValidator::withoutTerm($text, $term) : null;
         abort_unless($fixed !== null, 422);
@@ -641,10 +642,11 @@ class CampaignWorkspace extends Component
             : [];
 
         $contentItems = $pack && ContentLibrary::available() ? $pack->contentItems()->with('latestVersion')->orderBy('id')->get() : null;
+        $canEdit = $isLatestVersion && (bool) $this->membership()?->canCreate();
         $canFix = $isLatestVersion && $selectedPackVersion->review_status !== 'approved'
             && ! in_array($pack->latestGenerationJob?->status, ['queued', 'processing', 'retrying'], true)
             && $this->membership()?->canCreate();
-        $qaIssues = array_map(function (array $issue) use ($pack, $qaContent, $contentItems, $canFix): array {
+        $qaIssues = array_map(function (array $issue) use ($pack, $qaContent, $contentItems, $canFix, $canEdit): array {
             if (! isset($issue['path'])) {
                 return $issue;
             }
@@ -655,8 +657,10 @@ class CampaignWorkspace extends Component
                 $parts = [Str::before($item->title, ' · '), ...array_slice($parts, str_starts_with($location['section'], 'creative_routes.') ? 2 : 1)];
             }
             $issue['where'] = collect($parts)->map(fn ($part) => is_numeric($part) ? '#'.($part + 1) : (string) Str::of($part)->replace('_', ' ')->ucfirst())->implode(' › ');
-            $issue['edit_url'] = $item ? route('products.show', array_filter(['product' => $pack->product_id, 'tab' => 'content', 'item' => $item->id, 'field' => $location['field'] ?: null])) : null;
-            $issue['fixed'] = $canFix && isset($issue['term']) ? CampaignPackSafetyValidator::withoutTerm($issue['text'], $issue['term']) : null;
+            // Timed lines (voiceover, captions, shots) change only through Regenerate, so their timing stays checked.
+            $timed = $location && in_array(explode('__', $location['field'])[0], ContentBrowser::LOCKED_KEYS, true);
+            $issue['edit_url'] = $item && $canEdit ? route('products.show', array_filter(['product' => $pack->product_id, 'tab' => 'content', 'item' => $item->id, 'field' => $timed ? null : ($location['field'] ?: null)])) : null;
+            $issue['fixed'] = $canFix && ! $timed && isset($issue['term']) ? CampaignPackSafetyValidator::withoutTerm($issue['text'], $issue['term']) : null;
 
             return $issue;
         }, $qaIssues);

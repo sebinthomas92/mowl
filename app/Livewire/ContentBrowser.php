@@ -26,7 +26,7 @@ class ContentBrowser extends Component
     use InteractsWithWorkspace;
 
     /** Keys that hold ids, ranks or timing, never prose a person should retype. */
-    private const LOCKED_KEYS = ['id', 'shot_id', 'status', 'supporting_claim_ids', 'claim_validation_status', 'angle_rank', 'rank', 'voiceover', 'captions', 'shot_plan', 'final_url', 'total_duration_seconds'];
+    public const LOCKED_KEYS = ['id', 'shot_id', 'status', 'supporting_claim_ids', 'claim_validation_status', 'angle_rank', 'rank', 'voiceover', 'captions', 'shot_plan', 'final_url', 'total_duration_seconds'];
 
     #[Locked]
     public ?int $productId = null;

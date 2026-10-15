@@ -206,7 +206,7 @@ class CampaignPackSafetyValidator
             }
         }
 
-        return collect($issues)->unique(fn (array $issue) => $issue['type'].'|'.$issue['message'])->values()->all();
+        return collect($issues)->unique(fn (array $issue) => $issue['type'].'|'.$issue['message'].'|'.($issue['path'] ?? ''))->values()->all();
     }
 
     /** @param  array{path?: string, text?: string, term?: string}  $location  where in the content the wording sits */
@@ -225,6 +225,10 @@ class CampaignPackSafetyValidator
             return null;
         }
         $pattern = implode('\\s*[-\\x{2010}-\\x{2013}]\\s*', array_map(fn ($part) => preg_quote($part, '/'), explode('-', $term)));
+        // "Not guaranteed" without its term reads as a different claim, so a negated term is left to a person.
+        if (preg_match('/\\b(not|no|never|without|non)\\s+'.$pattern.'/iu', $text)) {
+            return null;
+        }
         $result = (string) preg_replace('/(?<![\\p{L}\\p{N}])'.$pattern.'(?![\\p{L}\\p{N}])/iu', '', $text);
         if ($result === $text) {
             return null;
@@ -235,7 +239,7 @@ class CampaignPackSafetyValidator
         $result = (string) preg_replace('/([,;:])\\s*([.!?]|$)/u', '$2', $result);
         $result = trim((string) preg_replace('/^[\\s,;:&-]+|[\\s,;:&-]+$/u', '', $result));
         $result = (string) preg_replace('/^(and|or)\\s+|\\s+(and|or)$/iu', '', $result);
-        if (mb_strlen($result) < 3 || ! preg_match('/[\\p{L}\\p{N}]/u', $result)) {
+        if (preg_match_all('/\\p{L}{2,}/u', $result) < 2) {
             return null;
         }
         if (preg_match('/^\\p{Lu}/u', $text)) {
