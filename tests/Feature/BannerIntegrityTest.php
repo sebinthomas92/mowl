@@ -41,6 +41,21 @@ class BannerIntegrityTest extends TestCase
         $this->assertSame([], $validator->unsupportedPrices('Only Rs. 699.00, was ₹750.', $supported));
     }
 
+    public function test_other_iso_currencies_and_bare_price_fields_are_checked(): void
+    {
+        $validator = app(CampaignPackSafetyValidator::class);
+        $yen = $validator->supportedPrices(new SourceSnapshot(['extracted_content' => 'Stand', 'extracted_truth' => ['price' => '699', 'currency' => 'JPY']]));
+
+        $this->assertSame(['JPY 699'], $yen);
+        $this->assertSame(['699'], $validator->unsupportedPrices('Only USD 699', $yen));
+        $this->assertSame(['899'], $validator->unsupportedPrices('Only 899 USD', $yen));
+        $this->assertSame([], $validator->unsupportedPrices('Only 699 JPY', $yen));
+
+        $source = new SourceSnapshot(['extracted_content' => self::PAGE, 'extracted_truth' => ['price' => '699.00', 'currency' => 'INR']]);
+        $issues = collect($validator->issues(['product_truth' => ['price' => '899'], 'marketing_hub' => ['product_details' => ['price' => '699.00']]], [], [], $source))->whereNotNull('path');
+        $this->assertSame(['product_truth.price'], $issues->pluck('path')->values()->all());
+    }
+
     public function test_decimal_comma_prices_keep_their_value(): void
     {
         $validator = app(CampaignPackSafetyValidator::class);

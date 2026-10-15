@@ -8,6 +8,9 @@ use Illuminate\Validation\ValidationException;
 
 class CampaignPackSafetyValidator
 {
+    /** ISO codes recognised next to an amount in copy ("899 USD", "AED 99"). */
+    private const CURRENCY_CODES = ['INR', 'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'SGD', 'AED', 'NZD', 'CHF', 'CNY', 'HKD', 'SAR', 'MYR', 'ZAR', 'SEK', 'NOK', 'DKK', 'BRL', 'MXN', 'IDR', 'THB', 'PHP', 'KRW', 'QAR', 'NPR', 'LKR', 'BDT', 'PKR'];
+
     private const UNSAFE_STATUSES = [
         'too_specific_for_evidence',
         'unsupported',
@@ -152,7 +155,7 @@ class CampaignPackSafetyValidator
 
         $supportedPrices = $this->supportedPrices($source);
         foreach ($this->stringsWithPaths($content) as $path => $text) {
-            if ($prices = $this->unsupportedPrices($text, $supportedPrices)) {
+            if ($prices = $this->unsupportedPrices($text, $supportedPrices, (bool) preg_match('/(^|\.)price$/', $path))) {
                 $issues[] = $this->issue('claim', "{$text} states a price the product page does not show (".implode(', ', $prices).').', ['path' => $path, 'text' => $text]);
             }
         }
@@ -229,7 +232,8 @@ class CampaignPackSafetyValidator
             return null;
         }
         $truth = $source->extracted_truth ?? [];
-        $currency = $this->currency((string) data_get($truth, 'currency', '')) ?? '*';
+        $code = strtoupper(trim((string) data_get($truth, 'currency', '')));
+        $currency = $this->currency($code) ?? (preg_match('/^[A-Z]{3}$/', $code) ? $code : '*');
         $explicit = [(string) data_get($truth, 'price', '')];
         if (ProductKnowledge::available() && $source->product_id) {
             $explicit[] = (string) $source->product?->facts()->where('key', 'price')->where('status', 'ok')->value('confirmed_value');
@@ -248,15 +252,24 @@ class CampaignPackSafetyValidator
 
     /**
      * Currency amounts in the text that the supported prices do not include. The currency counts:
-     * "INR 699" is not supported by a page showing "$699".
+     * "INR 699" is not supported by a page showing "$699". In a price field a bare "899" is a price too.
      *
      * @param  list<string>|null  $supported  from supportedPrices()
      * @return list<string>
      */
-    public function unsupportedPrices(string $text, ?array $supported): array
+    public function unsupportedPrices(string $text, ?array $supported, bool $priceField = false): array
     {
         if ($supported === null) {
             return [];
+        }
+        if ($priceField && $this->currencyAmounts($text) === []) {
+            preg_match_all('/\\d(?:[\\d.,]*\\d)?/u', $text, $numbers);
+            $amounts = array_map(fn (string $price) => explode(' ', $price)[1], $supported);
+
+            return array_values(array_unique(array_filter(
+                array_map(fn (string $number) => $this->amount($number), $numbers[0]),
+                fn (string $amount) => ! in_array($amount, $amounts, true),
+            )));
         }
 
         return array_values(array_unique(array_map(
@@ -276,8 +289,9 @@ class CampaignPackSafetyValidator
     private function currencyAmounts(string $text): array
     {
         $number = '(\\d(?:[\\d.,]*\\d)?)';
-        preg_match_all('/([₹$€£]|(?<![\\p{L}\\p{N}])(?:rs\\.?|inr|usd|eur|gbp))\\s?'.$number.'/iu', $text, $before, PREG_SET_ORDER);
-        preg_match_all('/'.$number.'\\s?(inr|rupees|usd|eur|gbp)(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER);
+        $codes = implode('|', self::CURRENCY_CODES);
+        preg_match_all('/([₹$€£¥]|(?<![\\p{L}\\p{N}])(?:rs\\.?|'.$codes.'))\\s?'.$number.'/iu', $text, $before, PREG_SET_ORDER);
+        preg_match_all('/'.$number.'\\s?(rupees|'.$codes.')(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER);
         $prices = [
             ...array_map(fn (array $match) => $this->currency($match[1]).' '.$this->amount($match[2]), $before),
             ...array_map(fn (array $match) => $this->currency($match[2]).' '.$this->amount($match[1]), $after),
@@ -288,12 +302,15 @@ class CampaignPackSafetyValidator
 
     private function currency(string $label): ?string
     {
-        return match (rtrim(mb_strtolower(trim($label)), '.')) {
-            '₹', 'rs', 'inr', 'rupees' => 'INR',
-            '$', 'usd' => 'USD',
-            '€', 'eur' => 'EUR',
-            '£', 'gbp' => 'GBP',
-            default => null,
+        $label = rtrim(mb_strtolower(trim($label)), '.');
+
+        return match ($label) {
+            '₹', 'rs', 'rupees' => 'INR',
+            '$' => 'USD',
+            '€' => 'EUR',
+            '£' => 'GBP',
+            '¥' => 'JPY',
+            default => in_array(strtoupper($label), self::CURRENCY_CODES, true) ? strtoupper($label) : null,
         };
     }
 
