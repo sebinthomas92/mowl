@@ -19,7 +19,7 @@ class CampaignPackDeliveryController extends Controller
             ->firstOrFail();
         $version = $share->version;
         abort_unless($version->review_status === 'approved', 404);
-        $content = $normalizer->normalize($version->content, $version->campaignPack->product, $version->campaignPack->sourceSnapshot);
+        $content = VoiceoverTiming::refreshContent($normalizer->normalize($version->content, $version->campaignPack->product, $version->campaignPack->sourceSnapshot));
 
         return response()->view('campaign-packs.share', compact('version', 'content'));
     }
@@ -33,7 +33,7 @@ class CampaignPackDeliveryController extends Controller
             'actor_user_id' => auth()->id(), 'event' => 'campaign_pack_exported', 'subject_type' => CampaignPackVersion::class,
             'subject_id' => $version->id, 'metadata' => ['format' => $format],
         ]);
-        $content = $normalizer->normalize($version->content, $pack->product, $pack->sourceSnapshot);
+        $content = VoiceoverTiming::refreshContent($normalizer->normalize($version->content, $pack->product, $pack->sourceSnapshot));
         $text = $this->text($version, $content);
         $filename = str($pack->name)->slug().'-v'.$version->version;
 
@@ -68,7 +68,6 @@ class CampaignPackDeliveryController extends Controller
         $rows = [['route', 'start_seconds', 'end_seconds', 'word_count', 'pace_wpm', 'delivery_notes', 'shot_id', 'line']];
         foreach ($content['creative_routes'] ?? [] as $route) {
             foreach ($route['voiceover'] ?? [] as $line) {
-                $line = VoiceoverTiming::refresh($line);
                 $rows[] = [$route['name'], $line['start_seconds'], $line['end_seconds'], $line['word_count'], $line['pace_wpm'], $line['delivery_notes'], $line['shot_id'], $line['line']];
             }
         }

@@ -26,6 +26,20 @@ class VoiceoverTiming
         return $seconds > 0 ? (int) round((self::words((string) ($segment['line'] ?? '')) / $seconds) * 60) : null;
     }
 
+    /** Pack content with every creative route's voiceover recounted. */
+    public static function refreshContent(array $content): array
+    {
+        foreach ($content['creative_routes'] ?? [] as $routeIndex => $route) {
+            foreach (is_array($route['voiceover'] ?? null) ? $route['voiceover'] : [] as $segmentIndex => $segment) {
+                if (is_array($segment)) {
+                    $content['creative_routes'][$routeIndex]['voiceover'][$segmentIndex] = self::refresh($segment);
+                }
+            }
+        }
+
+        return $content;
+    }
+
     /** The segment with word_count and pace_wpm recounted from its line and times. */
     public static function refresh(array $segment): array
     {

@@ -34,12 +34,8 @@ class CampaignPackFinalizer
             )));
         }
 
+        $content = VoiceoverTiming::refreshContent($content);
         foreach ($content['creative_routes'] ?? [] as $routeIndex => $route) {
-            foreach (is_array($route['voiceover'] ?? null) ? $route['voiceover'] : [] as $segmentIndex => $segment) {
-                if (is_array($segment)) {
-                    $content['creative_routes'][$routeIndex]['voiceover'][$segmentIndex] = VoiceoverTiming::refresh($segment);
-                }
-            }
             foreach (is_array($route['platform_assets'] ?? null) ? $route['platform_assets'] : [] as $platform => $asset) {
                 if (is_array($asset) && isset($asset['cta'])) {
                     $content['creative_routes'][$routeIndex]['platform_assets'][$platform]['cta'] = $this->retail((string) $asset['cta']);
