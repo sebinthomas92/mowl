@@ -8,6 +8,11 @@ use Illuminate\Validation\ValidationException;
 
 class CampaignPackSafetyValidator
 {
+    /** ISO codes recognised next to an amount in copy ("899 USD", "AED 99"). */
+    private const DOLLARS = ['USD', 'AUD', 'CAD', 'SGD', 'NZD', 'HKD', 'MXN'];
+
+    private const CURRENCY_CODES = ['INR', 'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'SGD', 'AED', 'NZD', 'CHF', 'CNY', 'HKD', 'SAR', 'MYR', 'ZAR', 'SEK', 'NOK', 'DKK', 'BRL', 'MXN', 'IDR', 'THB', 'PHP', 'KRW', 'QAR', 'NPR', 'LKR', 'BDT', 'PKR'];
+
     private const UNSAFE_STATUSES = [
         'too_specific_for_evidence',
         'unsupported',
@@ -150,6 +155,13 @@ class CampaignPackSafetyValidator
             }
         }
 
+        $supportedPrices = $this->supportedPrices($source);
+        foreach ($this->stringsWithPaths($content) as $path => $text) {
+            if ($prices = $this->unsupportedPrices($text, $supportedPrices, (bool) preg_match('/(^|\.)price$/', $path))) {
+                $issues[] = $this->issue('claim', "{$text} states a price the product page does not show (".implode(', ', $prices).').', ['path' => $path, 'text' => $text]);
+            }
+        }
+
         foreach ($content['creative_routes'] ?? [] as $routeIndex => $route) {
             $routeName = $route['name'] ?? 'Route '.($routeIndex + 1);
             $requiredPlatforms = ['instagram_reels', 'youtube_shorts', 'whatsapp_status', 'meta_ads'];
@@ -207,6 +219,121 @@ class CampaignPackSafetyValidator
         }
 
         return collect($issues)->unique(fn (array $issue) => $issue['type'].'|'.$issue['message'].'|'.($issue['path'] ?? ''))->values()->all();
+    }
+
+    /**
+     * Amounts a price may use: currency amounts written on the product page, the page's structured
+     * price, and a price the team confirmed in Knowledge. Other numbers on the page (dispatch times,
+     * sizes, review counts) are not prices. Null source means nothing to check against.
+     *
+     * @return list<string>|null
+     */
+    public function supportedPrices(?SourceSnapshot $source): ?array
+    {
+        if (! $source) {
+            return null;
+        }
+        $truth = $source->extracted_truth ?? [];
+        $code = strtoupper(trim((string) data_get($truth, 'currency', '')));
+        $currency = $this->currency($code) ?? (preg_match('/^[A-Z]{3}$/', $code) ? $code : '*');
+        $explicit = [(string) data_get($truth, 'price', '')];
+        if (ProductKnowledge::available() && $source->product_id) {
+            // A price the team confirmed, or one they saved that no page supplied. A value only ever
+            // seeded from an earlier page is not kept alive once the page stops showing it.
+            $explicit[] = (string) $source->product?->facts()->where('key', 'price')->where('status', 'ok')
+                ->where(fn ($query) => $query->whereNotNull('confirmed_by_user_id')->orWhereNull('source_value'))
+                ->value('confirmed_value');
+        }
+        $known = $currency === '*' ? [] : [$currency];
+        $supported = $this->currencyAmounts((string) $source->extracted_content, $known);
+        foreach (array_filter($explicit) as $price) {
+            $labelled = $this->currencyAmounts($price, $known);
+            if ($labelled === [] && preg_match('/\\d(?:[\\d.,]*\\d)?/u', $price, $number)) {
+                $labelled = [$currency.' '.$this->amount($number[0])];
+            }
+            $supported = [...$supported, ...$labelled];
+        }
+
+        return array_values(array_unique($supported));
+    }
+
+    /**
+     * Currency amounts in the text that the supported prices do not include. The currency counts:
+     * "INR 699" is not supported by a page showing "$699". In a price field a bare "899" is a price too.
+     *
+     * @param  list<string>|null  $supported  from supportedPrices()
+     * @return list<string>
+     */
+    public function unsupportedPrices(string $text, ?array $supported, bool $priceField = false): array
+    {
+        if ($supported === null) {
+            return [];
+        }
+        $known = array_values(array_filter(array_map(fn (string $price) => explode(' ', $price)[0], $supported), fn (string $code) => $code !== '*'));
+        if ($priceField && $this->currencyAmounts($text, $known) === []) {
+            preg_match_all('/\\d(?:[\\d.,]*\\d)?/u', $text, $numbers);
+            $amounts = array_map(fn (string $price) => explode(' ', $price)[1], $supported);
+
+            return array_values(array_unique(array_filter(
+                array_map(fn (string $number) => $this->amount($number), $numbers[0]),
+                fn (string $amount) => ! in_array($amount, $amounts, true),
+            )));
+        }
+
+        return array_values(array_unique(array_map(
+            fn (string $price) => explode(' ', $price)[1],
+            array_filter($this->currencyAmounts($text, $known), function (string $price) use ($supported) {
+                return ! in_array($price, $supported, true) && ! in_array('* '.explode(' ', $price)[1], $supported, true);
+            }),
+        )));
+    }
+
+    /**
+     * Amounts written with a currency, as "INR 699": "₹699", "INR 899", "Rs. 1,499", "500 rupees".
+     * Symbols may follow a digit ("₹750₹699" is a struck-out price beside the sale price); words may not.
+     *
+     * The source's own currencies are always recognised, and settle what "$" or "¥" means.
+     *
+     * @param  list<string>  $known  currency codes the source uses
+     * @return list<string>
+     */
+    private function currencyAmounts(string $text, array $known = []): array
+    {
+        $number = '(\\d(?:[\\d.,]*\\d)?)';
+        $codes = implode('|', array_unique([...self::CURRENCY_CODES, ...array_filter($known, fn (string $code) => preg_match('/^[A-Z]{3}$/', $code))]));
+        preg_match_all('/([₹$€£¥]|(?<![\\p{L}\\p{N}])(?:rs\\.?|'.$codes.'))\\s?'.$number.'/iu', $text, $before, PREG_SET_ORDER);
+        preg_match_all('/'.$number.'\\s?(rupees|'.$codes.')(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER);
+        $prices = [
+            ...array_map(fn (array $match) => $this->currency($match[1], $known).' '.$this->amount($match[2]), $before),
+            ...array_map(fn (array $match) => $this->currency($match[2], $known).' '.$this->amount($match[1]), $after),
+        ];
+
+        return array_values(array_unique($prices));
+    }
+
+    /** @param  list<string>  $known  currency codes the source uses, to read "$" as AUD on an Australian page */
+    private function currency(string $label, array $known = []): ?string
+    {
+        $label = rtrim(mb_strtolower(trim($label)), '.');
+
+        return match ($label) {
+            '₹', 'rs', 'rupees' => 'INR',
+            '$' => collect($known)->first(fn (string $code) => in_array($code, self::DOLLARS, true)) ?? 'USD',
+            '€' => 'EUR',
+            '£' => 'GBP',
+            '¥' => collect($known)->first(fn (string $code) => in_array($code, ['JPY', 'CNY'], true)) ?? 'JPY',
+            default => preg_match('/^[a-z]{3}$/', $label) ? strtoupper($label) : null,
+        };
+    }
+
+    /** "1,499.00", "1.499,00" and "1499" are the same amount; "1,99" (a decimal comma) is 1.99. */
+    private function amount(string $number): string
+    {
+        $number = preg_match('/,\\d{1,2}$/', $number)
+            ? str_replace(',', '.', str_replace('.', '', $number))
+            : str_replace(',', '', $number);
+
+        return str_contains($number, '.') ? rtrim(rtrim($number, '0'), '.') : $number;
     }
 
     /** @param  array{path?: string, text?: string, term?: string}  $location  where in the content the wording sits */

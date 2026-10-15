@@ -6,6 +6,9 @@ use App\Models\CampaignPackVersion;
 
 class BannerCopySelector
 {
+    /** @var (\Closure(string): bool)|null */
+    private ?\Closure $usable = null;
+
     private const DIRECTIONS = [
         ['key' => 'product_hero', 'label' => 'Product hero · strongest verified benefit', 'layout' => 'hero_top'],
         ['key' => 'problem_solution', 'label' => 'Problem / solution · approved positioning', 'layout' => 'split_left'],
@@ -15,6 +18,11 @@ class BannerCopySelector
     public function select(CampaignPackVersion $version, int $sequence): array
     {
         $content = $version->content;
+        // Banner copy is reused from the approved pack, and a price on a banner is the claim people
+        // act on, so a line whose price the product page does not show is never used.
+        $validator = app(CampaignPackSafetyValidator::class);
+        $prices = $version->exists ? $validator->supportedPrices($version->campaignPack?->sourceSnapshot) : null;
+        $this->usable = fn (string $text): bool => $validator->unsupportedPrices($text, $prices) === [];
         $direction = self::DIRECTIONS[($sequence - 1) % count(self::DIRECTIONS)];
         $routes = collect(data_get($content, 'creative_routes', []));
         $headlines = $this->strings([
@@ -40,8 +48,8 @@ class BannerCopySelector
             ...$routes->pluck('target_buyer')->all(),
             ...collect(data_get($content, 'positioning.audience_priorities', []))->pluck('name')->all(),
         ]);
-        $fallback = trim((string) (data_get($content, 'direction.title') ?: data_get($content, 'ranked_angles.0.title') ?: data_get($content, 'overview.campaign_goal')));
-        $headlinePool = array_values(array_unique([...$headlines, ...$hooks, ...($fallback !== '' ? [$fallback] : [])]));
+        $fallback = $this->strings([data_get($content, 'direction.title'), data_get($content, 'ranked_angles.0.title'), data_get($content, 'overview.campaign_goal')]);
+        $headlinePool = array_values(array_unique([...$headlines, ...$hooks, ...array_slice($fallback, 0, 1)]));
         $headline = $headlinePool[($sequence - 1) % max(1, count($headlinePool))]
             ?? (string) data_get($content, 'product_truth.name', 'Product');
         $supportPool = array_values(array_unique([...$descriptions, ...$benefits]));
@@ -89,13 +97,13 @@ class BannerCopySelector
             default => 'Keep the upper-left 46% visually quiet for an overlay.',
         };
 
-        return trim("You are an expert ad creative prompt engineer. Create one premium vertical Meta feed visual composition for ONE specific product: {$product}. The approved PRODUCT DNA is the source of truth for what to depict: {$productDna}. Brand context: {$brand}; use it only for palette and aesthetic consistency. CRITICAL: Every visual must depict the specific product {$product}; ignore and do not show other products or SKUs from the brand catalog. Direction: {$direction['label']}. Approved benefit context: {$benefit}. Approved audience context: {$audience}. Use the first supplied product image as the exact product reference. Follow its visual cues so the result matches the real product. Preserve its recognizable form, materials, proportions, color, and packaging silhouette; do not invent components or features. {$negativeSpace} Generate the visual composition only. Do not include any text, letters, numbers, logos, labels, captions, UI, signatures, borders, or watermarks. Do not add unverified product features or claims. Photorealistic commercial lighting, clean art direction, 4:5 composition.");
+        return trim("You are an expert ad creative prompt engineer. Create one premium vertical Meta feed visual composition for ONE specific product: {$product}. The approved PRODUCT DNA is the source of truth for what to depict: {$productDna}. Brand context: {$brand}; use it only for palette and aesthetic consistency. CRITICAL: Every visual must depict the specific product {$product}; ignore and do not show other products or SKUs from the brand catalog. Direction: {$direction['label']}. Approved benefit context: {$benefit}. Approved audience context: {$audience}. Use the first supplied product image as the exact product reference. Follow its visual cues so the result matches the real product. Preserve its recognizable form, materials, proportions, color, and packaging silhouette; do not invent components or features. {$negativeSpace} Generate the visual composition only. Do not include any text, letters, numbers, logos, labels, captions, UI, signatures, borders, or watermarks. Show no third-party intellectual property: no real book covers, titles or publisher marks, no film, game or app imagery, and no other brands' logos or trademarks. The product itself must still match its reference exactly; any other screen, book, package or poster in the scene must be blank, plain or abstract. Do not add unverified product features or claims. Photorealistic commercial lighting, clean art direction, 4:5 composition.");
     }
 
     private function strings(mixed $values): array
     {
         return collect(is_array($values) ? $values : [])
-            ->filter(fn ($value) => is_string($value) && trim($value) !== '')
+            ->filter(fn ($value) => is_string($value) && trim($value) !== '' && (! $this->usable || ($this->usable)($value)))
             ->map(fn (string $value) => trim($value))
             ->values()
             ->all();

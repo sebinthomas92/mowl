@@ -194,6 +194,18 @@ class ProductKnowledge
 
                 continue;
             }
+            // An unresolved conflict means nobody has confirmed the saved value against what the page
+            // now says, so the page value stands (or nothing, when the page no longer shows one) and
+            // the saved one is not passed off as team-confirmed. A product always keeps some name.
+            if ($fact->status === 'conflict') {
+                if ($column && isset($raw[$key])) {
+                    $subject->setAttribute($column, $raw[$key]);
+                } elseif ($column && $column !== 'name') {
+                    $subject->setAttribute($column, null);
+                }
+
+                continue;
+            }
             if ($fact->confirmed_value === null) {
                 continue;
             }
