@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BannerCreative;
 use App\Models\CampaignPack;
+use App\Services\CampaignPackSafetyValidator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -20,6 +21,7 @@ class BannerDeliveryController extends Controller
     public function download(Request $request, CampaignPack $pack, BannerCreative $bannerCreative): StreamedResponse
     {
         $this->authorizeCreative($request, $pack, $bannerCreative);
+        abort_unless(app(CampaignPackSafetyValidator::class)->bannerPrices($bannerCreative) === [], 404);
         $bannerCreative->batch->workspace->auditEvents()->create([
             'actor_user_id' => $request->user()->id,
             'event' => 'campaign_banner_downloaded',

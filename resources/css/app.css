@@ -146,4 +146,4 @@ button { cursor:pointer; }
 .qa-where{color:var(--ink-2)!important;font-weight:500}.qa-fix{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:2px}.qa-fix a{font-size:12px}.qa-issue-body{display:grid;gap:4px}.qa-issue-body small{color:var(--muted);font-size:11px}.qa-issue-body a{color:var(--link)}
 .field.is-focus .input{box-shadow:0 0 0 2px var(--accent)}.field.is-focus label{color:var(--link)}
 
-.banner-card-body .banner-price-issue { display: block; margin-top: 4px; color: var(--bad-fg); }
+.banner-card-body .banner-price-issue { display: block; margin-top: 4px; color: var(--bad-fg); white-space: normal; overflow: visible; line-height: 1.4; }
