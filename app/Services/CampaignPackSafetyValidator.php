@@ -12,6 +12,9 @@ class CampaignPackSafetyValidator
     /** ISO codes recognised next to an amount in copy ("899 USD", "AED 99"). */
     private const DOLLARS = ['USD', 'AUD', 'CAD', 'SGD', 'NZD', 'HKD', 'MXN'];
 
+    /** How far (in bytes of page text) an amount may sit from the product's own price and still be about it. */
+    private const PRICE_BLOCK_BYTES = 400;
+
     private const CURRENCY_CODES = ['INR', 'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'SGD', 'AED', 'NZD', 'CHF', 'CNY', 'HKD', 'SAR', 'MYR', 'ZAR', 'SEK', 'NOK', 'DKK', 'BRL', 'MXN', 'IDR', 'THB', 'PHP', 'KRW', 'QAR', 'NPR', 'LKR', 'BDT', 'PKR'];
 
     private const UNSAFE_STATUSES = [
@@ -223,9 +226,11 @@ class CampaignPackSafetyValidator
     }
 
     /**
-     * Amounts a price may use: currency amounts written on the product page, the page's structured
-     * price, and a price the team confirmed in Knowledge. Other numbers on the page (dispatch times,
-     * sizes, review counts) are not prices. Null source means nothing to check against.
+     * Amounts a price may use: the page's structured price, a price the team confirmed in Knowledge,
+     * and currency amounts written on the product page. When the page text shows the product's own
+     * price, only amounts near it count (a struck-through price, a free-shipping threshold), so
+     * another product's price in a "you may also like" row does not. Other numbers on the page
+     * (dispatch times, sizes, review counts) are not prices. Null source means nothing to check against.
      *
      * @return list<string>|null
      */
@@ -246,16 +251,28 @@ class CampaignPackSafetyValidator
                 ->value('confirmed_value');
         }
         $known = $currency === '*' ? [] : [$currency];
-        $supported = $this->currencyAmounts((string) $source->extracted_content, $known);
+        $own = [];
         foreach (array_filter($explicit) as $price) {
             $labelled = $this->currencyAmounts($price, $known);
             if ($labelled === [] && preg_match('/\\d(?:[\\d.,]*\\d)?/u', $price, $number)) {
                 $labelled = [$currency.' '.$this->amount($number[0])];
             }
-            $supported = [...$supported, ...$labelled];
+            $own = [...$own, ...$labelled];
         }
+        $page = (string) $source->extracted_content;
+        $onPage = $this->currencyAmountsAt($page, $known);
+        $anchors = array_filter($onPage, fn (array $found) => $this->matchesAny($found[0], $own));
+        $nearby = $anchors === [] ? $onPage : array_filter($onPage, function (array $found) use ($anchors): bool {
+            foreach ($anchors as $anchor) {
+                if (abs($found[1] - $anchor[1]) <= self::PRICE_BLOCK_BYTES) {
+                    return true;
+                }
+            }
 
-        return array_values(array_unique($supported));
+            return false;
+        });
+
+        return array_values(array_unique([...array_column($nearby, 0), ...$own]));
     }
 
     /**
@@ -315,16 +332,39 @@ class CampaignPackSafetyValidator
      */
     private function currencyAmounts(string $text, array $known = []): array
     {
+        return array_values(array_unique(array_column($this->currencyAmountsAt($text, $known), 0)));
+    }
+
+    /**
+     * Currency amounts with the byte offset each starts at.
+     *
+     * @return list<array{0: string, 1: int}>
+     */
+    private function currencyAmountsAt(string $text, array $known = []): array
+    {
         $number = '(\\d(?:[\\d.,]*\\d)?)';
         $codes = implode('|', array_unique([...self::CURRENCY_CODES, ...array_filter($known, fn (string $code) => preg_match('/^[A-Z]{3}$/', $code))]));
-        preg_match_all('/([₹$€£¥]|(?<![\\p{L}\\p{N}])(?:rs\\.?|'.$codes.'))\\s?'.$number.'/iu', $text, $before, PREG_SET_ORDER);
-        preg_match_all('/'.$number.'\\s?(rupees|'.$codes.')(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER);
-        $prices = [
-            ...array_map(fn (array $match) => $this->currency($match[1], $known).' '.$this->amount($match[2]), $before),
-            ...array_map(fn (array $match) => $this->currency($match[2], $known).' '.$this->amount($match[1]), $after),
-        ];
+        preg_match_all('/([₹$€£¥]|(?<![\\p{L}\\p{N}])(?:rs\\.?|'.$codes.'))\\s?'.$number.'/iu', $text, $before, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+        preg_match_all('/'.$number.'\\s?(rupees|'.$codes.')(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
 
-        return array_values(array_unique($prices));
+        return [
+            ...array_map(fn (array $match) => [$this->currency($match[1][0], $known).' '.$this->amount($match[2][0]), $match[0][1]], $before),
+            ...array_map(fn (array $match) => [$this->currency($match[2][0], $known).' '.$this->amount($match[1][0]), $match[0][1]], $after),
+        ];
+    }
+
+    /** A "CUR amount" pair matches when the amounts agree and the currencies do, or either is unknown ("*"). */
+    private function matchesAny(string $price, array $candidates): bool
+    {
+        [$currency, $amount] = explode(' ', $price, 2);
+        foreach ($candidates as $candidate) {
+            [$otherCurrency, $otherAmount] = explode(' ', $candidate, 2);
+            if ($amount === $otherAmount && ($currency === $otherCurrency || $currency === '*' || $otherCurrency === '*')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param  list<string>  $known  currency codes the source uses, to read "$" as AUD on an Australian page */

@@ -95,6 +95,20 @@ class BannerIntegrityTest extends TestCase
         $this->assertSame([], $validator->unsupportedPrices('Only Rs. 699.00, was ₹750.', $supported));
     }
 
+    public function test_another_products_price_further_down_the_page_does_not_count(): void
+    {
+        $validator = app(CampaignPackSafetyValidator::class);
+        $page = self::PAGE.' '.str_repeat('Reviews and care notes. ', 30).'You may also like: Cloud Modular Organiser ₹899 Crab Pen Holder ₹750';
+        $truth = ['price' => '699.00', 'currency' => 'INR'];
+
+        $supported = $validator->supportedPrices(new SourceSnapshot(['extracted_content' => $page, 'extracted_truth' => $truth]));
+        $this->assertEqualsCanonicalizing(['INR 750', 'INR 699', 'INR 499'], $supported);
+        $this->assertSame(['899'], $validator->unsupportedPrices('Now just INR 899', $supported));
+
+        $unanchored = $validator->supportedPrices(new SourceSnapshot(['extracted_content' => 'Organiser ₹899', 'extracted_truth' => []]));
+        $this->assertSame(['INR 899'], $unanchored, 'With no product price to anchor on, every page amount still counts');
+    }
+
     public function test_other_iso_currencies_and_bare_price_fields_are_checked(): void
     {
         $validator = app(CampaignPackSafetyValidator::class);

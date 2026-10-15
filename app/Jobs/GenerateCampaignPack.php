@@ -117,8 +117,9 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             }
 
             $job->update(['phase' => 'generating_pack']);
+            $baseContent = null;
             if ($section) {
-                $baseContent = $this->baseContent($job);
+                $baseContent = $this->withCurrentPrice($this->baseContent($job), $subject->price);
                 $page['regeneration_section'] = $section;
                 $page['current_content'] = $baseContent;
             }
@@ -168,12 +169,12 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 ? 0.018
                 : $costs->calculate($result->model ?? '', $result->inputTokens, $result->cachedInputTokens, $result->outputTokens);
 
-            DB::transaction(function () use ($job, $result, $cost, $cached, $section): void {
+            DB::transaction(function () use ($job, $result, $cost, $cached, $section, $baseContent): void {
                 $pack = $job->campaignPack()->lockForUpdate()->firstOrFail();
                 $nextVersion = ((int) $pack->versions()->max('version')) + 1;
                 $content = app(CampaignPackFinalizer::class)->finalize($section
                     ? $this->replaceSection(
-                        $this->baseContent($job),
+                        $baseContent,
                         $result->content,
                         $section,
                     )
@@ -300,6 +301,19 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
         $knowledge = app(ProductKnowledge::class);
 
         return $knowledge->scrub($content, $knowledge->excludedValues($job->campaignPack->product, $job->sourceSnapshot?->extracted_truth ?? []));
+    }
+
+    /**
+     * A section regeneration keeps the base version's Product truth, which can predate a price the
+     * team has since confirmed. The new version, and the generator's view of it, carry today's price.
+     */
+    private function withCurrentPrice(array $content, ?string $price): array
+    {
+        if (filled($price) && is_array($content['product_truth'] ?? null)) {
+            $content['product_truth']['price'] = $price;
+        }
+
+        return $content;
     }
 
     private function replaceSection(array $current, array $generated, string $section): array
