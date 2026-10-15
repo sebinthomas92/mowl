@@ -43,7 +43,7 @@ class LibraryPreviews
         if (! $url) {
             return null;
         }
-        if ($this->isStream($url)) {
+        if ($this->isStream($url) || config('workflows.collections.'.$prompt->collection.'.mirror_previews') === false) {
             return $this->markRemote($prompt, $kind);
         }
 

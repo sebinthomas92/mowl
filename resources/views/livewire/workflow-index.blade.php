@@ -82,6 +82,9 @@
                                                 <img class="wf-video" src="{{ $prompt['poster'] }}" alt="Preview of {{ $prompt['title'] }}" loading="lazy">
                                             @endif
                                             <pre class="wf-body">{{ $prompt['body'] }}</pre>
+                                            @if(($prompt['credit'] ?? null) || ($prompt['source_url'] ?? null))
+                                                <p class="muted xs wf-credit">{{ $prompt['credit'] }}@if($prompt['source_url'] ?? null) <a class="linkbtn" href="{{ $prompt['source_url'] }}" target="_blank" rel="noopener">Original post</a>@endif</p>
+                                            @endif
                                             <button type="button" class="pill ghost sm" @click="navigator.clipboard.writeText(@js($prompt['body'])); copied = {{ $index }}; setTimeout(() => copied = null, 1600)">
                                                 <i class="ti ti-copy" aria-hidden="true"></i><span x-text="copied === {{ $index }} ? 'Copied' : 'Copy prompt'">Copy prompt</span>
                                             </button>
@@ -89,7 +92,7 @@
                                     @endforeach
                                 </div>
                                 @if($current['credit'])<span class="muted xs">{{ $current['credit'] }}</span>@endif
-                                @if($current['source_url'])<a class="linkbtn" href="{{ $current['source_url'] }}" target="_blank" rel="noopener">See it on the prompt showcase</a>@endif
+                                @if($current['source_url'])<a class="linkbtn" href="{{ $current['source_url'] }}" target="_blank" rel="noopener">{{ $current['source_label'] ?? 'See it on the prompt showcase' }}</a>@endif
                             @endif
                             <span class="muted xs">Running opens the brief and credit review first. A download or copy does not use credits.</span>
                         </aside>

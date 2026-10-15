@@ -266,6 +266,33 @@ MD);
         $this->assertSame(route('workflows.preview', [$big->id, 'poster']), $hero['prompts'][0]['poster']);
     }
 
+    public function test_open_collections_credit_each_prompt_and_show_previews_from_the_source(): void
+    {
+        Http::fake();
+        foreach (['ana' => 'Orbit intro', 'ben' => 'Logo reveal'] as $author => $title) {
+            LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => $author, 'pack' => 'Motion graphics', 'category' => 'motion', 'title' => $title, 'body' => "Animate {$title}.", 'credit' => "Prompt by @{$author}", 'source_url' => "https://x.com/{$author}/status/1", 'poster_url' => "https://media.example.com/{$author}.webp"]);
+        }
+        $user = $this->member();
+
+        $pack = app(WorkflowCatalog::class)->find('opus-videos-motion-graphics');
+        $this->assertSame('Motion & video', $pack['category_label']);
+        $this->assertStringContainsString('awesome-opus5-5-videos', $pack['credit']);
+        $this->assertSame('https://github.com/yihui-dev/awesome-opus5-5-videos', $pack['source_url']);
+
+        Livewire::actingAs($user)->withQueryParams(['workflow' => 'opus-videos-motion-graphics'])->test(WorkflowIndex::class)
+            ->assertSee('Prompt by @ana')
+            ->assertSee('Prompt by @ben')
+            ->assertSee('https://x.com/ben/status/1', false)
+            ->assertSee('See the collection on GitHub');
+
+        $ana = LibraryPrompt::where('source_key', 'ana')->first();
+        $this->actingAs($user)->get(route('workflows.preview', [$ana->id, 'poster']))->assertRedirect('https://media.example.com/ana.webp');
+        Http::assertNothingSent();
+
+        $download = $this->actingAs($user)->get(route('workflows.download', 'opus-videos-motion-graphics'))->getContent();
+        $this->assertStringContainsString('_Prompt by @ana https://x.com/ana/status/1_', $download);
+    }
+
     private function member(): User
     {
         $user = User::factory()->create();
