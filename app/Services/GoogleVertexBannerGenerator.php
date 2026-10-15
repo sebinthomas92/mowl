@@ -8,6 +8,7 @@ use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\BannerCreative;
 use App\Models\MediaAsset;
+use App\Support\GenerationDeadline;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 
@@ -28,14 +29,36 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         $usage = [0, 0, 0];
         $inspectionCost = 0.0;
         $marks = [];
+        // Generation plus inspection, possibly twice, must finish inside the queue worker timeout
+        // (180s) and the request function's limit, so the whole loop runs under one deadline.
+        $deadline = app(GenerationDeadline::class);
+        $ownsDeadline = $deadline->remaining() === null;
+        if ($ownsDeadline) {
+            $deadline->start((int) config('campaigns.banners.time_budget_seconds'));
+        }
+        try {
+            return $this->generateWithin($deadline, $attempts, $creative, $productImages, $product, $brand, $usage, $inspectionCost, $marks);
+        } finally {
+            if ($ownsDeadline) {
+                $deadline->clear();
+            }
+        }
+    }
+
+    private function generateWithin(GenerationDeadline $deadline, int $attempts, BannerCreative $creative, Collection $productImages, string $product, string $brand, array $usage, float $inspectionCost, array $marks): BannerGenerationResult
+    {
+        $reference = $productImages->first();
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            if ($attempt > 1 && ($deadline->remaining() ?? INF) < (int) config('campaigns.banners.min_round_seconds')) {
+                break;
+            }
             try {
                 $result = $this->generateOnce($creative, $productImages);
                 $usage = [$usage[0] + $result->inputTokens, $usage[1] + $result->outputTextTokens, $usage[2] + $result->outputImageTokens];
                 if (! config('campaigns.banners.inspect_images')) {
                     return $result;
                 }
-                $inspection = $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand);
+                $inspection = $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $reference ? $this->imagePart($reference)['inlineData'] : null);
             } catch (VertexAIResponseException $exception) {
                 // Images already generated in this attempt were paid for, even when a later call fails.
                 $spent = $this->spent($usage, $inspectionCost);

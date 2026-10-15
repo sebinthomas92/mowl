@@ -7,6 +7,7 @@ use App\Models\BannerCreative;
 use App\Models\MediaAsset;
 use App\Services\GoogleVertexBannerGenerator;
 use App\Services\ProviderCostCalculator;
+use App\Support\GenerationDeadline;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -58,6 +59,11 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             && $request['generationConfig']['imageConfig'] === ['aspectRatio' => '4:5', 'imageSize' => '1K']
             && count($request['contents'][0]['parts']) === 2
             && $request['contents'][0]['parts'][1]['inlineData']['data'] === base64_encode('product-bytes'));
+        // The inspector sees the real product photo, so text printed on the product itself is not a mark.
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/models/gemini-3.5-flash:generateContent')
+            && count($request['contents'][0]['parts']) === 3
+            && $request['contents'][0]['parts'][1]['inlineData']['data'] === $generated
+            && $request['contents'][0]['parts'][2]['inlineData']['data'] === base64_encode('product-bytes'));
     }
 
     public function test_a_background_with_a_real_book_cover_is_regenerated_and_every_attempt_is_costed(): void
@@ -117,6 +123,35 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             $this->assertEqualsWithDelta($expected, $exception->spentCost, 0.000001);
         }
         Http::assertSentCount(3 + 2 * 2);
+    }
+
+    public function test_no_second_round_starts_when_the_time_budget_cannot_fit_it(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        config()->set('campaigns.banners.min_round_seconds', 70);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*gemini-3.5-flash:*' => Http::response(self::inspection(['The Hobbit'])),
+            'aiplatform.googleapis.com/*' => Http::response(self::image('cover-on-screen')),
+        ]);
+        // A caller's deadline with less left than one more round needs.
+        app(GenerationDeadline::class)->start(60);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
+
+        try {
+            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
+            $this->fail('A rejected background must not be used.');
+        } catch (BannerAttemptFailed $exception) {
+            $this->assertSame('banner_third_party_text', $exception->errorCode);
+        } finally {
+            app(GenerationDeadline::class)->clear();
+        }
+        Http::assertSentCount(3 + 2);
     }
 
     private static function image(string $bytes): array

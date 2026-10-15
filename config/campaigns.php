@@ -54,6 +54,10 @@ return [
         // logos) and regenerated up to this many times per banner attempt.
         'inspect_images' => env('BANNER_IMAGE_INSPECTION', true),
         'inspection_attempts' => (int) env('BANNER_INSPECTION_ATTEMPTS', 2),
+        // One banner attempt (generations plus inspections) stays under the 180s queue worker timeout;
+        // a new round starts only with enough time left for a generation and an inspection.
+        'time_budget_seconds' => 160,
+        'min_round_seconds' => 70,
         'disk' => env('BANNER_STORAGE_DISK', env('CAMPAIGN_MEDIA_DISK', 'local')),
         'prices_per_million' => [
             'input' => 0.50,
