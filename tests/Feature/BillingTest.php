@@ -235,7 +235,11 @@ class BillingTest extends TestCase
             'api.stripe.com/v1/subscriptions?*' => Http::response(['data' => [['id' => 'sub_old', 'status' => 'incomplete', 'metadata' => ['workspace_id' => (string) $workspace->id]]]]),
             'api.stripe.com/v1/subscriptions/sub_old' => Http::response(['id' => 'sub_old', 'status' => 'canceled']),
             'api.stripe.com/v1/checkout/sessions/cs_old/expire' => Http::response(['id' => 'cs_old', 'status' => 'expired']),
-            'api.stripe.com/v1/checkout/sessions?*' => Http::response(['data' => [['id' => 'cs_old', 'mode' => 'subscription'], ['id' => 'cs_pack', 'mode' => 'payment']]]),
+            'api.stripe.com/v1/checkout/sessions?*' => Http::response(['data' => [
+                ['id' => 'cs_old', 'mode' => 'subscription', 'metadata' => ['workspace_id' => (string) $workspace->id]],
+                ['id' => 'cs_pack', 'mode' => 'payment', 'metadata' => ['workspace_id' => (string) $workspace->id]],
+                ['id' => 'cs_elsewhere', 'mode' => 'subscription', 'metadata' => []],
+            ]]),
             'api.stripe.com/v1/checkout/sessions' => Http::response(['id' => 'cs_new', 'url' => 'https://checkout.stripe.com/c/pay/cs_new']),
         ]);
 
@@ -244,6 +248,7 @@ class BillingTest extends TestCase
         Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/checkout/sessions/cs_old/expire'));
         Http::assertSent(fn (Request $request) => $request->method() === 'DELETE' && str_ends_with($request->url(), '/subscriptions/sub_old'));
         Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'cs_pack/expire'));
+        Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'cs_elsewhere/expire'));
     }
 
     public function test_a_plan_paid_in_another_tab_blocks_a_second_checkout(): void
@@ -430,6 +435,16 @@ class BillingTest extends TestCase
             'metadata' => ['workspace_id' => (string) $workspace->id, 'kind' => 'credits', 'pack' => 'credits_10']])->assertOk();
 
         $this->assertSame(0, $workspace->creditBalance());
+    }
+
+    public function test_a_plan_unheard_from_for_a_day_is_rechecked_so_it_can_be_restarted(): void
+    {
+        [$owner, $workspace] = $this->subscribedWorkspace(status: 'active');
+        $workspace->subscription()->update(['stripe_updated_at' => now()->subDays(2)]);
+        $this->stripeSays('sub_1', 'canceled', $workspace);
+
+        $this->actingAs($owner)->get('/billing')->assertOk()->assertSee('Restart the plan');
+        $this->assertSame('canceled', $workspace->subscription()->value('status'));
     }
 
     public function test_signature_check_rejects_old_timestamps(): void

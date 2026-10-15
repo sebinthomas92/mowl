@@ -19,8 +19,10 @@ class BillingIndex extends Component
 
     public ?string $notice = null;
 
-    public function mount(StripeClient $stripe, StripeWebhookHandler $handler): void
+    public function mount(StripeClient $stripe, StripeWebhookHandler $handler, BillingCheckout $billing): void
     {
+        $this->refreshStalePlan($stripe, $billing);
+
         // Stripe returns here with the Checkout session id, or "cancelled".
         $checkout = (string) request()->query('checkout', '');
         if ($checkout === 'cancelled') {
@@ -29,6 +31,25 @@ class BillingIndex extends Component
             $this->notice = $this->reconcile($stripe, $handler, $checkout)
                 ? 'Payment received. Your plan and credits are below.'
                 : 'Stripe is still confirming this payment. Your plan and credits update here as soon as it does.';
+        }
+    }
+
+    /**
+     * A plan that still says active after a day without word from Stripe may have missed its final
+     * webhook; checking it lets the page offer a restart instead of only the portal.
+     */
+    private function refreshStalePlan(StripeClient $stripe, BillingCheckout $billing): void
+    {
+        $subscription = $this->currentWorkspace()->billingSubscription();
+        if (! $stripe->configured() || ! $subscription?->isSubscribed()
+            || ($subscription->stripe_updated_at && $subscription->stripe_updated_at->gt(now()->subDay()))) {
+            return;
+        }
+        try {
+            $billing->revalidate($subscription);
+            $subscription->update(['stripe_updated_at' => now()]);
+        } catch (StripeException $exception) {
+            Log::warning('Could not recheck a Stripe subscription.', ['error' => $exception->getMessage()]);
         }
     }
 

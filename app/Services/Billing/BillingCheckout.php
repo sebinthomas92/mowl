@@ -34,8 +34,8 @@ class BillingCheckout
                 'product_data' => ['name' => $plan['name'], 'description' => $plan['credits'].' launch pack credits every month'],
             ]];
 
-        // Outlasts the worst case of the Stripe calls below (each times out at 20s).
-        $lock = Cache::lock('billing.plan-checkout.'.$workspace->id, 180);
+        // Outlasts the worst case of the Stripe calls below: at most 22 calls of up to 28s each.
+        $lock = Cache::lock('billing.plan-checkout.'.$workspace->id, 900);
         if (! $lock->get()) {
             throw ValidationException::withMessages(['billing' => 'A checkout is already being opened for this workspace.']);
         }
@@ -57,7 +57,7 @@ class BillingCheckout
     }
 
     /** A row that says "active" may have missed its final webhook, or point at a customer that is gone. */
-    private function revalidate(WorkspaceSubscription $subscription): void
+    public function revalidate(WorkspaceSubscription $subscription): void
     {
         if (! $subscription->stripe_subscription_id) {
             return;
@@ -85,7 +85,7 @@ class BillingCheckout
             return;
         }
         try {
-            $subscriptions = $this->stripe->get('subscriptions', ['customer' => $customer, 'status' => 'all', 'limit' => 20]);
+            $subscriptions = $this->stripe->get('subscriptions', ['customer' => $customer, 'status' => 'all', 'limit' => 10]);
         } catch (StripeException $exception) {
             // A customer from another Stripe mode or account: forget it, and checkout makes a fresh one.
             if ($exception->stripeCode !== 'resource_missing') {
@@ -121,9 +121,9 @@ class BillingCheckout
         if (! $customer) {
             return;
         }
-        $sessions = $this->stripe->get('checkout/sessions', ['customer' => $customer, 'status' => 'open', 'limit' => 20]);
+        $sessions = $this->stripe->get('checkout/sessions', ['customer' => $customer, 'status' => 'open', 'limit' => 10]);
         foreach ($sessions['data'] ?? [] as $session) {
-            if (($session['mode'] ?? null) === 'subscription') {
+            if (($session['mode'] ?? null) === 'subscription' && (string) ($session['metadata']['workspace_id'] ?? '') === (string) $workspace->id) {
                 $this->stripe->post('checkout/sessions/'.$session['id'].'/expire');
             }
         }

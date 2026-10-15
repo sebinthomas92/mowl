@@ -66,7 +66,7 @@ class StripeWebhookHandler
 
         $payment = (string) ($session['payment_intent'] ?? $session['id']);
         // A refund that arrived first leaves a marker; then there is nothing to grant.
-        $credits = fn () => WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$payment)->exists() || $this->disputed($payment) ? null : $pack['credits'];
+        $credits = fn () => WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$payment)->exists() || $this->disputed($workspace, $payment) ? null : $pack['credits'];
         $this->ledger($workspace, $credits, 'credit_pack_purchase', $pack['credits'].' credits purchased', 'stripe:payment:'.$payment, [
             'checkout_session' => $session['id'] ?? null,
             'payment_intent' => $session['payment_intent'] ?? null,
@@ -116,7 +116,7 @@ class StripeWebhookHandler
 
         // Decided under the workspace lock, like the grant, so a refund racing its purchase can't miss it.
         // With no grant yet this writes a zero marker, and a late pack purchase then grants nothing.
-        $this->ledger($workspace, fn () => $this->disputed($charge['payment_intent']) ? null : -(int) WorkspaceCredit::query()->where('idempotency_key', $grantKey)->value('amount'),
+        $this->ledger($workspace, fn () => $this->disputed($workspace, $charge['payment_intent']) ? null : -(int) WorkspaceCredit::query()->where('idempotency_key', $this->grantKey($charge))->value('amount'),
             'credit_pack_refund', 'Payment refunded', 'stripe:refund:'.$charge['payment_intent'], [
                 'charge' => $charge['id'] ?? null,
                 'payment_intent' => $charge['payment_intent'],
@@ -133,7 +133,7 @@ class StripeWebhookHandler
         }
         $this->ledger($workspace, fn () => WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$charge['payment_intent'])->exists()
             ? null
-            : -(int) WorkspaceCredit::query()->where('idempotency_key', $grantKey)->value('amount'),
+            : -(int) WorkspaceCredit::query()->where('idempotency_key', $this->grantKey($charge))->value('amount'),
             'credit_dispute', 'Payment disputed', 'stripe:dispute:'.$dispute['id'], [
                 'dispute' => $dispute['id'],
                 'charge' => $charge['id'] ?? null,
@@ -176,11 +176,10 @@ class StripeWebhookHandler
     }
 
     /** Whether a dispute currently holds this payment's money (withdrawn and not yet won back). */
-    private function disputed(string $paymentIntent): bool
+    private function disputed(Workspace $workspace, string $paymentIntent): bool
     {
-        return WorkspaceCredit::query()->where('event', 'credit_dispute')->where('idempotency_key', 'like', 'stripe:dispute:%')->get(['idempotency_key', 'metadata'])
-            ->contains(fn (WorkspaceCredit $credit) => ($credit->metadata['payment_intent'] ?? null) === $paymentIntent
-                && ! WorkspaceCredit::query()->where('idempotency_key', 'stripe:dispute-won:'.substr($credit->idempotency_key, strlen('stripe:dispute:')))->exists());
+        return $workspace->credits()->where('event', 'credit_dispute')->where('metadata->payment_intent', $paymentIntent)->pluck('idempotency_key')
+            ->contains(fn (string $key) => ! WorkspaceCredit::query()->where('idempotency_key', 'stripe:dispute-won:'.substr($key, strlen('stripe:dispute:')))->exists());
     }
 
     /** Payloads on newer API versions omit `invoice`; the pinned API version still returns it. */
