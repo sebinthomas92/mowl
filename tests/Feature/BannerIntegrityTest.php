@@ -65,7 +65,11 @@ class BannerIntegrityTest extends TestCase
 
         Livewire::actingAs($owner)->test(CampaignWorkspace::class, ['pack' => $pack])
             ->assertSeeText('Shows a price the product page does not show (899)')
-            ->assertViewHas('bannerPriceIssues', fn (array $issues) => count($issues) === 1);
+            ->assertViewHas('bannerPriceIssues', fn (array $issues) => count($issues) === 1)
+            ->assertDontSeeHtml(route('campaign-banners.download', [$pack, $creatives[0]]))
+            ->assertSeeHtml(route('campaign-banners.download', [$pack, $creatives[1]]));
+        $this->actingAs($owner)->get(route('campaign-banners.download', [$pack, $creatives[0]]))->assertNotFound();
+        $this->actingAs($owner)->get(route('campaign-banners.download', [$pack, $creatives[1]]))->assertOk();
 
         $library = app(ContentLibrary::class);
         $library->syncPack($pack);
