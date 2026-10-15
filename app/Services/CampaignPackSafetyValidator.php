@@ -42,7 +42,7 @@ class CampaignPackSafetyValidator
         $safeEvidence = collect($evidence)->filter(fn (array $reference) => in_array($reference['status'] ?? '', ['directly_supported', 'supported_paraphrased', 'source-linked'], true));
         $sourceText = $this->normalize(implode("\n", array_filter([
             $source?->extracted_content,
-            json_encode($source?->extracted_truth ?? []),
+            CampaignPackEvidence::json($source?->extracted_truth ?? []),
         ])));
 
         if ($source && (! $source->approved_at || $source->status !== 'ready')) {
@@ -211,7 +211,7 @@ class CampaignPackSafetyValidator
 
     private function normalize(string $value): string
     {
-        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $value)));
+        return CampaignPackEvidence::normalize($value);
     }
 
     private function wordCount(string $value): int
