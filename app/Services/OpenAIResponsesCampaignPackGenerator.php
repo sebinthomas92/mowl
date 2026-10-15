@@ -153,8 +153,16 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
         $this->validateShape($generated);
         $evidence = $generated['evidence'] ?? [];
         $flags = $generated['compliance_flags'] ?? [];
-        $this->validateEvidence($generated, $evidence, $flags, $source, $page);
         unset($generated['evidence'], $generated['compliance_flags']);
+        $checked = app(CampaignPackEvidence::class)->check($generated, $evidence, $flags, $source, $page);
+        if (is_string($checked)) {
+            throw new OpenAIResponseException('openai_'.$checked, 'OpenAI '.match ($checked) {
+                'empty_claim' => 'returned evidence without a claim.',
+                'unflagged_claim' => 'returned an unsafe claim without a compliance flag.',
+                default => 'returned no evidence that is traceable to the supplied source.',
+            }, true);
+        }
+        [$generated, $evidence] = $checked;
 
         return new GenerationResult(
             content: $generated,
@@ -195,66 +203,11 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
         return config('campaigns.openai.retry_backoff_ms')[$attempt - 1] ?? 0;
     }
 
-    private function validateEvidence(array $generated, array $evidence, array $flags, SourceSnapshot $source, array $page): void
-    {
-        $allowedSources = array_filter([$source->url, $page['url'] ?? null, $page['canonical_url'] ?? null]);
-        $sourceText = $this->normalize(implode("\n", [
-            $page['description'] ?? '',
-            $page['content'] ?? '',
-            json_encode($page['product_truth'] ?? []),
-        ]));
-        $teamText = $this->normalize(implode("\n", array_map('strval', $page['team_knowledge'] ?? [])));
-        $flaggedClaims = collect($flags)->pluck('claim')->map(fn ($claim) => $this->normalize((string) $claim));
-        $linkedClaims = [];
-
-        foreach ($evidence as $reference) {
-            $claim = $this->normalize((string) ($reference['claim'] ?? ''));
-            $status = $reference['status'] ?? null;
-            if ($claim === '') {
-                throw new OpenAIResponseException('openai_invalid_evidence', 'OpenAI returned evidence without a claim.', true);
-            }
-
-            if (in_array($status, ['too_specific_for_evidence', 'unsupported', 'contradicted_by_source'], true)) {
-                if (! $flaggedClaims->contains($claim)) {
-                    throw new OpenAIResponseException('openai_unflagged_claim', 'OpenAI returned an unsafe claim without a compliance flag.', true);
-                }
-
-                continue;
-            }
-
-            $excerpt = $this->normalize((string) ($reference['excerpt'] ?? ''));
-            // Facts the agency team confirmed on the product's Knowledge tab carry their own provenance.
-            if (($reference['source'] ?? null) === 'team_confirmed' && ! empty($page['team_knowledge'])
-                && in_array($status, ['directly_supported', 'supported_paraphrased'], true) && $excerpt !== '' && str_contains($teamText, $excerpt)) {
-                $linkedClaims[(string) ($reference['id'] ?? '')] = $claim;
-
-                continue;
-            }
-            if (! in_array($status, ['directly_supported', 'supported_paraphrased'], true) || ! in_array($reference['source'] ?? null, $allowedSources, true) || $excerpt === '' || ! str_contains($sourceText, $excerpt)) {
-                throw new OpenAIResponseException('openai_invalid_evidence', 'OpenAI returned evidence that is not traceable to the supplied source.', true);
-            }
-
-            $linkedClaims[(string) ($reference['id'] ?? '')] = $claim;
-        }
-
-        foreach ($generated['product_truth']['verified_facts'] ?? [] as $fact) {
-            $claimId = (string) ($fact['claim_id'] ?? '');
-            if ($claimId === '' || ($linkedClaims[$claimId] ?? null) !== $this->normalize((string) ($fact['statement'] ?? ''))) {
-                throw new OpenAIResponseException('openai_unlinked_fact', 'OpenAI returned a verified fact without a source-linked evidence claim.', true);
-            }
-        }
-    }
-
     private function validateShape(array $generated): void
     {
         if ($error = CampaignPackBlueprint::shapeError($generated)) {
             throw new OpenAIResponseException('openai_invalid_schema', 'OpenAI '.$error, true);
         }
-    }
-
-    private function normalize(string $value): string
-    {
-        return mb_strtolower(trim((string) preg_replace('/\s+/', ' ', $value)));
     }
 
     private function instructions(): string
@@ -269,26 +222,26 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
             "SUPPLIED PRICE\n".($product->price ?: 'Not supplied'),
             "PRODUCT CONTEXT\n".($product->summary ?: 'Not supplied'),
             "SOURCE URL\n{$source->url}",
-            'EXTRACTED STRUCTURED TRUTH'."\n".json_encode($page['product_truth'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
+            'EXTRACTED STRUCTURED TRUTH'."\n".CampaignPackEvidence::json($page['product_truth'] ?? [], JSON_PRETTY_PRINT),
             "SOURCE DESCRIPTION\n".($page['description'] ?? ''),
             "NORMALIZED SOURCE CONTENT\n".mb_substr($page['content'] ?? '', 0, 50_000),
         ];
 
         if ($team = $page['team_knowledge'] ?? null) {
-            $parts[] = 'TEAM-CONFIRMED FACTS'."\n".json_encode($team, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            $parts[] = 'TEAM-CONFIRMED FACTS'."\n".CampaignPackEvidence::json($team, JSON_PRETTY_PRINT);
         }
 
         if ($brand = $page['brand_profile'] ?? null) {
-            $parts[] = 'BRAND VOICE AND PALETTE (style guidance for tone and colour, not product facts)'."\n".json_encode($brand, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            $parts[] = 'BRAND VOICE AND PALETTE (style guidance for tone and colour, not product facts)'."\n".CampaignPackEvidence::json($brand, JSON_PRETTY_PRINT);
         }
 
         if ($brief = $page['campaign_brief'] ?? null) {
-            $parts[] = 'CAMPAIGN BRIEF (the team\'s direction for angle and emphasis; never a source of product facts, prices, offers or claims)'."\n".json_encode($brief, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            $parts[] = 'CAMPAIGN BRIEF (the team\'s direction for angle and emphasis; never a source of product facts, prices, offers or claims)'."\n".CampaignPackEvidence::json($brief, JSON_PRETTY_PRINT);
         }
 
         if ($section = $page['regeneration_section'] ?? null) {
             $parts[] = "REGENERATION REQUEST\nCreate a materially different {$section} section while preserving every other section's meaning. Avoid unsupported claims and repetition.";
-            $parts[] = 'CURRENT CAMPAIGN PACK'."\n".json_encode($page['current_content'] ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            $parts[] = 'CURRENT CAMPAIGN PACK'."\n".CampaignPackEvidence::json($page['current_content'] ?? [], JSON_PRETTY_PRINT);
         }
 
         return implode("\n\n", $parts);
