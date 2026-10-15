@@ -15,11 +15,16 @@ class WorkflowPreviewController extends Controller
     public function __invoke(Request $request, LibraryPrompt $prompt, string $kind, LibraryPreviews $previews)
     {
         $path = $previews->path($prompt, $kind);
-        abort_unless($path !== null, 404);
+        if ($path === null) {
+            abort_unless($prompt->{$kind.'_url'} && $kind === 'poster', 404);
+
+            return redirect()->away($prompt->{$kind.'_url'});
+        }
 
         $disk = Storage::disk($previews->disk());
         $size = $disk->size($path);
-        [$start, $end] = $this->range((string) $request->header('Range'), $size);
+        // Images are sent whole (they are stored only when small enough); videos in ranges.
+        [$start, $end] = $this->range($kind === 'video' ? (string) $request->header('Range') : '', $size, $kind === 'video' ? self::CHUNK : $size);
         if ($start === null) {
             return response('', 416, ['Content-Range' => "bytes */{$size}"]);
         }
@@ -52,7 +57,7 @@ class WorkflowPreviewController extends Controller
     }
 
     /** @return array{0: ?int, 1: int} */
-    private function range(string $header, int $size): array
+    private function range(string $header, int $size, int $chunk): array
     {
         $start = 0;
         $end = $size - 1;
@@ -68,6 +73,6 @@ class WorkflowPreviewController extends Controller
             }
         }
 
-        return [$start, min($end, $start + self::CHUNK - 1)];
+        return [$start, min($end, $start + max(1, $chunk) - 1)];
     }
 }

@@ -112,7 +112,9 @@ class WorkflowCatalog
             ->map(function (Collection $prompts) {
                 $first = $prompts->first();
                 $premium = $prompts->where('tier', 'premium')->count();
-                $preview = fn (LibraryPrompt $prompt, string $kind) => $prompt->{$kind.'_url'} || $prompt->{$kind.'_path'}
+                $previews = app(LibraryPreviews::class);
+                $preview = fn (LibraryPrompt $prompt, string $kind) => ($prompt->{$kind.'_url'} || $prompt->{$kind.'_path'})
+                    && ! ($kind === 'video' && ($prompt->video_path === LibraryPreviews::REMOTE || $previews->isStream($prompt->video_url)))
                     ? route('workflows.preview', [$prompt->id, $kind])
                     : null;
                 $items = $prompts->map(fn (LibraryPrompt $prompt) => [

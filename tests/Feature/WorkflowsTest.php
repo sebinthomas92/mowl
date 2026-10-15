@@ -6,6 +6,7 @@ use App\Livewire\WorkflowIndex;
 use App\Models\LibraryPrompt;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\LibraryPreviews;
 use App\Services\WorkflowCatalog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\File;
@@ -237,6 +238,32 @@ MD);
 
         auth()->logout();
         $this->get(route('workflows.preview', [$aurora->id, 'video']))->assertRedirect(route('login'));
+    }
+
+    public function test_previews_the_app_cannot_serve_are_shown_from_the_source(): void
+    {
+        Storage::fake('previews');
+        config(['workflows.media_disk' => 'previews']);
+        Http::fake([
+            'cdn.example.com/big.gif' => Http::response(str_repeat('g', 4 * 1024 * 1024 + 1), 200, ['Content-Type' => 'image/gif']),
+            'cdn.example.com/gone.gif' => Http::response('', 404),
+            '*' => Http::response('unexpected', 500),
+        ]);
+        $big = LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '1', 'pack' => 'Hero', 'title' => 'Big', 'body' => 'b', 'poster_url' => 'https://cdn.example.com/big.gif', 'video_url' => 'https://stream.mux.com/abc.m3u8']);
+        $gone = LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '2', 'pack' => 'Hero', 'title' => 'Gone', 'body' => 'b', 'poster_url' => 'https://cdn.example.com/gone.gif']);
+        $user = $this->member();
+
+        $this->actingAs($user)->get(route('workflows.preview', [$big->id, 'poster']))->assertRedirect('https://cdn.example.com/big.gif');
+        $this->actingAs($user)->get(route('workflows.preview', [$big->id, 'poster']))->assertRedirect('https://cdn.example.com/big.gif');
+        $this->actingAs($user)->get(route('workflows.preview', [$gone->id, 'poster']))->assertRedirect('https://cdn.example.com/gone.gif');
+        $this->actingAs($user)->get(route('workflows.preview', [$big->id, 'video']))->assertNotFound();
+        $this->assertSame(LibraryPreviews::REMOTE, $big->fresh()->poster_path);
+        $this->assertSame(LibraryPreviews::REMOTE, $gone->fresh()->poster_path);
+        Http::assertSentCount(2);
+
+        $hero = app(WorkflowCatalog::class)->find('motionsites-hero');
+        $this->assertNull($hero['prompts'][0]['video']);
+        $this->assertSame(route('workflows.preview', [$big->id, 'poster']), $hero['prompts'][0]['poster']);
     }
 
     private function member(): User
