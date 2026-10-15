@@ -126,7 +126,8 @@ class BannerComposer
     /** An elliptical dark scrim in the bottom-right corner, strongest under the wordmark and gone well before the middle. */
     private function drawBrandScrim(\GdImage $canvas, int $width, int $height): void
     {
-        for ($y = $height - 240; $y < $height; $y++) {
+        // The ellipse is centred 70px above the bottom with a 200px vertical radius, so start where it is fully clear.
+        for ($y = $height - 280; $y < $height; $y++) {
             for ($x = $width - 600; $x < $width; $x++) {
                 $distance = sqrt((($width - 60 - $x) / 540) ** 2 + (($height - 70 - $y) / 200) ** 2);
                 $alpha = 127 - (int) round(70 * (1 - $this->fade((int) round($distance * 100), 35, 100)));

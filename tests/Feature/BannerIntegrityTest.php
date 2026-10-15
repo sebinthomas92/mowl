@@ -245,9 +245,9 @@ class BannerIntegrityTest extends TestCase
         foreach (['split_left' => fn ($image, $i) => imagecolorat($image, $i, 900), 'bottom_panel' => fn ($image, $i) => imagecolorat($image, 1060, 720 + $i)] as $layout => $pixel) {
             $creative = new BannerCreative(['headline' => 'A stand', 'supporting_text' => null, 'cta' => 'Shop now', 'layout' => $layout]);
             $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, $creative));
-            // Stops short of the wordmark's corner scrim, which starts 240px above the bottom.
-            $red = array_map(fn ($i) => (($pixel($image, $i) >> 16) & 255), range(0, 380));
-            $steps = array_map(fn ($i) => $red[$i] - $red[$i - 1], range(1, 380));
+            // Stops short of the wordmark's corner scrim, which starts 280px above the bottom.
+            $red = array_map(fn ($i) => (($pixel($image, $i) >> 16) & 255), range(0, 340));
+            $steps = array_map(fn ($i) => $red[$i] - $red[$i - 1], range(1, 340));
             $this->assertLessThanOrEqual(2, max($steps) - min($steps), "{$layout} gradient should be smooth");
 
             if ($layout === 'bottom_panel') {
@@ -297,6 +297,11 @@ class BannerIntegrityTest extends TestCase
             $this->assertGreaterThan(0, $wordmark[2], "{$layout}: the wordmark is in the bottom-right corner");
             $this->assertGreaterThanOrEqual(990, $wordmark[1], "{$layout}: the wordmark is right-aligned to the corner");
         }
+
+        // The corner scrim fades in from nothing: no seam along its top edge above the wordmark.
+        $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, new BannerCreative(['headline' => 'A stand', 'cta' => 'Shop now', 'layout' => 'hero_top'])));
+        $red = array_map(fn ($y) => (imagecolorat($image, 1020, $y) >> 16) & 255, range(1000, 1220));
+        $this->assertLessThanOrEqual(4, max(array_map(fn ($i) => abs($red[$i] - $red[$i - 1]), range(1, count($red) - 1))));
 
         // The hero panel fades out to the right instead of ending in a hard vertical edge.
         $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, new BannerCreative(['headline' => 'A stand', 'cta' => 'Shop now', 'layout' => 'hero_top'])));
