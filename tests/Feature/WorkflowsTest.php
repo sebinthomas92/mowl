@@ -166,10 +166,11 @@ MD);
         $this->assertStringContainsString('MotionSites.ai', $hero['credit']);
 
         // Re-importing updates by id and drops prompts the export no longer has.
-        File::put($file, json_encode([['id' => 'a1', 'title' => 'Aurora hero v2', 'category' => 'Hero Section', 'body' => 'New body.']]));
+        File::put($file, json_encode([['id' => 'a1', 'title' => 'Aurora hero v2', 'category' => 'Hero Section', 'body' => 'New body.', 'credit' => 'Prompt by @ana']]));
         $this->artisan('workflows:import-prompts', ['file' => $file])->assertSuccessful();
         $this->assertSame(1, LibraryPrompt::count());
         $this->assertSame('free', LibraryPrompt::first()->tier);
+        $this->assertSame('Prompt by @ana', LibraryPrompt::first()->credit);
         $this->artisan('workflows:import-prompts', ['file' => $this->library.'/missing.json'])->assertFailed();
     }
 
@@ -298,10 +299,12 @@ MD);
         Storage::fake('previews');
         config(['workflows.media_disk' => 'previews']);
         Storage::disk('previews')->put('library/opus-videos/old-poster.webp', 'old copy');
-        $prompt = LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => 'cara', 'pack' => 'UI motion animations', 'category' => 'animation', 'title' => 'Card flip', 'body' => 'Flip the card.', 'credit' => 'Prompt by @cara', 'source_url' => 'javascript:alert(1)', 'poster_url' => 'https://media.example.com/cara.webp', 'poster_path' => 'library/opus-videos/old-poster.webp']);
+        $prompt = LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => 'cara', 'pack' => 'UI motion animations', 'category' => 'animation', 'title' => 'Card flip', 'body' => 'Flip the card.', 'credit' => 'Prompt by @cara', 'source_url' => 'javascript:alert(1)', 'video_url' => 'https://media.example.com/cara.mp4', 'poster_url' => 'https://media.example.com/cara.webp', 'poster_path' => 'library/opus-videos/old-poster.webp']);
         LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => 'dev', 'pack' => 'UI motion animations', 'category' => 'animation', 'title' => 'Tab slide', 'body' => 'Slide the tabs.', 'credit' => 'Prompt by @dev', 'poster_url' => 'javascript:alert(2)']);
         $user = $this->member();
 
+        $pack = app(WorkflowCatalog::class)->find('opus-videos-ui-motion-animations');
+        $this->assertNull($pack['prompts'][0]['video']);
         $this->actingAs($user)->get(route('workflows.preview', [$prompt->id, 'poster']))->assertRedirect('https://media.example.com/cara.webp');
         $this->assertSame(LibraryPreviews::REMOTE, $prompt->fresh()->poster_path);
 

@@ -120,8 +120,10 @@ class WorkflowCatalog
                 $sharedCredit = $prompts->pluck('credit')->unique()->count() === 1 ? $first->credit : null;
                 $premium = $prompts->where('tier', 'premium')->count();
                 $previews = app(LibraryPreviews::class);
+                // Videos play only from our own copy; source-only collections show their poster instead.
+                $sourceOnly = ($collection['mirror_previews'] ?? true) === false;
                 $preview = fn (LibraryPrompt $prompt, string $kind) => ($prompt->{$kind.'_url'} || $prompt->{$kind.'_path'})
-                    && ! ($kind === 'video' && ($prompt->video_path === LibraryPreviews::REMOTE || $previews->isStream($prompt->video_url)))
+                    && ! ($kind === 'video' && ($sourceOnly || $prompt->video_path === LibraryPreviews::REMOTE || $previews->isStream($prompt->video_url)))
                     ? route('workflows.preview', [$prompt->id, $kind])
                     : null;
                 $items = $prompts->map(fn (LibraryPrompt $prompt) => [

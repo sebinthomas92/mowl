@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
  * Loads a licensed prompt collection (JSON array) into library_prompts.
  *
  * Each entry needs `title` and `body`; `id`, `category` (the source's own section, used as the pack),
- * `tags` (containing "premium" or "free"), `source_url`, `video_url` and `poster_url` are optional. Re-running updates entries
+ * `tags` (containing "premium" or "free"), `credit` (falls back to --credit), `source_url`, `video_url` and `poster_url` are optional. Re-running updates entries
  * by id and removes ones the file no longer has.
  */
 class ImportLibraryPrompts extends Command
@@ -59,7 +59,7 @@ class ImportLibraryPrompts extends Command
                     'body' => $body,
                     'tier' => in_array('premium', $tags, true) ? 'premium' : 'free',
                     'position' => $positions[$pack] = ($positions[$pack] ?? 0) + 1,
-                    'credit' => $this->option('credit'),
+                    'credit' => Str::limit(trim((string) ($entry['credit'] ?? '')), 200, '') ?: $this->option('credit'),
                     'source_url' => $this->mediaUrl($entry['source_url'] ?? null),
                 ]);
                 if ($previews) {
