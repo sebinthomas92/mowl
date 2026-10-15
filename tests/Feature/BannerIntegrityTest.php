@@ -219,6 +219,7 @@ class BannerIntegrityTest extends TestCase
         $pack = CampaignPack::create(['product_id' => $product->id, 'source_snapshot_id' => $source->id, 'name' => 'Pack', 'status' => 'approved', 'current_version' => 1, 'analysis_mode' => 'standard']);
         $version = $pack->versions()->create(['version' => 1, 'content' => [
             'product_truth' => ['name' => 'Book-Shaped Kindle & E-Reader Stand – Minimal Open Book Display Stand for Kindle & Kobo'],
+            'ranked_angles' => [['title' => 'Kindle Stand | Gift Ideas for Readers']],
             'creative_routes' => [
                 ['hooks' => ['This Diwali, gift a beautiful, dedicated home for their favorite e-reader.'], 'platform_assets' => ['meta_ads' => ['title' => 'Book-Shaped Kindle Stand | Cozy Reading', 'headlines' => ['E-Reader Stand - Minimal Open Book Display', 'Stop Hiding Your Kindle | Book-Shaped Stand', 'Comfy hands-free reading'], 'description_lines' => ['Complimentary shipping over INR 499', 'Small-batch minimal design']]]],
             ],

@@ -54,7 +54,8 @@ class BannerCopySelector
             ...collect(data_get($content, 'positioning.audience_priorities', []))->pluck('name')->all(),
         ]);
         $fallback = $this->strings([data_get($content, 'direction.title'), data_get($content, 'ranked_angles.0.title'), data_get($content, 'overview.campaign_goal')]);
-        $headlinePool = array_values(array_unique([...$headlines, ...$hooks, ...array_slice($fallback, 0, 1)]));
+        $headlinePool = array_values(array_unique([...$headlines, ...$hooks, ...array_slice(array_values(array_filter($fallback, $headlineLike)), 0, 1)]))
+            ?: array_slice($fallback, 0, 1);
         $headline = $headlinePool[($sequence - 1) % max(1, count($headlinePool))]
             ?? (string) data_get($content, 'product_truth.name', 'Product');
         $supportPool = array_values(array_unique([...$descriptions, ...$benefits]));
