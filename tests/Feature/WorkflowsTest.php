@@ -225,8 +225,8 @@ MD);
         $this->actingAs($user)->withHeader('Range', 'bytes=9000-')->get(route('workflows.preview', [$aurora->id, 'video']))->assertStatus(416);
         $this->flushHeaders();
 
-        // Served from the stored copy without fetching again.
-        Http::assertSentCount(1);
+        // Served from the stored copy without fetching again (one size check, one download).
+        Http::assertSentCount(2);
         $this->actingAs($user)->get(route('workflows.preview', [$aurora->id, 'poster']))->assertOk()->assertHeader('Content-Type', 'image/jpeg');
         $this->actingAs($user)->get(route('workflows.preview', [$plain->id, 'video']))->assertNotFound();
         $this->actingAs($user)->get(route('workflows.preview', [$plain->id, 'poster']))->assertNotFound();
@@ -246,13 +246,24 @@ MD);
         Storage::fake('previews');
         config(['workflows.media_disk' => 'previews']);
         Http::fake([
-            'cdn.example.com/big.gif' => Http::response(str_repeat('g', 4 * 1024 * 1024 + 1), 200, ['Content-Type' => 'image/gif']),
+            'cdn.example.com/big.gif' => Http::response(str_repeat('g', LibraryPreviews::MAX_BYTES['poster'] + 1), 200, ['Content-Type' => 'image/gif']),
+            'cdn.example.com/huge.gif' => Http::response('', 200, ['Content-Type' => 'image/gif', 'Content-Length' => (string) (5 * 1024 * 1024)]),
             'cdn.example.com/gone.gif' => Http::response('', 404),
             '*' => Http::response('unexpected', 500),
         ]);
         $big = LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '1', 'pack' => 'Hero', 'title' => 'Big', 'body' => 'b', 'poster_url' => 'https://cdn.example.com/big.gif', 'video_url' => 'https://stream.mux.com/abc.m3u8']);
         $gone = LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '2', 'pack' => 'Hero', 'title' => 'Gone', 'body' => 'b', 'poster_url' => 'https://cdn.example.com/gone.gif']);
+        $huge = LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '3', 'pack' => 'Hero', 'title' => 'Huge', 'body' => 'b', 'poster_url' => 'https://cdn.example.com/huge.gif']);
+        Storage::disk('previews')->put('library/motionsites/old.gif', str_repeat('o', LibraryPreviews::MAX_BYTES['poster'] + 1));
+        $old = LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '4', 'pack' => 'Hero', 'title' => 'Old', 'body' => 'b', 'poster_url' => 'https://cdn.example.com/old.gif', 'poster_path' => 'library/motionsites/old.gif']);
         $user = $this->member();
+
+        // Too large by its size header: marked without downloading it. A copy over the cap is not served.
+        $this->actingAs($user)->get(route('workflows.preview', [$huge->id, 'poster']))->assertRedirect('https://cdn.example.com/huge.gif');
+        $this->actingAs($user)->get(route('workflows.preview', [$old->id, 'poster']))->assertRedirect('https://cdn.example.com/old.gif');
+        $this->assertSame(LibraryPreviews::REMOTE, $huge->fresh()->poster_path);
+        $this->assertSame(LibraryPreviews::REMOTE, $old->fresh()->poster_path);
+        Http::assertSentCount(1);
 
         $this->actingAs($user)->get(route('workflows.preview', [$big->id, 'poster']))->assertRedirect('https://cdn.example.com/big.gif');
         $this->actingAs($user)->get(route('workflows.preview', [$big->id, 'poster']))->assertRedirect('https://cdn.example.com/big.gif');
@@ -260,7 +271,14 @@ MD);
         $this->actingAs($user)->get(route('workflows.preview', [$big->id, 'video']))->assertNotFound();
         $this->assertSame(LibraryPreviews::REMOTE, $big->fresh()->poster_path);
         $this->assertSame(LibraryPreviews::REMOTE, $gone->fresh()->poster_path);
-        Http::assertSentCount(2);
+        Http::assertSentCount(5);
+
+        // A storage failure shows the preview from its source instead of breaking the page.
+        $this->mock(LibraryPreviews::class, fn ($mock) => $mock->shouldReceive('path')->andThrow(new \RuntimeException('storage down')));
+        $this->actingAs($user)->get(route('workflows.preview', [$gone->id, 'poster']))->assertRedirect('https://cdn.example.com/gone.gif');
+        $this->app->forgetInstance(LibraryPreviews::class);
+
+        Livewire::actingAs($user)->withQueryParams(['workflow' => 'motionsites-hero'])->test(WorkflowIndex::class)->assertSet('category', 'web');
 
         $hero = app(WorkflowCatalog::class)->find('motionsites-hero');
         $this->assertNull($hero['prompts'][0]['video']);

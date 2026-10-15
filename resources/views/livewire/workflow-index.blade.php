@@ -36,7 +36,7 @@
                         @foreach($workflows as $workflow)
                             <button type="button" class="ccard" wire:key="wf-{{ $workflow['slug'] }}" aria-pressed="{{ $current && $current['slug'] === $workflow['slug'] ? 'true' : 'false' }}" wire:click="select('{{ $workflow['slug'] }}')">
                                 <span class="thumb wf-thumb" style="background:{{ $gradients[$workflow['gradient'] % 6] }}" aria-hidden="true">
-                                    @if($workflow['poster'])<img class="wf-poster" src="{{ $workflow['poster'] }}" alt="" loading="lazy" decoding="async">@endif
+                                    @if($workflow['poster'])<img class="wf-poster" src="{{ $workflow['poster'] }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">@endif
                                     @if($workflow['category'] === 'motion')<i class="ti ti-player-play"></i>@elseif($workflow['category'] === 'animation')<i class="ti ti-sparkles"></i>@elseif($workflow['category'] === 'web')<i class="ti ti-browser"></i>@endif
                                     @if($workflow['length'])<span class="wf-len">{{ $workflow['length'] }}</span>@endif
                                 </span>
@@ -79,7 +79,7 @@
                                             @if($prompt['video'] ?? null)
                                                 <video class="wf-video" src="{{ $prompt['video'] }}" @if($prompt['poster'] ?? null) poster="{{ $prompt['poster'] }}" @endif controls muted loop playsinline preload="none" aria-label="Preview of {{ $prompt['title'] }}"></video>
                                             @elseif($prompt['poster'] ?? null)
-                                                <img class="wf-video" src="{{ $prompt['poster'] }}" alt="Preview of {{ $prompt['title'] }}" loading="lazy">
+                                                <img class="wf-video" src="{{ $prompt['poster'] }}" alt="Preview of {{ $prompt['title'] }}" loading="lazy" decoding="async" referrerpolicy="no-referrer">
                                             @endif
                                             <pre class="wf-body">{{ $prompt['body'] }}</pre>
                                             @if(($prompt['credit'] ?? null) || ($prompt['source_url'] ?? null))
