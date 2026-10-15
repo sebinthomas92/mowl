@@ -10,6 +10,7 @@ use App\Models\Workspace;
 use App\Services\BannerComposer;
 use App\Services\BannerCopySelector;
 use App\Services\CampaignPackSafetyValidator;
+use App\Services\ProductKnowledge;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -54,6 +55,31 @@ class BannerIntegrityTest extends TestCase
         $source = new SourceSnapshot(['extracted_content' => self::PAGE, 'extracted_truth' => ['price' => '699.00', 'currency' => 'INR']]);
         $issues = collect($validator->issues(['product_truth' => ['price' => '899'], 'marketing_hub' => ['product_details' => ['price' => '699.00']]], [], [], $source))->whereNotNull('path');
         $this->assertSame(['product_truth.price'], $issues->pluck('path')->values()->all());
+    }
+
+    public function test_the_source_currency_settles_dollar_signs_and_unlisted_codes(): void
+    {
+        $validator = app(CampaignPackSafetyValidator::class);
+        $aud = $validator->supportedPrices(new SourceSnapshot(['extracted_content' => 'Now $699', 'extracted_truth' => ['price' => '699', 'currency' => 'AUD']]));
+        $this->assertSame(['AUD 699'], $aud);
+        $this->assertSame(['699'], $validator->unsupportedPrices('USD 699', $aud));
+        $this->assertSame([], $validator->unsupportedPrices('Just $699', $aud));
+
+        $pln = $validator->supportedPrices(new SourceSnapshot(['extracted_content' => 'Stand', 'extracted_truth' => ['price' => '699', 'currency' => 'PLN']]));
+        $this->assertSame(['899'], $validator->unsupportedPrices('Only PLN 899', $pln));
+    }
+
+    public function test_a_price_only_seeded_from_an_old_page_is_not_supported_once_the_page_drops_it(): void
+    {
+        $workspace = Workspace::create(['name' => 'Banner Agency']);
+        $product = $workspace->brands()->create(['name' => 'Plush'])->products()->create(['name' => 'Kindle Stand']);
+        $old = $product->sourceSnapshots()->create(['url' => 'https://example.com/stand', 'content_hash' => 'a', 'status' => 'ready', 'extracted_content' => 'Stand', 'extracted_truth' => ['price' => '899', 'currency' => 'INR']]);
+        app(ProductKnowledge::class)->syncFromSource($product, $old);
+        $new = $product->sourceSnapshots()->create(['url' => 'https://example.com/stand', 'content_hash' => 'b', 'status' => 'ready', 'extracted_content' => 'Stand', 'extracted_truth' => []]);
+        app(ProductKnowledge::class)->syncFromSource($product, $new);
+        $this->assertSame('ok', $product->facts()->where('key', 'price')->value('status'));
+
+        $this->assertSame([], app(CampaignPackSafetyValidator::class)->supportedPrices($new));
     }
 
     public function test_decimal_comma_prices_keep_their_value(): void

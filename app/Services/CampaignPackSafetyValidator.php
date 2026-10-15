@@ -9,6 +9,8 @@ use Illuminate\Validation\ValidationException;
 class CampaignPackSafetyValidator
 {
     /** ISO codes recognised next to an amount in copy ("899 USD", "AED 99"). */
+    private const DOLLARS = ['USD', 'AUD', 'CAD', 'SGD', 'NZD', 'HKD', 'MXN'];
+
     private const CURRENCY_CODES = ['INR', 'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'SGD', 'AED', 'NZD', 'CHF', 'CNY', 'HKD', 'SAR', 'MYR', 'ZAR', 'SEK', 'NOK', 'DKK', 'BRL', 'MXN', 'IDR', 'THB', 'PHP', 'KRW', 'QAR', 'NPR', 'LKR', 'BDT', 'PKR'];
 
     private const UNSAFE_STATUSES = [
@@ -236,11 +238,16 @@ class CampaignPackSafetyValidator
         $currency = $this->currency($code) ?? (preg_match('/^[A-Z]{3}$/', $code) ? $code : '*');
         $explicit = [(string) data_get($truth, 'price', '')];
         if (ProductKnowledge::available() && $source->product_id) {
-            $explicit[] = (string) $source->product?->facts()->where('key', 'price')->where('status', 'ok')->value('confirmed_value');
+            // A price the team confirmed, or one they saved that no page supplied. A value only ever
+            // seeded from an earlier page is not kept alive once the page stops showing it.
+            $explicit[] = (string) $source->product?->facts()->where('key', 'price')->where('status', 'ok')
+                ->where(fn ($query) => $query->whereNotNull('confirmed_by_user_id')->orWhereNull('source_value'))
+                ->value('confirmed_value');
         }
-        $supported = $this->currencyAmounts((string) $source->extracted_content);
+        $known = $currency === '*' ? [] : [$currency];
+        $supported = $this->currencyAmounts((string) $source->extracted_content, $known);
         foreach (array_filter($explicit) as $price) {
-            $labelled = $this->currencyAmounts($price);
+            $labelled = $this->currencyAmounts($price, $known);
             if ($labelled === [] && preg_match('/\\d(?:[\\d.,]*\\d)?/u', $price, $number)) {
                 $labelled = [$currency.' '.$this->amount($number[0])];
             }
@@ -262,7 +269,8 @@ class CampaignPackSafetyValidator
         if ($supported === null) {
             return [];
         }
-        if ($priceField && $this->currencyAmounts($text) === []) {
+        $known = array_values(array_filter(array_map(fn (string $price) => explode(' ', $price)[0], $supported), fn (string $code) => $code !== '*'));
+        if ($priceField && $this->currencyAmounts($text, $known) === []) {
             preg_match_all('/\\d(?:[\\d.,]*\\d)?/u', $text, $numbers);
             $amounts = array_map(fn (string $price) => explode(' ', $price)[1], $supported);
 
@@ -274,7 +282,7 @@ class CampaignPackSafetyValidator
 
         return array_values(array_unique(array_map(
             fn (string $price) => explode(' ', $price)[1],
-            array_filter($this->currencyAmounts($text), function (string $price) use ($supported) {
+            array_filter($this->currencyAmounts($text, $known), function (string $price) use ($supported) {
                 return ! in_array($price, $supported, true) && ! in_array('* '.explode(' ', $price)[1], $supported, true);
             }),
         )));
@@ -284,33 +292,37 @@ class CampaignPackSafetyValidator
      * Amounts written with a currency, as "INR 699": "₹699", "INR 899", "Rs. 1,499", "500 rupees".
      * Symbols may follow a digit ("₹750₹699" is a struck-out price beside the sale price); words may not.
      *
+     * The source's own currencies are always recognised, and settle what "$" or "¥" means.
+     *
+     * @param  list<string>  $known  currency codes the source uses
      * @return list<string>
      */
-    private function currencyAmounts(string $text): array
+    private function currencyAmounts(string $text, array $known = []): array
     {
         $number = '(\\d(?:[\\d.,]*\\d)?)';
-        $codes = implode('|', self::CURRENCY_CODES);
+        $codes = implode('|', array_unique([...self::CURRENCY_CODES, ...array_filter($known, fn (string $code) => preg_match('/^[A-Z]{3}$/', $code))]));
         preg_match_all('/([₹$€£¥]|(?<![\\p{L}\\p{N}])(?:rs\\.?|'.$codes.'))\\s?'.$number.'/iu', $text, $before, PREG_SET_ORDER);
         preg_match_all('/'.$number.'\\s?(rupees|'.$codes.')(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER);
         $prices = [
-            ...array_map(fn (array $match) => $this->currency($match[1]).' '.$this->amount($match[2]), $before),
-            ...array_map(fn (array $match) => $this->currency($match[2]).' '.$this->amount($match[1]), $after),
+            ...array_map(fn (array $match) => $this->currency($match[1], $known).' '.$this->amount($match[2]), $before),
+            ...array_map(fn (array $match) => $this->currency($match[2], $known).' '.$this->amount($match[1]), $after),
         ];
 
         return array_values(array_unique($prices));
     }
 
-    private function currency(string $label): ?string
+    /** @param  list<string>  $known  currency codes the source uses, to read "$" as AUD on an Australian page */
+    private function currency(string $label, array $known = []): ?string
     {
         $label = rtrim(mb_strtolower(trim($label)), '.');
 
         return match ($label) {
             '₹', 'rs', 'rupees' => 'INR',
-            '$' => 'USD',
+            '$' => collect($known)->first(fn (string $code) => in_array($code, self::DOLLARS, true)) ?? 'USD',
             '€' => 'EUR',
             '£' => 'GBP',
-            '¥' => 'JPY',
-            default => in_array(strtoupper($label), self::CURRENCY_CODES, true) ? strtoupper($label) : null,
+            '¥' => collect($known)->first(fn (string $code) => in_array($code, ['JPY', 'CNY'], true)) ?? 'JPY',
+            default => preg_match('/^[a-z]{3}$/', $label) ? strtoupper($label) : null,
         };
     }
 
