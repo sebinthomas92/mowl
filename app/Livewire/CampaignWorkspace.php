@@ -150,8 +150,8 @@ class CampaignWorkspace extends Component
 
         [$pack, $generationJob] = DB::transaction(function () use ($data, $workspace, $creditCost, $brief): array {
             $lockedWorkspace = $workspace->newQuery()->lockForUpdate()->findOrFail($workspace->id);
-            if ($lockedWorkspace->creditBalance() < $creditCost) {
-                throw ValidationException::withMessages(['sourceUrl' => 'This workspace does not have enough pack credits.']);
+            if ($lockedWorkspace->spendableCredits() < $creditCost) {
+                throw ValidationException::withMessages(['sourceUrl' => $lockedWorkspace->creditShortfallMessage('This workspace does not have enough pack credits.')]);
             }
 
             $product = $this->scopedProducts()->findOrFail($this->productId);
@@ -213,8 +213,8 @@ class CampaignWorkspace extends Component
             $lockedPack = CampaignPack::query()->lockForUpdate()->findOrFail($pack->id);
             abort_unless($lockedPack->status === 'failed', 422);
 
-            if ($lockedWorkspace->creditBalance() < $lockedPack->credit_cost) {
-                throw ValidationException::withMessages(['sourceUrl' => 'This workspace does not have enough pack credits to retry.']);
+            if ($lockedWorkspace->spendableCredits() < $lockedPack->credit_cost) {
+                throw ValidationException::withMessages(['sourceUrl' => $lockedWorkspace->creditShortfallMessage('This workspace does not have enough pack credits to retry.')]);
             }
 
             $job = CampaignGenerationJob::create([

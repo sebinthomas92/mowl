@@ -70,7 +70,7 @@ class EnforceWorkspaceRole
         if ($route->named('brands.create') && ! $membership->canCreateBrands()) {
             abort(403, 'Your access is limited to one brand.');
         }
-        if ($route->named('usage.index') && ! $membership->canSeeCosts()) {
+        if ($route->named('usage.index', 'billing.index') && ! $membership->canSeeCosts()) {
             abort(403, 'Usage and costs are visible to the workspace owner.');
         }
 

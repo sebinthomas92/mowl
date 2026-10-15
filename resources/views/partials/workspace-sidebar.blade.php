@@ -19,6 +19,7 @@
 @php($secondary = array_filter([
     $navLink('team.index', 'team.*', 'Team', 'users'),
     $sideMembership?->canSeeCosts() ? $navLink('usage.index', 'usage.*', 'Usage', 'chart-bar') : null,
+    $sideMembership?->canSeeCosts() ? $navLink('billing.index', 'billing.*', 'Billing', 'credit-card') : null,
     $navLink('workspace.settings', 'workspace.settings', 'Settings', 'settings'),
     $navLink('help.index', 'help.*', 'Help', 'help-circle'),
     $isConcierge ? $navLink('concierge.index', 'concierge.*', 'Concierge', 'lifebuoy') : null,
