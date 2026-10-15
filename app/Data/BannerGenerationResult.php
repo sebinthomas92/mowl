@@ -14,5 +14,7 @@ readonly class BannerGenerationResult
         public int $outputImageTokens = 0,
         public ?string $providerRequestId = null,
         public ?int $providerLatencyMs = null,
+        // Spend outside the image model's own token prices, such as the background inspection.
+        public float $additionalCost = 0.0,
     ) {}
 }

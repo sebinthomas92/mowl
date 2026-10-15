@@ -2,10 +2,11 @@
 
 namespace Tests\Unit;
 
-use App\Exceptions\VertexAIResponseException;
+use App\Exceptions\BannerAttemptFailed;
 use App\Models\BannerCreative;
 use App\Models\MediaAsset;
 use App\Services\GoogleVertexBannerGenerator;
+use App\Services\ProviderCostCalculator;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -46,8 +47,10 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect([$asset, $secondAsset]));
 
         $this->assertSame('generated-image-bytes', $result->imageBytes);
-        $this->assertSame(400 + 300, $result->inputTokens);
-        $this->assertSame(10 + 12, $result->outputTextTokens);
+        $this->assertSame(400, $result->inputTokens);
+        $this->assertSame(10, $result->outputTextTokens);
+        // The inspection is priced at the inspector model's rates, not the image model's.
+        $this->assertEqualsWithDelta((300 * 2.70 + 12 * 16.20) / 1_000_000, $result->additionalCost, 0.000001);
         $this->assertSame(1290, $result->outputImageTokens);
         $this->assertSame('vertex-banner-1', $result->providerRequestId);
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/models/gemini-3.1-flash-image:generateContent')
@@ -84,7 +87,8 @@ class GoogleVertexBannerGeneratorTest extends TestCase
 
         $this->assertSame('blank-screen', $result->imageBytes);
         $this->assertSame(2 * 1290, $result->outputImageTokens);
-        $this->assertSame(2 * 400 + 2 * 300, $result->inputTokens);
+        $this->assertSame(2 * 400, $result->inputTokens);
+        $this->assertEqualsWithDelta(2 * (300 * 2.70 + 12 * 16.20) / 1_000_000, $result->additionalCost, 0.000001);
     }
 
     public function test_it_gives_up_when_every_background_shows_third_party_text(): void
@@ -105,10 +109,12 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         try {
             app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
             $this->fail('A background with a real book cover must not be used.');
-        } catch (VertexAIResponseException $exception) {
+        } catch (BannerAttemptFailed $exception) {
             $this->assertSame('banner_third_party_text', $exception->errorCode);
-            $this->assertTrue($exception->retryable);
             $this->assertStringContainsString('The Hobbit', $exception->getMessage());
+            // Both rejected rounds were paid for, and that spend travels with the failure.
+            $expected = app(ProviderCostCalculator::class)->calculateBanner(800, 20, 2580) + 2 * (300 * 2.70 + 12 * 16.20) / 1_000_000;
+            $this->assertEqualsWithDelta($expected, $exception->spentCost, 0.000001);
         }
         Http::assertSentCount(3 + 2 * 2);
     }
@@ -135,6 +141,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
     private function configureGoogle(): void
     {
         config()->set('campaigns.google.model', 'gemini-3.5-flash');
+        config()->set('campaigns.google.prices_per_million.gemini-3.5-flash', ['input' => 2.70, 'cached_input' => 0.27, 'output' => 16.20]);
         config()->set('campaigns.banners.inspect_images', true);
         config()->set('campaigns.banners.inspection_attempts', 2);
         config()->set('campaigns.banners.model', 'gemini-3.1-flash-image');

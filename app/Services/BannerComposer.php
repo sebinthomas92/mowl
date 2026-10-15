@@ -125,8 +125,8 @@ class BannerComposer
 
     /**
      * A soft dark scrim behind the bottom-right wordmark: solid over the wordmark's box and feathered
-     * out over 150px. It is darker over a bright background (a light napkin, pale wood), so the white
-     * wordmark keeps its contrast on any photo.
+     * out over 150px. It is darker when any part of the background behind it is bright (a light
+     * napkin, pale wood), so the white wordmark keeps its contrast on any photo.
      */
     private function drawBrandScrim(\GdImage $canvas, int $width, int $height): void
     {
@@ -138,7 +138,10 @@ class BannerComposer
                 $samples[] = 0.2126 * (($rgb >> 16) & 255) + 0.7152 * (($rgb >> 8) & 255) + 0.0722 * ($rgb & 255);
             }
         }
-        $brightness = array_sum($samples) / max(1, count($samples));
+        // The brightest patches decide, not the average: one white patch behind a few letters is enough
+        // to lose them.
+        sort($samples);
+        $brightness = $samples[(int) floor(0.9 * (count($samples) - 1))] ?? 0;
         $strength = 60 + 55 * max(0, min(1, ($brightness - 60) / 140));
 
         for ($y = $top - $feather; $y < $height; $y++) {

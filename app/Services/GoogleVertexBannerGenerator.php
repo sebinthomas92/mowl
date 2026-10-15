@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Contracts\BannerGenerator;
 use App\Data\BannerGenerationResult;
+use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\BannerCreative;
 use App\Models\MediaAsset;
@@ -12,12 +13,12 @@ use Illuminate\Support\Facades\Storage;
 
 class GoogleVertexBannerGenerator implements BannerGenerator
 {
-    public function __construct(private GoogleVertexAIClient $client, private BannerImageInspector $inspector) {}
+    public function __construct(private GoogleVertexAIClient $client, private BannerImageInspector $inspector, private ProviderCostCalculator $costs) {}
 
     /**
      * Generates the background, then rejects and regenerates any image with readable third-party
-     * text or marks (a real book cover on the e-reader, a magazine spine). Every attempt's tokens
-     * count toward the banner's cost.
+     * text or marks (a real book cover on the e-reader, a magazine spine). Every round's image tokens
+     * are kept, and inspections are priced at the inspector model's own rates.
      */
     public function generate(BannerCreative $creative, Collection $productImages): BannerGenerationResult
     {
@@ -25,15 +26,26 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         $product = (string) ($creative->campaignPack?->product?->name ?? '');
         $brand = (string) ($creative->campaignPack?->product?->brand?->name ?? '');
         $usage = [0, 0, 0];
+        $inspectionCost = 0.0;
         $marks = [];
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
-            $result = $this->generateOnce($creative, $productImages);
-            $usage = [$usage[0] + $result->inputTokens, $usage[1] + $result->outputTextTokens, $usage[2] + $result->outputImageTokens];
-            if (! config('campaigns.banners.inspect_images')) {
-                return $result;
+            try {
+                $result = $this->generateOnce($creative, $productImages);
+                $usage = [$usage[0] + $result->inputTokens, $usage[1] + $result->outputTextTokens, $usage[2] + $result->outputImageTokens];
+                if (! config('campaigns.banners.inspect_images')) {
+                    return $result;
+                }
+                $inspection = $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand);
+            } catch (VertexAIResponseException $exception) {
+                // Images already generated in this attempt were paid for, even when a later call fails.
+                $spent = $this->spent($usage, $inspectionCost);
+                if ($spent > 0) {
+                    throw new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), $spent);
+                }
+
+                throw $exception;
             }
-            $inspection = $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand);
-            $usage = [$usage[0] + $inspection['input_tokens'], $usage[1] + $inspection['output_tokens'], $usage[2]];
+            $inspectionCost += $this->costs->calculate((string) config('campaigns.google.model'), $inspection['input_tokens'], 0, $inspection['output_tokens']);
             $marks = $inspection['marks'];
             if ($marks === []) {
                 return new BannerGenerationResult(
@@ -46,11 +58,17 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                     outputImageTokens: $usage[2],
                     providerRequestId: $result->providerRequestId,
                     providerLatencyMs: $result->providerLatencyMs,
+                    additionalCost: round($inspectionCost, 6),
                 );
             }
         }
 
-        throw new VertexAIResponseException('banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300), true);
+        throw new BannerAttemptFailed('banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300), $this->spent($usage, $inspectionCost));
+    }
+
+    private function spent(array $usage, float $inspectionCost): float
+    {
+        return round($this->costs->calculateBanner($usage[0], $usage[1], $usage[2]) + $inspectionCost, 6);
     }
 
     private function generateOnce(BannerCreative $creative, Collection $productImages): BannerGenerationResult

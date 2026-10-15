@@ -239,14 +239,19 @@ class BannerIntegrityTest extends TestCase
         $content = [
             'product_truth' => ['name' => 'Kindle Stand'],
             'ranked_angles' => [['title' => 'The Gift of Reading (Diwali Focus)']],
-            'creative_routes' => [['platform_assets' => ['meta_ads' => ['headlines' => ['A home for Kindle & Kobo', 'Keep your next chapter in view [Habit]']]]]],
+            'creative_routes' => [['platform_assets' => ['meta_ads' => ['headlines' => ['A home for Kindle & Kobo', 'Free shipping (orders over ₹499)', 'Keep your next chapter in view']]]]],
         ];
         $selector = app(BannerCopySelector::class);
         $headlines = array_map(fn (int $sequence) => $selector->select(new CampaignPackVersion(['content' => $content]), $sequence)['headline'], range(1, 3));
+        // Approved copy with a bracketed qualifier is skipped, never shortened into a broader claim.
         $this->assertSame(['A home for Kindle & Kobo', 'Keep your next chapter in view', 'A home for Kindle & Kobo'], $headlines);
 
         unset($content['creative_routes']);
         $this->assertSame('The Gift of Reading', $selector->select(new CampaignPackVersion(['content' => $content]), 1)['headline']);
+
+        // A title that is nothing but a label falls through to the product name, never an empty headline.
+        $content['ranked_angles'] = [['title' => '(Diwali Focus)']];
+        $this->assertSame('Kindle Stand', $selector->select(new CampaignPackVersion(['content' => $content]), 1)['headline']);
     }
 
     public function test_the_wordmark_scrim_darkens_more_over_a_bright_background(): void
@@ -266,6 +271,16 @@ class BannerIntegrityTest extends TestCase
         // White text over at most this grey keeps a contrast ratio above 4.5:1.
         $this->assertLessThanOrEqual(110, $behindWordmark['bright']);
         $this->assertLessThan(40, $behindWordmark['dark']);
+
+        // Mostly dark behind the wordmark but white right under one end: the bright patch still decides.
+        $background = imagecreatetruecolor(1080, 1350);
+        imagefill($background, 0, 0, imagecolorallocate($background, 30, 30, 30));
+        imagefilledrectangle($background, 900, 1240, 1079, 1349, imagecolorallocate($background, 255, 255, 255));
+        ob_start();
+        imagepng($background);
+        $bytes = ob_get_clean();
+        $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, new BannerCreative(['headline' => 'A stand', 'cta' => 'Shop now', 'layout' => 'hero_top'])));
+        $this->assertLessThanOrEqual(110, (imagecolorat($image, 905, 1262) >> 16) & 255);
     }
 
     public function test_the_readability_gradient_has_no_scan_lines_and_the_bottom_wordmark_sits_on_the_panel(): void
