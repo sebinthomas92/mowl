@@ -251,29 +251,46 @@ class CampaignWorkspace extends Component
     }
 
     /**
-     * The one-click QA fix: takes an unsupported term out of one line and saves the result as a new
-     * draft pack version. Only a term the checks still flag on the latest version can be removed,
-     * and removing words never adds a claim.
+     * The one-click QA fix: takes an unsupported term out of one line. The line is changed where
+     * people edit it, on its output's draft (a revision is started for an output with requested
+     * changes); text outside any output gets a new draft pack version. Only a term the checks still
+     * flag can be removed, and removing words never adds a claim.
      */
-    public function removeUnsupportedWording(string $path, string $term): void
+    public function removeUnsupportedWording(string $path, string $term, ContentLibrary $library): void
     {
         abort_unless($this->membership()?->canCreate(), 403);
         $pack = $this->workspacePack();
+        abort_if($pack->generationJobs()->whereIn('status', ['queued', 'processing', 'retrying'])->exists(), 422);
+        $latest = $pack->versions()->orderByDesc('version')->firstOrFail();
+        abort_if($latest->review_status === 'approved', 422);
+        $content = ContentLibrary::available()
+            ? $library->current($pack)
+            : app(CampaignPackContentNormalizer::class)->normalize($latest->content ?? [], $pack->product, $pack->sourceSnapshot);
+        $flagged = collect(app(CampaignPackSafetyValidator::class)->issues($content, $latest->evidence ?? [], $latest->compliance_flags ?? [], $pack->sourceSnapshot))
+            ->contains(fn (array $issue) => ($issue['path'] ?? null) === $path && ($issue['term'] ?? null) === $term);
+        abort_unless($flagged, 422);
+        $text = data_get($content, $path);
+        $fixed = is_string($text) ? CampaignPackSafetyValidator::withoutTerm($text, $term) : null;
+        abort_unless($fixed !== null, 422);
 
-        $version = DB::transaction(function () use ($pack, $path, $term): CampaignPackVersion {
+        $location = ContentLibrary::available() ? $library->locate($content, $path) : null;
+        $item = $location ? $pack->contentItems()->where('section', $location['section'])->with('latestVersion')->first() : null;
+        if ($item?->latestVersion) {
+            abort_if($item->latestVersion->status === 'review', 422, 'This output is in review. Request changes first, then fix it.');
+            $draft = $item->latestVersion->status === 'draft' ? $item->latestVersion : $library->revise($item, auth()->user());
+            $body = $draft->body;
+            abort_unless(data_get($body, $location['body_path']) === $text, 422);
+            data_set($body, $location['body_path'], $fixed);
+            $draft->update(['body' => $body]);
+            $this->audit('content_wording_removed', $draft, null, ['path' => $path, 'term' => $term]);
+
+            return;
+        }
+
+        $version = DB::transaction(function () use ($pack, $latest, $content, $path, $fixed, $text, $term): CampaignPackVersion {
             $lockedPack = CampaignPack::query()->lockForUpdate()->findOrFail($pack->id);
-            abort_if($lockedPack->generationJobs()->whereIn('status', ['queued', 'processing', 'retrying'])->exists(), 422);
-            $latest = $lockedPack->versions()->orderByDesc('version')->firstOrFail();
-            abort_if($latest->review_status === 'approved', 422);
-            $content = app(CampaignPackContentNormalizer::class)->normalize($latest->content ?? [], $pack->product, $pack->sourceSnapshot);
-            $flagged = collect(app(CampaignPackSafetyValidator::class)->issues($content, $latest->evidence ?? [], $latest->compliance_flags ?? [], $pack->sourceSnapshot))
-                ->contains(fn (array $issue) => ($issue['path'] ?? null) === $path && ($issue['term'] ?? null) === $term);
-            abort_unless($flagged, 422);
-            $text = data_get($content, $path);
-            $fixed = is_string($text) ? CampaignPackSafetyValidator::withoutTerm($text, $term) : null;
-            abort_unless($fixed !== null, 422);
+            abort_unless($lockedPack->versions()->max('version') === $latest->version, 409);
             data_set($content, $path, $fixed);
-
             $version = $lockedPack->versions()->create([
                 'version' => $latest->version + 1, 'content' => $content, 'evidence' => $latest->evidence,
                 'compliance_flags' => $latest->compliance_flags, 'generator' => 'qa_fix', 'review_status' => 'draft',
@@ -286,7 +303,7 @@ class CampaignWorkspace extends Component
 
         $this->selectedVersion = null;
         $this->audit('campaign_pack_wording_removed', $version, null, ['path' => $path, 'term' => $term]);
-        app(ContentLibrary::class)->syncPack($pack->fresh());
+        $library->syncPack($pack->fresh());
     }
 
     public function selectVersion(int $version): void
@@ -314,7 +331,12 @@ class CampaignWorkspace extends Component
         $this->ensureReviewer();
         $version = $this->selectedPackVersion();
         abort_unless(in_array($version->review_status, $this->decidableStatuses()), 422);
-        app(CampaignPackSafetyValidator::class)->assertApprovable($version, $version->campaignPack->sourceSnapshot);
+        $pack = $version->campaignPack;
+        if (ContentLibrary::available() && $version->version === $pack->versions()->max('version') && $pack->contentItems()->exists()
+            && app(ContentLibrary::class)->current($pack) != app(CampaignPackContentNormalizer::class)->normalize($version->content ?? [], $pack->product, $pack->sourceSnapshot)) {
+            throw ValidationException::withMessages(['reviewNote' => 'Some outputs were edited after this version was generated. Approve each output in the Review queue so the edits are kept.']);
+        }
+        app(CampaignPackSafetyValidator::class)->assertApprovable($version, $pack->sourceSnapshot);
         $version->update([
             'review_status' => 'approved',
             'reviewed_by_user_id' => auth()->id(),
@@ -606,9 +628,12 @@ class CampaignWorkspace extends Component
         $displayContent = $selectedPackVersion
             ? app(CampaignPackContentNormalizer::class)->normalize($selectedPackVersion->content ?? [], $pack->product, $pack->sourceSnapshot)
             : [];
+        $isLatestVersion = $selectedPackVersion && $selectedPackVersion->version === $pack->versions->max('version');
+        // The latest version is checked as its outputs read now, so edits saved on an output count.
+        $qaContent = $isLatestVersion && ContentLibrary::available() ? app(ContentLibrary::class)->current($pack) : $displayContent;
         $qaIssues = $selectedPackVersion
             ? app(CampaignPackSafetyValidator::class)->issues(
-                $displayContent,
+                $qaContent,
                 $selectedPackVersion->evidence ?? [],
                 $selectedPackVersion->compliance_flags ?? [],
                 $pack->sourceSnapshot,
@@ -616,15 +641,14 @@ class CampaignWorkspace extends Component
             : [];
 
         $contentItems = $pack && ContentLibrary::available() ? $pack->contentItems()->with('latestVersion')->orderBy('id')->get() : null;
-        $isLatestVersion = $selectedPackVersion && $selectedPackVersion->version === $pack->versions->max('version');
         $canFix = $isLatestVersion && $selectedPackVersion->review_status !== 'approved'
             && ! in_array($pack->latestGenerationJob?->status, ['queued', 'processing', 'retrying'], true)
             && $this->membership()?->canCreate();
-        $qaIssues = array_map(function (array $issue) use ($pack, $displayContent, $contentItems, $canFix): array {
+        $qaIssues = array_map(function (array $issue) use ($pack, $qaContent, $contentItems, $canFix): array {
             if (! isset($issue['path'])) {
                 return $issue;
             }
-            $location = app(ContentLibrary::class)->locate($displayContent, $issue['path']);
+            $location = app(ContentLibrary::class)->locate($qaContent, $issue['path']);
             $item = $location ? $contentItems?->firstWhere('section', $location['section']) : null;
             $parts = explode('.', $issue['path']);
             if ($item) {

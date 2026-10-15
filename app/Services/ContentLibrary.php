@@ -96,7 +96,7 @@ class ContentLibrary
      * is not part of any item (product truth). Field keys match the editor's "__"-joined keys; a
      * line in a list of strings is edited as the whole list.
      *
-     * @return array{section: string, field: string}|null
+     * @return array{section: string, field: string, body_path: string}|null
      */
     public function locate(array $content, string $path): ?array
     {
@@ -111,6 +111,7 @@ class ContentLibrary
         if (! $section || ! array_key_exists($section, $this->sections($content))) {
             return null;
         }
+        $bodyPath = implode('.', $rest);
         if ($rest !== [] && is_numeric(end($rest))) {
             $parent = data_get($content, implode('.', array_slice($parts, 0, -1)));
             if (is_array($parent) && array_is_list($parent) && collect($parent)->every(fn ($entry) => is_string($entry))) {
@@ -118,7 +119,7 @@ class ContentLibrary
             }
         }
 
-        return ['section' => $section, 'field' => implode('__', $rest)];
+        return ['section' => $section, 'field' => implode('__', $rest), 'body_path' => $bodyPath];
     }
 
     /** Writes an item body back into pack content. */
@@ -391,8 +392,12 @@ class ContentLibrary
         if ($item->isPackSection()) {
             $pack = $item->campaignPack;
             $latest = $pack->versions()->orderByDesc('version')->first();
-            $content = $this->apply($this->assemble($pack), $item->section, $version->body);
-            $issues = $latest ? app(CampaignPackSafetyValidator::class)->issues($content, $latest->evidence ?? [], $latest->compliance_flags ?? [], $pack->sourceSnapshot) : [];
+            // Checked against every output's current text, so an edit saved on another output
+            // counts; wording issues in another output block that output, not this one.
+            $content = $this->apply($this->current($pack), $item->section, $version->body);
+            $issues = $latest ? collect(app(CampaignPackSafetyValidator::class)->issues($content, $latest->evidence ?? [], $latest->compliance_flags ?? [], $pack->sourceSnapshot))
+                ->reject(fn (array $issue) => isset($issue['path']) && ($section = $this->locate($content, $issue['path'])['section'] ?? null) && $section !== $item->section)
+                ->values()->all() : [];
             $checks[] = ['ok' => $issues === [], 'blocking' => true, 'label' => $issues === [] ? 'Claims, timing and source checks pass' : $issues[0]['message']];
         }
 
@@ -514,6 +519,20 @@ class ContentLibrary
             $approved = $item->versions()->where('status', 'approved')->orderByDesc('version')->first();
             if ($approved) {
                 $content = $this->apply($content, $item->section, $approved->body);
+            }
+        }
+
+        return $content;
+    }
+
+    /** Pack content with every section replaced by its item's latest version, edited drafts included. */
+    public function current(CampaignPack $pack): array
+    {
+        $latest = $pack->versions()->orderByDesc('version')->first();
+        $content = $latest ? app(CampaignPackContentNormalizer::class)->normalize($latest->content ?? [], $pack->product, $pack->sourceSnapshot) : [];
+        foreach ($pack->contentItems()->with('latestVersion')->get()->filter->isPackSection() as $item) {
+            if ($item->latestVersion && array_key_exists($item->section, $this->sections($content))) {
+                $content = $this->apply($content, $item->section, $item->latestVersion->body);
             }
         }
 

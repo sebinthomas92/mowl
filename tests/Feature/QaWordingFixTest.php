@@ -8,8 +8,10 @@ use App\Models\CampaignPack;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\CampaignPackSafetyValidator;
+use App\Services\ContentLibrary;
 use App\Services\MockCampaignPackGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -33,15 +35,63 @@ class QaWordingFixTest extends TestCase
 
         $component->call('removeUnsupportedWording', self::PATH, 'guaranteed');
 
+        $this->assertSame(1, $pack->versions()->count());
+        $item = $pack->contentItems()->where('section', 'creative_routes.0')->first();
+        $this->assertSame('7-day returns', $item->latestVersion->body['platform_assets']['whatsapp_status']['description_lines'][1]);
+        $this->assertSame('draft', $item->latestVersion->status);
+        $this->assertNull(collect($component->viewData('qaIssues'))->firstWhere('path', self::PATH));
+    }
+
+    public function test_an_edited_output_clears_the_pack_check_and_unblocks_other_outputs(): void
+    {
+        [$owner, $pack] = $this->fixture();
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        Livewire::actingAs($owner)->test(CampaignWorkspace::class, ['pack' => $pack]);
+        $library = app(ContentLibrary::class);
+        $positioning = $pack->contentItems()->where('section', 'positioning')->first();
+
+        $route = $pack->contentItems()->where('section', 'creative_routes.0')->first();
+        $this->assertStringContainsString('7-day returns guaranteed', collect($library->checks($route->latestVersion))->firstWhere('ok', false)['label']);
+
+        $library->approve($positioning->latestVersion, $owner);
+        $this->assertSame('approved', $positioning->fresh()->status);
+
+        $library->saveDraft($route->latestVersion, ['platform_assets.whatsapp_status.description_lines' => "Explore the product page for verified details.\n7-day returns"]);
+        $library->approve($route->fresh()->latestVersion, $owner);
+        $this->assertSame('approved', $route->fresh()->status);
+
+        $component = Livewire::actingAs($owner)->test(CampaignWorkspace::class, ['pack' => $pack]);
+        $this->assertSame([], collect($component->viewData('qaIssues'))->where('type', 'claim')->all());
+        $component->call('approveVersion')->assertHasErrors(['reviewNote']);
+        $this->assertSame('draft', $pack->versions()->first()->review_status);
+    }
+
+    public function test_an_edited_output_that_adds_a_claim_still_blocks_its_own_approval(): void
+    {
+        [$owner, $pack] = $this->fixture();
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        Livewire::actingAs($owner)->test(CampaignWorkspace::class, ['pack' => $pack]);
+        $library = app(ContentLibrary::class);
+        $positioning = $pack->contentItems()->where('section', 'positioning')->first();
+        $field = collect($positioning->latestVersion->body)->filter(fn ($value) => is_string($value))->keys()->first();
+        $library->saveDraft($positioning->latestVersion, [$field => 'Clinically proven and waterproof']);
+
+        $this->expectException(ValidationException::class);
+        $library->approve($positioning->fresh()->latestVersion, $owner);
+    }
+
+    public function test_text_outside_any_output_is_fixed_in_a_new_pack_version(): void
+    {
+        [$owner, $pack] = $this->fixture(fn (array $content) => data_set($content, 'product_truth.supported_benefits', ['Guaranteed sturdy build']) ? $content : $content);
+        $path = 'product_truth.supported_benefits.0';
+
+        Livewire::actingAs($owner)->test(CampaignWorkspace::class, ['pack' => $pack])
+            ->call('removeUnsupportedWording', $path, 'guaranteed');
+
         $latest = $pack->fresh()->versions()->orderByDesc('version')->first();
         $this->assertSame(2, $latest->version);
         $this->assertSame('qa_fix', $latest->generator);
-        $this->assertSame('draft', $latest->review_status);
-        $this->assertSame('7-day returns', data_get($latest->content, self::PATH));
-        $this->assertSame(2, $pack->fresh()->current_version);
-        $this->assertNull(collect($component->viewData('qaIssues'))->firstWhere('path', self::PATH));
-        $item = $pack->contentItems()->where('section', 'creative_routes.0')->first();
-        $this->assertSame('7-day returns', $item->latestVersion->body['platform_assets']['whatsapp_status']['description_lines'][1]);
+        $this->assertSame('Sturdy build', data_get($latest->content, $path));
     }
 
     public function test_only_a_flagged_term_on_the_latest_version_can_be_removed(): void
@@ -85,7 +135,7 @@ class QaWordingFixTest extends TestCase
         $this->assertSame('Shop the stand', CampaignPackSafetyValidator::withoutTerm('Shop the cruelty‑free stand', 'cruelty-free'));
     }
 
-    private function fixture(): array
+    private function fixture(?\Closure $change = null): array
     {
         $owner = User::factory()->create();
         $workspace = Workspace::create(['name' => 'QA Agency']);
@@ -100,6 +150,9 @@ class QaWordingFixTest extends TestCase
         $result = app(MockCampaignPackGenerator::class)->generate($product, $source, ['description' => $product->summary]);
         $content = $result->content;
         $content['creative_routes'][0]['platform_assets']['whatsapp_status']['description_lines'][] = '7-day returns guaranteed';
+        if ($change) {
+            $content = $change($content);
+        }
         $pack->versions()->create(['version' => 1, 'generator' => 'mock', 'content' => $content, 'evidence' => $result->evidence, 'compliance_flags' => $result->complianceFlags]);
 
         return [$owner, $pack, $workspace];
