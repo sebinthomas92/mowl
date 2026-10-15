@@ -141,7 +141,29 @@
                 <header class="pack-toolbar">
                     <div class="breadcrumbs"><span>{{ $pack->product->brand->name }}</span><b>›</b><span>{{ $pack->product->name }}</span><b>›</b><strong>Launch pack v{{ $version->version }}</strong></div>
                     <div class="toolbar-actions">
-                        <span @class(['verified-chip', 'qa-blocked-chip' => $qaIssues])>{{ $qaIssues ? '✕ QA blocked' : '✓ Claims and timing checked' }}</span>
+                        @if($qaIssues)
+                            <details class="qa-chip">
+                                <summary class="verified-chip qa-blocked-chip">✕ {{ count($qaIssues) }} QA {{ \Illuminate\Support\Str::plural('issue', count($qaIssues)) }} block approval</summary>
+                                <div class="qa-chip-panel" role="region" aria-label="Why approval is blocked">
+                                    <ul>
+                                        @foreach($qaIssues as $issue)
+                                            <li>
+                                                <span>{{ $issue['message'] }}</span>
+                                                @if($issue['type'] === 'source')
+                                                    <small>Approve the product source in the <a href="{{ route('review.index') }}" wire:navigate>Review queue</a>.</small>
+                                                @elseif($issue['type'] === 'claim')
+                                                    <small>Edit the output that uses this wording, or regenerate that section.</small>
+                                                @else
+                                                    <small>Regenerate the section with this problem.</small>
+                                                @endif
+                                            </li>
+                                        @endforeach
+                                    </ul>
+                                </div>
+                            </details>
+                        @else
+                            <span class="verified-chip">✓ Claims and timing checked</span>
+                        @endif
                         <button type="button" class="secondary-button" wire:click="startAnother">＋ New pack</button>
                         <button type="button" class="copy-pack" @click="navigator.clipboard.writeText(@js(json_encode($content, JSON_PRETTY_PRINT))); copied = 'pack'; setTimeout(() => copied = '', 1600)"><span x-text="copied === 'pack' ? '✓ Copied' : '▣ Copy pack'"></span></button>
                     </div>

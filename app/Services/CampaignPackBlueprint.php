@@ -17,7 +17,7 @@ Voiceover segments must use exact non-overlapping start_seconds and end_seconds,
 
 Every factual statement must have an evidence record classified as directly_supported, supported_paraphrased, too_specific_for_evidence, unsupported, or contradicted_by_source. Every verified fact must point to a safe evidence id. Unsafe claims must remain visible in evidence and compliance_flags but must not be presented as approved copy. Prefer value framing over invented discounts.
 
-Also return a marketing_hub handoff containing product details, key messaging, Meta Ads, Google Ads (Search, Performance Max, and Display), email and SMS, and organic social. Google Ads fields must respect common field-length constraints, use the source product URL as final_url, and never invent sitelinks or promotions.
+Also return a marketing_hub handoff containing product details, key messaging, Meta Ads, Google Ads (Search, Performance Max, and Display), email and SMS, and organic social. Google Ads fields must respect common field-length constraints, use the source product URL as final_url, and never invent sitelinks or promotions. Every CTA must suit buying a physical product online (Shop Now, Buy Now, Order Now, Learn More, or Get Offer only when the source states an offer); never use service or booking CTAs such as Book Now or Sign Up. Write "guaranteed", "warranty" or similar assurance words only when the source uses them.
 PROMPT;
     }
 

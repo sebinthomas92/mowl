@@ -141,3 +141,5 @@ button { cursor:pointer; }
     .campaign-workspace-shell .pack-layout{grid-template-columns:180px minmax(0,1fr)}
     .campaign-workspace-shell .pack-content{padding-left:24px}
 }
+
+.qa-chip{position:relative}.qa-chip>summary{list-style:none;cursor:pointer}.qa-chip>summary::-webkit-details-marker{display:none}.qa-chip-panel{position:absolute;right:0;top:calc(100% + 6px);z-index:30;width:min(380px,calc(100vw - 32px));padding:12px 14px;border:1px solid var(--line-strong);background:var(--surface);border-radius:6px;box-shadow:0 10px 30px rgba(0,0,0,.12)}.qa-chip-panel ul{margin:0;padding:0;list-style:none;display:grid;gap:10px}.qa-chip-panel li{display:grid;gap:3px;font-size:12px;line-height:1.45;color:var(--ink)}.qa-chip-panel small{color:var(--muted);font-size:11px}.qa-chip-panel a{color:var(--link)}

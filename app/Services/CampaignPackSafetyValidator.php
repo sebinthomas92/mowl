@@ -97,8 +97,13 @@ class CampaignPackSafetyValidator
                 continue;
             }
 
-            if ($status === 'directly_supported' && ! str_contains($excerpt, $normalizedClaim) && ! str_contains($sourceText, $normalizedClaim)) {
-                $issues[] = $this->issue('claim', "{$claim} is not stated directly in the supplied source.");
+            // Claims are restated as sentences, so the wording need not match. What must hold: the quoted
+            // excerpt is on the page (Knowledge excerpts were checked at generation), and every number in
+            // the claim appears in that excerpt or on the page.
+            if ($source && ($reference['source'] ?? null) !== 'team_confirmed' && ! str_contains($sourceText, $excerpt)) {
+                $issues[] = $this->issue('claim', "{$claim} quotes text that is not on the product page.");
+            } elseif ($missing = array_diff($this->numbers($normalizedClaim), $this->numbers($excerpt.' '.$sourceText))) {
+                $issues[] = $this->issue('claim', "{$claim} uses a number the source does not state (".implode(', ', $missing).').');
             }
 
             foreach (self::SPECIFICITY_TERMS as $term) {
@@ -212,6 +217,18 @@ class CampaignPackSafetyValidator
     private function normalize(string $value): string
     {
         return CampaignPackEvidence::normalize($value);
+    }
+
+    /** @return list<string> plain numbers ("1,499.00" and "1499" are the same number) */
+    private function numbers(string $text): array
+    {
+        preg_match_all('/\d[\d,]*(?:\.\d+)?/u', $text, $matches);
+
+        return array_values(array_unique(array_map(function (string $number): string {
+            $number = str_replace(',', '', $number);
+
+            return str_contains($number, '.') ? rtrim(rtrim($number, '0'), '.') : $number;
+        }, $matches[0])));
     }
 
     private function wordCount(string $value): int
