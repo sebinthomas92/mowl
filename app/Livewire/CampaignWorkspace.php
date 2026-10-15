@@ -101,6 +101,8 @@ class CampaignWorkspace extends Component
         $this->brandId = $pack->product->brand_id;
         $this->bannerPrimaryColor = $pack->product->brand->primary_color ?: '#F4B942';
         $this->step = 4;
+        // Packs made before content items existed get their items on first open.
+        app(ContentLibrary::class)->syncPack($pack);
     }
 
     /** Prefills the brief from confirmed Knowledge so nothing is retyped. */
