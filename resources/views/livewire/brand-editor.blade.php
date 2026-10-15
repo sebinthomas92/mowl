@@ -54,23 +54,26 @@
 
                     <section class="card col">
                         <div class="row"><span class="eyebrow">Palette</span><span class="sp"></span><span class="muted xs">The first colour is the primary, used on banner buttons.</span></div>
-                        <ul class="palette-list" role="list">
-                            @foreach($palette as $index => $color)
-                                <li class="palette-row" wire:key="color-{{ $index }}">
-                                    <label class="sr-only" for="b-color-{{ $index }}">Colour {{ $index + 1 }} picker</label>
-                                    <input id="b-color-{{ $index }}" class="color-pick" type="color" wire:model.live="palette.{{ $index }}" value="{{ strtolower(preg_match('/^#[0-9A-Fa-f]{6}$/', $color) ? $color : '#ffffff') }}">
-                                    <label class="sr-only" for="b-hex-{{ $index }}">Colour {{ $index + 1 }} hex value</label>
-                                    <input id="b-hex-{{ $index }}" class="input hex" type="text" wire:model.live.debounce.400ms="palette.{{ $index }}" maxlength="7" spellcheck="false" @error('palette.'.$index) aria-invalid="true" @enderror>
-                                    @if($index === 0)<span class="tag">Primary</span>@endif
-                                    <span class="sp"></span>
-                                    @if(count($palette) > 1 || $index > 0)
-                                        <button type="button" class="iconbtn flat" wire:click="removeColor({{ $index }})" aria-label="Remove colour {{ $index + 1 }}"><i class="ti ti-x" aria-hidden="true"></i></button>
-                                    @endif
-                                    @error('palette.'.$index)<span class="err palette-err" role="alert">{{ $message }}</span>@enderror
-                                </li>
-                            @endforeach
-                        </ul>
-                        @if(count($palette) < \App\Livewire\BrandEditor::MAX_COLORS && $profileAvailable)
+                        @if($colors)
+                            <ul class="palette-list" role="list">
+                                @foreach($colors as $id => $color)
+                                    <li class="palette-row" wire:key="color-{{ $id }}">
+                                        <label class="sr-only" for="b-color-{{ $id }}">Colour {{ $loop->iteration }} picker</label>
+                                        <input id="b-color-{{ $id }}" class="color-pick" type="color" wire:model.live.debounce.250ms="colors.{{ $id }}" value="{{ strtolower(is_string($color) && preg_match('/^#[0-9A-Fa-f]{6}$/', $color) ? $color : '#ffffff') }}">
+                                        <label class="sr-only" for="b-hex-{{ $id }}">Colour {{ $loop->iteration }} hex value</label>
+                                        <input id="b-hex-{{ $id }}" class="input hex" type="text" wire:model.live.debounce.400ms="colors.{{ $id }}" maxlength="7" spellcheck="false" @error('colors.'.$id) aria-invalid="true" @enderror>
+                                        @if($loop->first)<span class="tag">Primary</span>@endif
+                                        <span class="sp"></span>
+                                        <button type="button" class="iconbtn flat" wire:click="removeColor('{{ $id }}')" wire:loading.attr="disabled" wire:target="removeColor" aria-label="Remove colour {{ $loop->iteration }}"><i class="ti ti-x" aria-hidden="true"></i></button>
+                                        @error('colors.'.$id)<span class="err palette-err" role="alert">{{ $message }}</span>@enderror
+                                    </li>
+                                @endforeach
+                            </ul>
+                        @else
+                            <p class="muted small" role="status">No colours yet. Banners use the default accent until you add one.</p>
+                        @endif
+                        @error('colors')<span class="err" role="alert">{{ $message }}</span>@enderror
+                        @if(count($colors) < \App\Livewire\BrandEditor::MAX_COLORS && ($profileAvailable || ! $colors))
                             <button type="button" class="pill ghost sm self-start" wire:click="addColor"><i class="ti ti-plus" aria-hidden="true"></i> Add colour</button>
                         @endif
                     </section>
