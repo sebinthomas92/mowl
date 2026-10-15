@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 /** Queues a new version of one pack section. The first three in a pack's first day are included. */
 class SectionRegenerator
 {
-    public const SECTIONS = ['positioning', 'ranked_angles', 'creative_routes', 'offers'];
+    public const SECTIONS = ['positioning', 'ranked_angles', 'creative_routes', 'offers', 'marketing_hub'];
 
     public const READY_STATUSES = ['draft', 'review', 'rejected', 'approved'];
 

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\BannerCreative;
 use App\Models\CampaignPackVersion;
 use App\Models\SourceSnapshot;
 use Illuminate\Validation\ValidationException;
@@ -255,6 +256,21 @@ class CampaignPackSafetyValidator
         }
 
         return array_values(array_unique($supported));
+    }
+
+    /**
+     * Unsupported prices in the text rendered into a banner's image, field by field.
+     *
+     * @return list<string>
+     */
+    public function bannerPrices(BannerCreative $creative): array
+    {
+        $supported = $this->supportedPrices($creative->campaignPack?->sourceSnapshot);
+
+        return array_values(array_unique(array_merge(
+            $this->unsupportedPrices((string) $creative->headline, $supported),
+            $this->unsupportedPrices((string) $creative->supporting_text, $supported),
+        )));
     }
 
     /**

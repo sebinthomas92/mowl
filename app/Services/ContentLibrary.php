@@ -374,6 +374,21 @@ class ContentLibrary
             $checks[] = ['ok' => false, 'blocking' => false, 'label' => 'Mentions a price, but Knowledge has no confirmed price'];
         }
 
+        // Every output, banners included, may only state prices the product page shows. A banner is
+        // checked on the text rendered into its image too, which editing the item body does not change.
+        if ($source = $item->campaignPack?->sourceSnapshot) {
+            $validator = app(CampaignPackSafetyValidator::class);
+            $supported = $validator->supportedPrices($source);
+            // Field by field, so a number ending one field never pairs with a currency starting the next.
+            $wrongPrices = collect($this->strings($version->body))
+                ->flatMap(fn (string $field) => $validator->unsupportedPrices($field, $supported))
+                ->merge($item->bannerCreative ? $validator->bannerPrices($item->bannerCreative) : [])
+                ->unique()->values()->all();
+            if ($wrongPrices) {
+                $checks[] = ['ok' => false, 'blocking' => true, 'label' => 'States a price the product page does not show ('.implode(', ', $wrongPrices).')'];
+            }
+        }
+
         if (ProductKnowledge::available()) {
             $knowledge = app(ProductKnowledge::class);
             $source = $item->campaignPack?->sourceSnapshot;
@@ -467,7 +482,9 @@ class ContentLibrary
         if ($item->banner_creative_id) {
             $creative = $item->bannerCreative;
 
-            return $creative ? [[$creative->headline, $creative->supporting_text, $creative->cta, $creative->direction]] : [];
+            // Mirrors the body the banner item is created with, size included, so an unedited banner is not an edit.
+            return $creative ? [[$creative->headline, $creative->supporting_text, $creative->cta, $creative->direction,
+                $creative->width && $creative->height ? "{$creative->width}×{$creative->height}" : '1080×1350']] : [];
         }
         $pack = $item->campaignPack;
         if (! $item->section || ! $pack) {

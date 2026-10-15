@@ -665,7 +665,20 @@ class CampaignWorkspace extends Component
             return $issue;
         }, $qaIssues);
 
+        // Banner text was picked from an earlier pack version, so it is price-checked on its own.
+        $bannerPriceIssues = [];
+        if ($pack && $bannerStudioAvailable) {
+            $validator = app(CampaignPackSafetyValidator::class);
+            foreach ($pack->bannerGenerationBatches->flatMap->creatives as $creative) {
+                $creative->setRelation('campaignPack', $pack);
+                if ($wrong = $validator->bannerPrices($creative)) {
+                    $bannerPriceIssues[$creative->id] = $wrong;
+                }
+            }
+        }
+
         return view('livewire.campaign-workspace', [
+            'bannerPriceIssues' => $bannerPriceIssues,
             'workspace' => $workspace,
             'products' => $pack ? collect() : $this->scopedProducts()
                 ->with(['brand', 'mediaAssets'])->orderBy('name')->get(),
