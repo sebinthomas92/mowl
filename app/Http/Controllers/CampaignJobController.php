@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\CampaignGenerationJob;
 use App\Services\CampaignJobRunner;
+use App\Support\GenerationDeadline;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Throwable;
@@ -26,7 +27,7 @@ class CampaignJobController extends Controller
 
         CampaignGenerationJob::query()
             ->where('status', 'processing')
-            ->where('updated_at', '<', now()->subMinutes(10))
+            ->where('updated_at', '<', now()->subMinutes(config('campaigns.stale_after_minutes')))
             ->update(['status' => 'retrying', 'phase' => 'retry_wait']);
 
         $generationJob = CampaignGenerationJob::query()
@@ -47,6 +48,8 @@ class CampaignJobController extends Controller
             return response()->json(['status' => $generationJob->status], 202);
         }
 
+        app(GenerationDeadline::class)->start(config('campaigns.request_budget_seconds'));
+
         try {
             $generationJob = $runner->run($generationJob);
 
@@ -59,6 +62,8 @@ class CampaignJobController extends Controller
                 'status' => $generationJob->status,
                 'retryable' => $generationJob->status === 'retrying',
             ], $generationJob->status === 'retrying' ? 503 : 422);
+        } finally {
+            app(GenerationDeadline::class)->clear();
         }
     }
 }

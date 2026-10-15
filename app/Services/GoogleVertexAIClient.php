@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\VertexAIResponseException;
+use App\Support\GenerationDeadline;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
@@ -19,7 +20,7 @@ class GoogleVertexAIClient
         try {
             $response = Http::withToken($this->tokens->fetchAuthToken()['access_token'])
                 ->acceptJson()
-                ->timeout(config('campaigns.google.timeout_seconds'))
+                ->timeout(app(GenerationDeadline::class)->timeout(config('campaigns.google.timeout_seconds')))
                 ->post($this->endpoint($model), $payload);
         } catch (ConnectionException $exception) {
             throw new VertexAIResponseException('vertex_connection_error', 'Vertex AI connection failed: '.$exception->getMessage(), true);

@@ -7,9 +7,11 @@ use App\Data\GenerationResult;
 use App\Exceptions\OpenAIResponseException;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
+use App\Support\GenerationDeadline;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use JsonException;
 use RuntimeException;
 
@@ -30,12 +32,16 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
 
         foreach ($this->models() as $model) {
             for ($attempt = 1; $attempt <= config('campaigns.openai.retry_attempts'); $attempt++) {
+                if (! app(GenerationDeadline::class)->allowsAnotherAttempt()) {
+                    throw new OpenAIResponseException('openai_time_budget', 'Generation stopped to stay inside the request time limit.'.($lastException ? ' Last error: '.$lastException->getMessage() : ''), true);
+                }
                 try {
                     [$response, $latency] = $this->send($apiKey, $model, $userContent);
 
                     return $this->resultFromResponse($response, $source, $page, $model, $latency);
                 } catch (OpenAIResponseException $exception) {
                     $lastException = $exception;
+                    Log::warning('OpenAI campaign-pack attempt failed.', ['model' => $model, 'attempt' => $attempt, 'code' => $exception->errorCode, 'message' => $exception->getMessage()]);
 
                     if (! $exception->retryable) {
                         throw $exception;
@@ -60,7 +66,7 @@ class OpenAIResponsesCampaignPackGenerator implements CampaignPackGenerator
         try {
             $response = Http::withToken($apiKey)
                 ->acceptJson()
-                ->timeout(config('campaigns.openai.timeout_seconds'))
+                ->timeout(app(GenerationDeadline::class)->timeout(config('campaigns.openai.timeout_seconds')))
                 ->post(rtrim(config('campaigns.openai.base_url'), '/').'/responses', $this->payload($model, $userContent));
         } catch (ConnectionException $exception) {
             throw new OpenAIResponseException('openai_connection_error', 'OpenAI connection failed: '.$exception->getMessage(), true);

@@ -7,7 +7,9 @@ use App\Data\GenerationResult;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
+use App\Support\GenerationDeadline;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Log;
 use JsonException;
 
 class GoogleVertexAICampaignPackGenerator implements CampaignPackGenerator
@@ -19,12 +21,16 @@ class GoogleVertexAICampaignPackGenerator implements CampaignPackGenerator
         $lastException = null;
 
         for ($attempt = 1; $attempt <= config('campaigns.google.retry_attempts'); $attempt++) {
+            if (! app(GenerationDeadline::class)->allowsAnotherAttempt()) {
+                throw new VertexAIResponseException('vertex_time_budget', 'Generation stopped to stay inside the request time limit.'.($lastException ? ' Last error: '.$lastException->getMessage() : ''), true);
+            }
             try {
                 [$response, $latency] = $this->vertex->generateContent($this->payload($product, $source, $page));
 
                 return $this->resultFromResponse($response, $source, $page, $latency);
             } catch (VertexAIResponseException $exception) {
                 $lastException = $exception;
+                Log::warning('Vertex AI campaign-pack attempt failed.', ['attempt' => $attempt, 'code' => $exception->errorCode, 'message' => $exception->getMessage()]);
                 if (! $exception->retryable || $attempt === config('campaigns.google.retry_attempts')) {
                     throw $exception;
                 }
