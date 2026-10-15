@@ -712,8 +712,8 @@ class ContentLibrary
     /** Whether the wording marks an amount as an old price, a threshold or a saving rather than the price. */
     private function isNotTheCurrentPrice(string $before, string $after): bool
     {
-        return preg_match('/\b(?:was|m\.?r\.?p\.?|down from|instead of|regular(?:ly)?|list price|original(?:ly)?|over|above|orders?|shipping|save|saving)[\s:]*$/iu', $before) === 1
-            || preg_match('/^[\s:]*(?:m\.?r\.?p|off)\b/iu', $after) === 1;
+        return preg_match('/\b(?:was|m\.?r\.?p\.?|down from|instead of|regular(?:ly)?|list price|original(?:ly)?|over|above|orders?|shipping|save|saving|exceed(?:s|ing)?|threshold(?: of)?|minimum(?: of)?)[\s:]*$/iu', $before) === 1
+            || preg_match('/^[\s:]*(?:m\.?r\.?p|off|threshold|minimum|and above|or more)\b/iu', $after) === 1;
     }
 
     private function number(string $value): string
