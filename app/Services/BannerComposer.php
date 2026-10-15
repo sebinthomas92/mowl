@@ -9,6 +9,8 @@ use RuntimeException;
 
 class BannerComposer
 {
+    private const CTA_WIDTH = 230;
+
     private string $font;
 
     public function __construct()
@@ -36,7 +38,9 @@ class BannerComposer
 
         $layout = $this->layout($creative->layout, $width, $height);
         $this->drawReadabilityLayer($canvas, $creative->layout, $width, $height);
-        $this->drawBrand($canvas, $brand, $layout['x'], $layout['brand_y'], isset($layout['brand_right']) ? 360 : $layout['max_width'], $layout['brand_right'] ?? null);
+        // The wordmark sits right-aligned on the CTA row of every layout, over the dark panel, never the photo.
+        $brandRight = $layout['brand_right'] ?? $layout['x'] + $layout['max_width'];
+        $this->drawBrand($canvas, $brand, $layout['x'], $layout['cta_y'] + 58, min(360, $brandRight - ($layout['x'] + self::CTA_WIDTH + 32)), $brandRight);
 
         $white = imagecolorallocate($canvas, 255, 255, 255);
         $muted = imagecolorallocate($canvas, 231, 235, 241);
@@ -80,22 +84,23 @@ class BannerComposer
     private function layout(string $layout, int $width, int $height): array
     {
         return match ($layout) {
-            'split_left' => ['x' => 80, 'brand_y' => 105, 'headline_y' => 330, 'cta_y' => 1135, 'max_width' => 475, 'headline_height' => 450, 'support_height' => 200],
-            // The wordmark sits on the dark panel, right-aligned on the CTA row, not over the photo.
-            'bottom_panel' => ['x' => 80, 'brand_y' => 1230 + 58, 'brand_right' => $width - 80, 'headline_y' => 960, 'cta_y' => 1230, 'max_width' => $width - 160, 'headline_height' => 220, 'support_height' => 110],
-            default => ['x' => 80, 'brand_y' => 95, 'headline_y' => 240, 'cta_y' => 555, 'max_width' => 520, 'headline_height' => 300, 'support_height' => 130],
+            'split_left' => ['x' => 80, 'headline_y' => 330, 'cta_y' => 1135, 'max_width' => 475, 'headline_height' => 450, 'support_height' => 200],
+            'bottom_panel' => ['x' => 80, 'brand_right' => $width - 80, 'headline_y' => 960, 'cta_y' => 1230, 'max_width' => $width - 160, 'headline_height' => 220, 'support_height' => 110],
+            default => ['x' => 80, 'headline_y' => 240, 'cta_y' => 555, 'max_width' => 520, 'headline_height' => 300, 'support_height' => 130],
         };
     }
 
     /**
      * A smooth dark gradient behind the text. Drawn one pixel row or column at a time: GD rectangle
-     * bounds are inclusive, so wider strips overlap by a pixel and show as dark scan lines.
+     * bounds are inclusive, so wider strips overlap by a pixel and show as dark scan lines. Side
+     * panels stay dark across the whole text column and fade out after it, so no hard edge cuts the
+     * photo and no text runs off the panel.
      */
     private function drawReadabilityLayer(\GdImage $canvas, string $layout, int $width, int $height): void
     {
         if ($layout === 'split_left') {
-            for ($x = 0; $x < 650; $x++) {
-                $alpha = min(127, 18 + (int) (($x / 650) * 109));
+            for ($x = 0; $x < 900; $x++) {
+                $alpha = 24 + (int) round($this->fade($x, 560, 900) * 103);
                 imageline($canvas, $x, 0, $x, $height - 1, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
             }
         } elseif ($layout === 'bottom_panel') {
@@ -104,11 +109,26 @@ class BannerComposer
                 imageline($canvas, 0, $y, $width - 1, $y, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
             }
         } else {
-            for ($y = 0; $y < 720; $y++) {
-                $alpha = min(127, 20 + (int) (($y / 720) * 107));
-                imageline($canvas, 0, $y, 689, $y, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
+            // Dark over the text block down to the CTA row, fading below it and right of the text column.
+            for ($y = 0; $y < 840; $y++) {
+                $rowAlpha = 20 + $this->fade($y, 420, 840) * 107;
+                imageline($canvas, 0, $y, 619, $y, imagecolorallocatealpha($canvas, 5, 11, 20, (int) round($rowAlpha)));
+                for ($x = 620; $x < 980; $x++) {
+                    $alpha = (int) round($rowAlpha + (127 - $rowAlpha) * $this->fade($x, 620, 980));
+                    if ($alpha < 127) {
+                        imagesetpixel($canvas, $x, $y, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
+                    }
+                }
             }
         }
+    }
+
+    /** 0 before $from, 1 after $to, eased between. */
+    private function fade(int $value, int $from, int $to): float
+    {
+        $t = max(0, min(1, ($value - $from) / ($to - $from)));
+
+        return $t * $t * (3 - 2 * $t);
     }
 
     /** Draws the logo or name at $x, or ending at $right when given. */
@@ -155,17 +175,33 @@ class BannerComposer
         $foreground = (($red * 299) + ($green * 587) + ($blue * 114)) / 1000 > 150
             ? imagecolorallocate($canvas, 12, 19, 29)
             : imagecolorallocate($canvas, 255, 255, 255);
-        imagefilledrectangle($canvas, $x, $y, $x + 230, $y + 82, $background);
+        imagefilledrectangle($canvas, $x, $y, $x + self::CTA_WIDTH, $y + 82, $background);
         imagettftext($canvas, 27, 0, $x + 32, $y + 53, $foreground, $this->font, $cta);
     }
 
     private function fitText(string $text, int $maxWidth, int $startSize, int $minSize, int $maxLines, int $maxHeight): array
     {
+        // Prefer a size at which every word fits whole; a token too wide even at 14px (a URL, a SKU)
+        // falls back to the largest size whose wrapped lines fit, as before.
+        foreach ([true, false] as $keepWordsWhole) {
+            if ($fit = $this->fitTextAt($text, $maxWidth, $startSize, $minSize, $maxLines, $maxHeight, $keepWordsWhole)) {
+                return $fit;
+            }
+        }
+
+        $lines = $this->wrap($text, $minSize, $maxWidth);
+        $lineHeight = (int) round($minSize * 1.18);
+
+        return ['lines' => $lines, 'size' => $minSize, 'lineHeight' => $lineHeight, 'height' => count($lines) * $lineHeight];
+    }
+
+    private function fitTextAt(string $text, int $maxWidth, int $startSize, int $minSize, int $maxLines, int $maxHeight, bool $keepWordsWhole): ?array
+    {
         for ($size = $startSize; $size >= $minSize; $size -= 2) {
             $lines = $this->wrap($text, $size, $maxWidth);
             $lineHeight = (int) round($size * 1.22);
             $height = count($lines) * $lineHeight;
-            if (count($lines) <= $maxLines && $height <= $maxHeight) {
+            if (count($lines) <= $maxLines && $height <= $maxHeight && ! ($keepWordsWhole && $this->splitsWords($text, $size, $maxWidth))) {
                 return compact('lines', 'size', 'lineHeight', 'height');
             }
         }
@@ -174,15 +210,24 @@ class BannerComposer
             $lines = $this->wrap($text, $size, $maxWidth);
             $lineHeight = (int) round($size * 1.18);
             $height = count($lines) * $lineHeight;
-            if ($height <= $maxHeight) {
+            if ($height <= $maxHeight && ! ($keepWordsWhole && $this->splitsWords($text, $size, $maxWidth))) {
                 return compact('lines', 'size', 'lineHeight', 'height');
             }
         }
 
-        $lines = $this->wrap($text, $minSize, $maxWidth);
-        $lineHeight = (int) round($minSize * 1.18);
+        return null;
+    }
 
-        return ['lines' => $lines, 'size' => $minSize, 'lineHeight' => $lineHeight, 'height' => count($lines) * $lineHeight];
+    /** Whether a single word is wider than the column at this size, so wrapping would break it mid-word. */
+    private function splitsWords(string $text, int $size, int $maxWidth): bool
+    {
+        foreach (preg_split('/\s+/u', trim($text)) ?: [] as $word) {
+            if ($this->textWidth($word, $size) > $maxWidth) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function wrap(string $text, int $size, int $maxWidth): array
