@@ -22,7 +22,7 @@ return new class extends Migration
                 $table->string('stripe_customer_id')->nullable()->unique();
                 $table->string('stripe_subscription_id')->nullable()->unique();
                 $table->string('stripe_price_id')->nullable();
-                $table->string('status')->nullable()->index();
+                $table->string('status')->default('inactive')->index();
                 $table->timestamp('current_period_ends_at')->nullable();
                 $table->timestamp('stripe_updated_at')->nullable();
                 $table->timestamp('canceled_at')->nullable();
@@ -41,7 +41,7 @@ return new class extends Migration
                 $table->id();
                 $table->string('stripe_event_id')->unique();
                 $table->string('type')->index();
-                $table->json('payload')->nullable();
+                $table->json('payload');
                 $table->timestamp('processed_at')->nullable();
                 $table->timestamps();
             });
