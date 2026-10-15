@@ -50,6 +50,10 @@ return [
         'height' => 1350,
         'retry_attempts' => 3,
         'max_input_images' => 1,
+        // Each background is checked for readable third-party text (book covers, magazine names,
+        // logos) and regenerated up to this many times per banner attempt.
+        'inspect_images' => env('BANNER_IMAGE_INSPECTION', true),
+        'inspection_attempts' => (int) env('BANNER_INSPECTION_ATTEMPTS', 2),
         'disk' => env('BANNER_STORAGE_DISK', env('CAMPAIGN_MEDIA_DISK', 'local')),
         'prices_per_million' => [
             'input' => 0.50,

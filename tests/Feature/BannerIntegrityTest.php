@@ -6,6 +6,7 @@ use App\Livewire\CampaignWorkspace;
 use App\Models\BannerCreative;
 use App\Models\Brand;
 use App\Models\CampaignPack;
+use App\Models\CampaignPackVersion;
 use App\Models\SourceSnapshot;
 use App\Models\User;
 use App\Models\Workspace;
@@ -231,6 +232,40 @@ class BannerIntegrityTest extends TestCase
             $this->assertSame('Comfy hands-free reading', $selected['headline']);
             $this->assertSame('Small-batch minimal design', $selected['supporting_text']);
         }
+    }
+
+    public function test_angle_titles_are_a_last_resort_and_never_print_their_bracketed_label(): void
+    {
+        $content = [
+            'product_truth' => ['name' => 'Kindle Stand'],
+            'ranked_angles' => [['title' => 'The Gift of Reading (Diwali Focus)']],
+            'creative_routes' => [['platform_assets' => ['meta_ads' => ['headlines' => ['A home for Kindle & Kobo', 'Keep your next chapter in view [Habit]']]]]],
+        ];
+        $selector = app(BannerCopySelector::class);
+        $headlines = array_map(fn (int $sequence) => $selector->select(new CampaignPackVersion(['content' => $content]), $sequence)['headline'], range(1, 3));
+        $this->assertSame(['A home for Kindle & Kobo', 'Keep your next chapter in view', 'A home for Kindle & Kobo'], $headlines);
+
+        unset($content['creative_routes']);
+        $this->assertSame('The Gift of Reading', $selector->select(new CampaignPackVersion(['content' => $content]), 1)['headline']);
+    }
+
+    public function test_the_wordmark_scrim_darkens_more_over_a_bright_background(): void
+    {
+        $brand = new Brand(['name' => 'The Plush Republic', 'primary_color' => '#F4B942']);
+        $behindWordmark = [];
+        foreach (['bright' => [245, 240, 230], 'dark' => [40, 40, 40]] as $tone => [$red, $green, $blue]) {
+            $background = imagecreatetruecolor(1080, 1350);
+            imagefill($background, 0, 0, imagecolorallocate($background, $red, $green, $blue));
+            ob_start();
+            imagepng($background);
+            $bytes = ob_get_clean();
+            $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, new BannerCreative(['headline' => 'A stand', 'cta' => 'Shop now', 'layout' => 'hero_top'])));
+            $behindWordmark[$tone] = (imagecolorat($image, 660, 1262) >> 16) & 255;
+        }
+
+        // White text over at most this grey keeps a contrast ratio above 4.5:1.
+        $this->assertLessThanOrEqual(110, $behindWordmark['bright']);
+        $this->assertLessThan(40, $behindWordmark['dark']);
     }
 
     public function test_the_readability_gradient_has_no_scan_lines_and_the_bottom_wordmark_sits_on_the_panel(): void

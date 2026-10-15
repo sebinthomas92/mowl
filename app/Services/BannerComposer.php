@@ -123,14 +123,30 @@ class BannerComposer
         }
     }
 
-    /** An elliptical dark scrim in the bottom-right corner, strongest under the wordmark and gone well before the middle. */
+    /**
+     * A soft dark scrim behind the bottom-right wordmark: solid over the wordmark's box and feathered
+     * out over 150px. It is darker over a bright background (a light napkin, pale wood), so the white
+     * wordmark keeps its contrast on any photo.
+     */
     private function drawBrandScrim(\GdImage $canvas, int $width, int $height): void
     {
-        // The ellipse is centred 70px above the bottom with a 200px vertical radius, so start where it is fully clear.
-        for ($y = $height - 280; $y < $height; $y++) {
-            for ($x = $width - 600; $x < $width; $x++) {
-                $distance = sqrt((($width - 60 - $x) / 540) ** 2 + (($height - 70 - $y) / 200) ** 2);
-                $alpha = 127 - (int) round(70 * (1 - $this->fade((int) round($distance * 100), 35, 100)));
+        [$left, $right, $top, $bottom, $feather] = [$width - 440, $width - 80, $height - 100, $height - 50, 150];
+        $samples = [];
+        for ($y = $top; $y <= $bottom; $y += 4) {
+            for ($x = $left; $x <= $right; $x += 4) {
+                $rgb = imagecolorat($canvas, $x, $y);
+                $samples[] = 0.2126 * (($rgb >> 16) & 255) + 0.7152 * (($rgb >> 8) & 255) + 0.0722 * ($rgb & 255);
+            }
+        }
+        $brightness = array_sum($samples) / max(1, count($samples));
+        $strength = 60 + 55 * max(0, min(1, ($brightness - 60) / 140));
+
+        for ($y = $top - $feather; $y < $height; $y++) {
+            for ($x = $left - $feather; $x < $width; $x++) {
+                $dx = max(0, $left - $x, $x - $right);
+                $dy = max(0, $top - $y, $y - $bottom);
+                $distance = sqrt($dx ** 2 + $dy ** 2) / $feather;
+                $alpha = 127 - (int) round($strength * (1 - $this->fade((int) round($distance * 100), 0, 100)));
                 if ($alpha < 127) {
                     imagesetpixel($canvas, $x, $y, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
                 }

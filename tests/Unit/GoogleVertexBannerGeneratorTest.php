@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Exceptions\VertexAIResponseException;
 use App\Models\BannerCreative;
 use App\Models\MediaAsset;
 use App\Services\GoogleVertexBannerGenerator;
@@ -24,6 +25,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
             'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
             'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*gemini-3.5-flash:*' => Http::response(self::inspection([])),
             'aiplatform.googleapis.com/*' => Http::response([
                 'responseId' => 'vertex-banner-1',
                 'candidates' => [['content' => ['parts' => [['inlineData' => ['mimeType' => 'image/png', 'data' => $generated]]]]]],
@@ -44,8 +46,8 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect([$asset, $secondAsset]));
 
         $this->assertSame('generated-image-bytes', $result->imageBytes);
-        $this->assertSame(400, $result->inputTokens);
-        $this->assertSame(10, $result->outputTextTokens);
+        $this->assertSame(400 + 300, $result->inputTokens);
+        $this->assertSame(10 + 12, $result->outputTextTokens);
         $this->assertSame(1290, $result->outputImageTokens);
         $this->assertSame('vertex-banner-1', $result->providerRequestId);
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/models/gemini-3.1-flash-image:generateContent')
@@ -55,8 +57,86 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             && $request['contents'][0]['parts'][1]['inlineData']['data'] === base64_encode('product-bytes'));
     }
 
+    public function test_a_background_with_a_real_book_cover_is_regenerated_and_every_attempt_is_costed(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $inspections = [self::inspection(['The Hobbit', 'J.R.R. Tolkien', 'KINFOLK']), self::inspection([])];
+        $images = [self::image('cover-on-screen'), self::image('blank-screen')];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            // One callback for both models: Http::fake evaluates every matching stub, so two
+            // sequences on overlapping patterns would both advance on each request.
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$inspections, &$images) {
+                return str_contains($request->url(), 'gemini-3.5-flash:')
+                    ? Http::response(array_shift($inspections))
+                    : Http::response(array_shift($images));
+            },
+        ]);
+        $creative = new BannerCreative(['prompt' => 'No text or logos.']);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect([$asset]));
+
+        $this->assertSame('blank-screen', $result->imageBytes);
+        $this->assertSame(2 * 1290, $result->outputImageTokens);
+        $this->assertSame(2 * 400 + 2 * 300, $result->inputTokens);
+    }
+
+    public function test_it_gives_up_when_every_background_shows_third_party_text(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*gemini-3.5-flash:*' => Http::response(self::inspection(['The Hobbit'])),
+            'aiplatform.googleapis.com/*' => Http::response(self::image('cover-on-screen')),
+        ]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
+
+        try {
+            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
+            $this->fail('A background with a real book cover must not be used.');
+        } catch (VertexAIResponseException $exception) {
+            $this->assertSame('banner_third_party_text', $exception->errorCode);
+            $this->assertTrue($exception->retryable);
+            $this->assertStringContainsString('The Hobbit', $exception->getMessage());
+        }
+        Http::assertSentCount(3 + 2 * 2);
+    }
+
+    private static function image(string $bytes): array
+    {
+        return [
+            'candidates' => [['content' => ['parts' => [['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($bytes)]]]]]],
+            'usageMetadata' => ['promptTokenCount' => 400, 'candidatesTokenCount' => 1300, 'candidatesTokensDetails' => [
+                ['modality' => 'TEXT', 'tokenCount' => 10],
+                ['modality' => 'IMAGE', 'tokenCount' => 1290],
+            ]],
+        ];
+    }
+
+    private static function inspection(array $marks): array
+    {
+        return [
+            'candidates' => [['content' => ['parts' => [['text' => json_encode(['marks' => $marks])]]]]],
+            'usageMetadata' => ['promptTokenCount' => 300, 'candidatesTokenCount' => 12],
+        ];
+    }
+
     private function configureGoogle(): void
     {
+        config()->set('campaigns.google.model', 'gemini-3.5-flash');
+        config()->set('campaigns.banners.inspect_images', true);
+        config()->set('campaigns.banners.inspection_attempts', 2);
         config()->set('campaigns.banners.model', 'gemini-3.1-flash-image');
         config()->set('campaigns.google.project', 'callingdesk-marketingowl');
         config()->set('campaigns.google.location', 'global');

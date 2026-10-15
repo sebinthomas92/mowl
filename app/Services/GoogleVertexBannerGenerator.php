@@ -12,9 +12,48 @@ use Illuminate\Support\Facades\Storage;
 
 class GoogleVertexBannerGenerator implements BannerGenerator
 {
-    public function __construct(private GoogleVertexAIClient $client) {}
+    public function __construct(private GoogleVertexAIClient $client, private BannerImageInspector $inspector) {}
 
+    /**
+     * Generates the background, then rejects and regenerates any image with readable third-party
+     * text or marks (a real book cover on the e-reader, a magazine spine). Every attempt's tokens
+     * count toward the banner's cost.
+     */
     public function generate(BannerCreative $creative, Collection $productImages): BannerGenerationResult
+    {
+        $attempts = max(1, (int) config('campaigns.banners.inspection_attempts'));
+        $product = (string) ($creative->campaignPack?->product?->name ?? '');
+        $brand = (string) ($creative->campaignPack?->product?->brand?->name ?? '');
+        $usage = [0, 0, 0];
+        $marks = [];
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            $result = $this->generateOnce($creative, $productImages);
+            $usage = [$usage[0] + $result->inputTokens, $usage[1] + $result->outputTextTokens, $usage[2] + $result->outputImageTokens];
+            if (! config('campaigns.banners.inspect_images')) {
+                return $result;
+            }
+            $inspection = $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand);
+            $usage = [$usage[0] + $inspection['input_tokens'], $usage[1] + $inspection['output_tokens'], $usage[2]];
+            $marks = $inspection['marks'];
+            if ($marks === []) {
+                return new BannerGenerationResult(
+                    imageBytes: $result->imageBytes,
+                    mimeType: $result->mimeType,
+                    provider: $result->provider,
+                    model: $result->model,
+                    inputTokens: $usage[0],
+                    outputTextTokens: $usage[1],
+                    outputImageTokens: $usage[2],
+                    providerRequestId: $result->providerRequestId,
+                    providerLatencyMs: $result->providerLatencyMs,
+                );
+            }
+        }
+
+        throw new VertexAIResponseException('banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300), true);
+    }
+
+    private function generateOnce(BannerCreative $creative, Collection $productImages): BannerGenerationResult
     {
         $parts = [['text' => $creative->prompt]];
         foreach ($productImages->take((int) config('campaigns.banners.max_input_images')) as $asset) {
