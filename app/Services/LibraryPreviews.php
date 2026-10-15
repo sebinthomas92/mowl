@@ -35,6 +35,10 @@ class LibraryPreviews
         if ($path === self::REMOTE) {
             return null;
         }
+        // Checked before any stored copy, so a collection switched to source-only stops serving its old copies.
+        if (config('workflows.collections.'.$prompt->collection.'.mirror_previews') === false) {
+            return $prompt->{$kind.'_url'} ? $this->markRemote($prompt, $kind) : null;
+        }
         if ($path && Storage::disk($this->disk())->exists($path)) {
             return $path;
         }
@@ -43,7 +47,7 @@ class LibraryPreviews
         if (! $url) {
             return null;
         }
-        if ($this->isStream($url) || config('workflows.collections.'.$prompt->collection.'.mirror_previews') === false) {
+        if ($this->isStream($url)) {
             return $this->markRemote($prompt, $kind);
         }
 
@@ -69,6 +73,12 @@ class LibraryPreviews
         $prompt->forceFill([$kind.'_path' => $path])->save();
 
         return $path;
+    }
+
+    /** The URL when it is https, so rows loaded straight into the table can't put another scheme in a link or redirect. */
+    public static function safeUrl(?string $url): ?string
+    {
+        return $url && str_starts_with(strtolower($url), 'https://') ? $url : null;
     }
 
     /** HLS playlists play only through a streaming player, so they are never copied or offered as a video file. */

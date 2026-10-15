@@ -293,6 +293,25 @@ MD);
         $this->assertStringContainsString('_Prompt by @ana https://x.com/ana/status/1_', $download);
     }
 
+    public function test_source_only_collections_ignore_old_copies_and_unsafe_links(): void
+    {
+        Storage::fake('previews');
+        config(['workflows.media_disk' => 'previews']);
+        Storage::disk('previews')->put('library/opus-videos/old-poster.webp', 'old copy');
+        $prompt = LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => 'cara', 'pack' => 'UI motion animations', 'category' => 'animation', 'title' => 'Card flip', 'body' => 'Flip the card.', 'credit' => 'Prompt by @cara', 'source_url' => 'javascript:alert(1)', 'poster_url' => 'https://media.example.com/cara.webp', 'poster_path' => 'library/opus-videos/old-poster.webp']);
+        LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => 'dev', 'pack' => 'UI motion animations', 'category' => 'animation', 'title' => 'Tab slide', 'body' => 'Slide the tabs.', 'credit' => 'Prompt by @dev', 'poster_url' => 'javascript:alert(2)']);
+        $user = $this->member();
+
+        $this->actingAs($user)->get(route('workflows.preview', [$prompt->id, 'poster']))->assertRedirect('https://media.example.com/cara.webp');
+        $this->assertSame(LibraryPreviews::REMOTE, $prompt->fresh()->poster_path);
+
+        Livewire::actingAs($user)->withQueryParams(['workflow' => 'opus-videos-ui-motion-animations'])->test(WorkflowIndex::class)
+            ->assertSee('Prompt by @cara')
+            ->assertDontSee('javascript:', false);
+        $dev = LibraryPrompt::where('source_key', 'dev')->first();
+        $this->actingAs($user)->get(route('workflows.preview', [$dev->id, 'poster']))->assertNotFound();
+    }
+
     private function member(): User
     {
         $user = User::factory()->create();

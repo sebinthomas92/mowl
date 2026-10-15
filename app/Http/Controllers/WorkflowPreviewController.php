@@ -16,9 +16,10 @@ class WorkflowPreviewController extends Controller
     {
         $path = $previews->path($prompt, $kind);
         if ($path === null) {
-            abort_unless($prompt->{$kind.'_url'} && $kind === 'poster', 404);
+            $url = LibraryPreviews::safeUrl($prompt->{$kind.'_url'});
+            abort_unless($url && $kind === 'poster', 404);
 
-            return redirect()->away($prompt->{$kind.'_url'});
+            return redirect()->away($url);
         }
 
         $disk = Storage::disk($previews->disk());

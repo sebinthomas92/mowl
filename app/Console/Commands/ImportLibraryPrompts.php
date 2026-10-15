@@ -60,7 +60,7 @@ class ImportLibraryPrompts extends Command
                     'tier' => in_array('premium', $tags, true) ? 'premium' : 'free',
                     'position' => $positions[$pack] = ($positions[$pack] ?? 0) + 1,
                     'credit' => $this->option('credit'),
-                    'source_url' => ($entry['source_url'] ?? null) ?: null,
+                    'source_url' => $this->mediaUrl($entry['source_url'] ?? null),
                 ]);
                 if ($previews) {
                     foreach (['video', 'poster'] as $kind) {

@@ -130,7 +130,7 @@ class WorkflowCatalog
                     'body' => null,
                     'tier' => $prompt->tier,
                     'credit' => $sharedCredit ? null : $prompt->credit,
-                    'source_url' => $prompt->source_url,
+                    'source_url' => LibraryPreviews::safeUrl($prompt->source_url),
                     'video' => $preview($prompt, 'video'),
                     'poster' => $preview($prompt, 'poster'),
                 ])->values()->all();
