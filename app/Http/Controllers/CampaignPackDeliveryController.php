@@ -6,6 +6,7 @@ use App\Models\CampaignPack;
 use App\Models\CampaignPackShare;
 use App\Models\CampaignPackVersion;
 use App\Services\CampaignPackContentNormalizer;
+use App\Support\VoiceoverTiming;
 use Illuminate\Http\Response;
 
 class CampaignPackDeliveryController extends Controller
@@ -67,6 +68,7 @@ class CampaignPackDeliveryController extends Controller
         $rows = [['route', 'start_seconds', 'end_seconds', 'word_count', 'pace_wpm', 'delivery_notes', 'shot_id', 'line']];
         foreach ($content['creative_routes'] ?? [] as $route) {
             foreach ($route['voiceover'] ?? [] as $line) {
+                $line = VoiceoverTiming::refresh($line);
                 $rows[] = [$route['name'], $line['start_seconds'], $line['end_seconds'], $line['word_count'], $line['pace_wpm'], $line['delivery_notes'], $line['shot_id'], $line['line']];
             }
         }

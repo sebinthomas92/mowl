@@ -2,12 +2,15 @@
 
 namespace App\Services;
 
+use App\Support\VoiceoverTiming;
+
 /**
  * Deterministic clean-up of generated pack content before it is versioned.
  *
  * Models copy dates from the page ("Month of manufacture: July 2026") into fields that should
  * say when the pack was made, and pick service CTAs ("Book Now") for products. Every pack is for
- * an ecommerce product page, so CTAs come from the retail set.
+ * an ecommerce product page, so CTAs come from the retail set. Voiceover word counts and paces
+ * are recounted from the lines, since models miscount them.
  */
 class CampaignPackFinalizer
 {
@@ -32,6 +35,11 @@ class CampaignPackFinalizer
         }
 
         foreach ($content['creative_routes'] ?? [] as $routeIndex => $route) {
+            foreach (is_array($route['voiceover'] ?? null) ? $route['voiceover'] : [] as $segmentIndex => $segment) {
+                if (is_array($segment)) {
+                    $content['creative_routes'][$routeIndex]['voiceover'][$segmentIndex] = VoiceoverTiming::refresh($segment);
+                }
+            }
             foreach (is_array($route['platform_assets'] ?? null) ? $route['platform_assets'] : [] as $platform => $asset) {
                 if (is_array($asset) && isset($asset['cta'])) {
                     $content['creative_routes'][$routeIndex]['platform_assets'][$platform]['cta'] = $this->retail((string) $asset['cta']);

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\BannerCreative;
 use App\Models\CampaignPackVersion;
 use App\Models\SourceSnapshot;
+use App\Support\VoiceoverTiming;
 use Illuminate\Validation\ValidationException;
 
 class CampaignPackSafetyValidator
@@ -183,23 +184,14 @@ class CampaignPackSafetyValidator
             foreach ($route['voiceover'] ?? [] as $segmentIndex => $segment) {
                 $start = (float) ($segment['start_seconds'] ?? -1);
                 $end = (float) ($segment['end_seconds'] ?? -1);
-                $line = trim((string) ($segment['line'] ?? ''));
-                $words = $this->wordCount($line);
-                $declaredWords = (int) ($segment['word_count'] ?? -1);
-                $segmentDuration = $end - $start;
-                $pace = $segmentDuration > 0 ? (int) round(($words / $segmentDuration) * 60) : PHP_INT_MAX;
+                // Word count and pace are measured from the line, not taken from the model's own figures.
+                $pace = VoiceoverTiming::pace($segment) ?? PHP_INT_MAX;
 
                 if ($start < $previousEnd || $start < 0 || $start >= $duration || $end <= $start || $end > $duration) {
                     $issues[] = $this->issue('timing', "{$routeName} voiceover segment ".($segmentIndex + 1).' has an impossible time range.');
                 }
-                if ($declaredWords !== $words) {
-                    $issues[] = $this->issue('timing', "{$routeName} voiceover segment ".($segmentIndex + 1).' has an inaccurate word count.');
-                }
                 if ($pace > 170) {
                     $issues[] = $this->issue('timing', "{$routeName} voiceover segment ".($segmentIndex + 1)." requires {$pace} words per minute.");
-                }
-                if (abs(((int) ($segment['pace_wpm'] ?? -1)) - $pace) > 2) {
-                    $issues[] = $this->issue('timing', "{$routeName} voiceover segment ".($segmentIndex + 1).' has an inaccurate speaking pace.');
                 }
                 $previousEnd = max($previousEnd, $end);
             }
@@ -447,13 +439,6 @@ class CampaignPackSafetyValidator
 
             return str_contains($number, '.') ? rtrim(rtrim($number, '0'), '.') : $number;
         }, $matches[0])));
-    }
-
-    private function wordCount(string $value): int
-    {
-        preg_match_all("/[\p{L}\p{N}][\p{L}\p{N}’'-]*/u", $value, $matches);
-
-        return count($matches[0]);
     }
 
     /** @return array<string, string> dot path => text, for every string in the value */

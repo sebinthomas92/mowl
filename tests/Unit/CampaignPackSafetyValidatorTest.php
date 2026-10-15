@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Models\SourceSnapshot;
+use App\Services\CampaignPackFinalizer;
 use App\Services\CampaignPackSafetyValidator;
 use Tests\TestCase;
 
@@ -47,6 +48,26 @@ class CampaignPackSafetyValidatorTest extends TestCase
 
         $this->assertTrue(collect($issues)->contains(fn (array $issue) => $issue['type'] === 'timing'));
         $this->assertTrue(collect($issues)->contains(fn (array $issue) => $issue['type'] === 'caption'));
+    }
+
+    public function test_a_models_miscounted_words_and_pace_do_not_block_and_are_recounted(): void
+    {
+        $content = $this->safeContent();
+        $content['creative_routes'][0]['voiceover'][0] = [
+            'start_seconds' => 0,
+            'end_seconds' => 5,
+            'line' => 'This Diwali, gift a beautiful, dedicated home for their favorite e-reader.',
+            'word_count' => 12,
+            'pace_wpm' => 144,
+            'delivery_notes' => 'Warm',
+            'shot_id' => 'shot-1',
+        ];
+
+        $issues = app(CampaignPackSafetyValidator::class)->issues($content, [], [], $this->source());
+        $this->assertFalse(collect($issues)->contains(fn (array $issue) => $issue['type'] === 'timing'), 'The line itself fits: 11 words at 132 wpm');
+
+        $segment = app(CampaignPackFinalizer::class)->finalize($content)['creative_routes'][0]['voiceover'][0];
+        $this->assertSame([11, 132], [$segment['word_count'], $segment['pace_wpm']]);
     }
 
     public function test_it_blocks_specific_route_copy_when_only_broad_origin_evidence_exists(): void
