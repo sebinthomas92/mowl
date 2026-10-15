@@ -16,6 +16,7 @@ use App\Services\ContentLibrary;
 use App\Services\MockCampaignPackGenerator;
 use App\Services\ProductKnowledge;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -51,8 +52,11 @@ class BannerIntegrityTest extends TestCase
             'campaign_pack_id' => $pack->id, 'campaign_pack_version_id' => $version->id,
             'requested_by_user_id' => $owner->id, 'kind' => 'included', 'requested_count' => 2, 'status' => 'completed',
         ]);
+        Storage::fake('local');
+        $creatives = [];
         foreach (['INR 899 + Free Shipping', 'A stand for one more chapter'] as $index => $headline) {
-            $batch->creatives()->create([
+            Storage::disk('local')->put('creatives/'.($index + 1).'.png', 'png');
+            $creatives[] = $batch->creatives()->create([
                 'campaign_pack_id' => $pack->id, 'campaign_pack_version_id' => $version->id, 'sequence' => $index + 1,
                 'direction' => 'Product first', 'layout' => 'bottom_panel', 'headline' => $headline, 'cta' => 'Shop now',
                 'prompt' => 'p', 'status' => 'completed', 'disk' => 'local', 'output_path' => 'creatives/'.($index + 1).'.png', 'width' => 1080, 'height' => 1350,
@@ -71,6 +75,8 @@ class BannerIntegrityTest extends TestCase
         $flagged = $pack->contentItems()->get()->first(fn ($item) => $item->latestVersion?->body['headline'] === 'INR 899 + Free Shipping');
         $edited = $flagged->versions()->create(['version' => 2, 'status' => 'draft', 'body' => ['headline' => 'Free Shipping'] + $flagged->latestVersion->body]);
         $this->assertContains('States a price the product page does not show (899)', collect($library->checks($edited))->where('ok', false)->pluck('label')->all(), 'The PNG still shows the price, so editing the text does not clear it');
+        $this->actingAs($owner)->get(route('products.hub-creative', [$product, $creatives[0]]))->assertNotFound();
+        $this->actingAs($owner)->get(route('products.hub-creative', [$product, $creatives[1]]))->assertOk();
         $this->assertEmpty(collect($checks('A stand for one more chapter'))->where('ok', false)->where('blocking', true)->all(), 'An unedited banner, size line included, is not an edit');
     }
 

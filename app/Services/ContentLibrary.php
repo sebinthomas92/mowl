@@ -378,8 +378,12 @@ class ContentLibrary
         // checked on the text rendered into its image too, which editing the item body does not change.
         if ($source = $item->campaignPack?->sourceSnapshot) {
             $validator = app(CampaignPackSafetyValidator::class);
-            $rendered = $item->banner_creative_id ? trim($item->bannerCreative?->headline.' '.$item->bannerCreative?->supporting_text) : '';
-            $wrongPrices = $validator->unsupportedPrices(trim($text."\n".$rendered), $validator->supportedPrices($source));
+            $supported = $validator->supportedPrices($source);
+            // Field by field, so a number ending one field never pairs with a currency starting the next.
+            $wrongPrices = collect($this->strings($version->body))
+                ->flatMap(fn (string $field) => $validator->unsupportedPrices($field, $supported))
+                ->merge($item->bannerCreative ? $validator->bannerPrices($item->bannerCreative) : [])
+                ->unique()->values()->all();
             if ($wrongPrices) {
                 $checks[] = ['ok' => false, 'blocking' => true, 'label' => 'States a price the product page does not show ('.implode(', ', $wrongPrices).')'];
             }

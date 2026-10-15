@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\BannerCreative;
 use App\Models\CampaignPackVersion;
 use App\Models\SourceSnapshot;
 use Illuminate\Validation\ValidationException;
@@ -258,6 +259,21 @@ class CampaignPackSafetyValidator
     }
 
     /**
+     * Unsupported prices in the text rendered into a banner's image, field by field.
+     *
+     * @return list<string>
+     */
+    public function bannerPrices(BannerCreative $creative): array
+    {
+        $supported = $this->supportedPrices($creative->campaignPack?->sourceSnapshot);
+
+        return array_values(array_unique(array_merge(
+            $this->unsupportedPrices((string) $creative->headline, $supported),
+            $this->unsupportedPrices((string) $creative->supporting_text, $supported),
+        )));
+    }
+
+    /**
      * Currency amounts in the text that the supported prices do not include. The currency counts:
      * "INR 699" is not supported by a page showing "$699". In a price field a bare "899" is a price too.
      *
@@ -291,7 +307,6 @@ class CampaignPackSafetyValidator
     /**
      * Amounts written with a currency, as "INR 699": "₹699", "INR 899", "Rs. 1,499", "500 rupees".
      * Symbols may follow a digit ("₹750₹699" is a struck-out price beside the sale price); words may not.
-     * A currency never pairs with a number across a line break, since joined fields are separate text.
      *
      * The source's own currencies are always recognised, and settle what "$" or "¥" means.
      *
@@ -302,8 +317,8 @@ class CampaignPackSafetyValidator
     {
         $number = '(\\d(?:[\\d.,]*\\d)?)';
         $codes = implode('|', array_unique([...self::CURRENCY_CODES, ...array_filter($known, fn (string $code) => preg_match('/^[A-Z]{3}$/', $code))]));
-        preg_match_all('/([₹$€£¥]|(?<![\\p{L}\\p{N}])(?:rs\\.?|'.$codes.'))[ \\x{00A0}]?'.$number.'/iu', $text, $before, PREG_SET_ORDER);
-        preg_match_all('/'.$number.'[ \\x{00A0}]?(rupees|'.$codes.')(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER);
+        preg_match_all('/([₹$€£¥]|(?<![\\p{L}\\p{N}])(?:rs\\.?|'.$codes.'))\\s?'.$number.'/iu', $text, $before, PREG_SET_ORDER);
+        preg_match_all('/'.$number.'\\s?(rupees|'.$codes.')(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER);
         $prices = [
             ...array_map(fn (array $match) => $this->currency($match[1], $known).' '.$this->amount($match[2]), $before),
             ...array_map(fn (array $match) => $this->currency($match[2], $known).' '.$this->amount($match[1]), $after),

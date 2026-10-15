@@ -669,9 +669,9 @@ class CampaignWorkspace extends Component
         $bannerPriceIssues = [];
         if ($pack && $bannerStudioAvailable) {
             $validator = app(CampaignPackSafetyValidator::class);
-            $supported = $validator->supportedPrices($pack->sourceSnapshot);
             foreach ($pack->bannerGenerationBatches->flatMap->creatives as $creative) {
-                if ($wrong = $validator->unsupportedPrices(trim($creative->headline.' '.$creative->supporting_text), $supported)) {
+                $creative->setRelation('campaignPack', $pack);
+                if ($wrong = $validator->bannerPrices($creative)) {
                     $bannerPriceIssues[$creative->id] = $wrong;
                 }
             }
