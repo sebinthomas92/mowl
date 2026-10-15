@@ -8,11 +8,13 @@ use App\Http\Controllers\ClientPortalController;
 use App\Http\Controllers\ClientReviewController;
 use App\Http\Controllers\ProductHubDeliveryController;
 use App\Http\Controllers\SandboxStoreController;
+use App\Http\Controllers\StripeWebhookController;
 use App\Http\Controllers\WorkflowDownloadController;
 use App\Http\Controllers\WorkflowPreviewController;
 use App\Http\Controllers\WorkspaceInvitationController;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\Register;
+use App\Livewire\BillingIndex;
 use App\Livewire\BrandEditor;
 use App\Livewire\BrandIndex;
 use App\Livewire\CampaignIndex;
@@ -90,6 +92,7 @@ Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::get('/help', HelpIndex::class)->name('help.index');
     Route::get('/team', TeamIndex::class)->name('team.index');
     Route::get('/usage', UsageIndex::class)->name('usage.index');
+    Route::get('/billing', BillingIndex::class)->name('billing.index');
     Route::get('/settings', WorkspaceSettings::class)->name('workspace.settings');
     Route::get('/concierge', ConciergeIndex::class)->name('concierge.index');
     Route::get('/portal', ClientPortal::class)->name('portal.index');
@@ -109,6 +112,8 @@ Route::middleware(['auth', 'workspace.role'])->group(function (): void {
         return redirect()->route('login');
     })->name('logout');
 });
+
+Route::post('/stripe/webhook', StripeWebhookController::class)->middleware('throttle:240,1')->name('stripe.webhook');
 
 Route::get('/internal/campaign-jobs/recover', [CampaignJobController::class, 'recover'])
     ->middleware('throttle:6,1')

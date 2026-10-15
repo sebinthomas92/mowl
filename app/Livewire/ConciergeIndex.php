@@ -233,7 +233,7 @@ class ConciergeIndex extends Component
                 ->get() ?? collect(),
             'notes' => $workspace?->supportNotes()->with('author')->latest()->limit(10)->get() ?? collect(),
             'auditEvents' => $workspace?->auditEvents()->with('actor')->latest()->limit(12)->get() ?? collect(),
-            'creditBalance' => $workspace?->creditBalance() ?? 0,
+            'creditBalance' => $workspace?->spendableCredits() ?? 0,
             'failedJobs' => $workspace?->generationJobs()->where('status', 'failed')->count() ?? 0,
             'costAlerts' => $workspace?->generationJobs()->where('cost_alert', true)->count() ?? 0,
             'onboardingSteps' => $this->onboardingSteps(),

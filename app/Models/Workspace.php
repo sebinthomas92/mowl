@@ -61,4 +61,33 @@ class Workspace extends Model
     {
         return (int) $this->credits()->sum('amount');
     }
+
+    public const BILLING_LOCKED_MESSAGE = 'The plan for this workspace has ended. Restart it on the Billing page to generate again.';
+
+    public function subscription(): HasOne
+    {
+        return $this->hasOne(WorkspaceSubscription::class);
+    }
+
+    public function billingSubscription(): ?WorkspaceSubscription
+    {
+        return WorkspaceSubscription::available() ? $this->subscription()->first() : null;
+    }
+
+    /** A workspace whose plan was cancelled or went unpaid keeps its work but cannot spend credits. */
+    public function billingLocked(): bool
+    {
+        return (bool) $this->billingSubscription()?->isLocked();
+    }
+
+    /** Credits generation may use now: none while billing is locked. */
+    public function spendableCredits(): int
+    {
+        return $this->billingLocked() ? 0 : $this->creditBalance();
+    }
+
+    public function creditShortfallMessage(string $default): string
+    {
+        return $this->billingLocked() ? self::BILLING_LOCKED_MESSAGE : $default;
+    }
 }

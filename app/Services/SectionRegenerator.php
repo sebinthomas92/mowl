@@ -28,6 +28,9 @@ class SectionRegenerator
                 throw ValidationException::withMessages([$errorKey => 'A generation job is already running for this launch pack.']);
             }
 
+            if ($lockedWorkspace->billingLocked()) {
+                throw ValidationException::withMessages([$errorKey => Workspace::BILLING_LOCKED_MESSAGE]);
+            }
             $creditCost = $this->creditCost($lockedPack);
             if ($creditCost > 0 && $lockedWorkspace->creditBalance() < $creditCost) {
                 throw ValidationException::withMessages([$errorKey => 'This workspace does not have enough credits for another regeneration.']);

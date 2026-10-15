@@ -1,0 +1,147 @@
+<?php
+
+namespace App\Livewire;
+
+use App\Concerns\InteractsWithWorkspace;
+use App\Models\Workspace;
+use App\Models\WorkspaceSubscription;
+use App\Services\Billing\BillingCheckout;
+use App\Services\Billing\StripeClient;
+use App\Services\Billing\StripeException;
+use App\Services\Billing\StripeWebhookHandler;
+use App\Support\Membership;
+use Illuminate\Support\Facades\Log;
+use Livewire\Component;
+
+class BillingIndex extends Component
+{
+    use InteractsWithWorkspace;
+
+    public ?string $notice = null;
+
+    public function mount(StripeClient $stripe, StripeWebhookHandler $handler, BillingCheckout $billing): void
+    {
+        $this->refreshStalePlan($stripe, $billing);
+
+        // Stripe returns here with the Checkout session id, or "cancelled".
+        $checkout = (string) request()->query('checkout', '');
+        if ($checkout === 'cancelled') {
+            $this->notice = 'Checkout was cancelled. Nothing was charged.';
+        } elseif (preg_match('/^cs_[A-Za-z0-9_]+$/', $checkout)) {
+            $this->notice = $this->reconcile($stripe, $handler, $checkout)
+                ? 'Payment received. Your plan and credits are below.'
+                : 'Stripe is still confirming this payment. Your plan and credits update here as soon as it does.';
+        }
+    }
+
+    /**
+     * A plan that still says active after a day without word from Stripe may have missed its final
+     * webhook; checking it lets the page offer a restart instead of only the portal.
+     */
+    private function refreshStalePlan(StripeClient $stripe, BillingCheckout $billing): void
+    {
+        $subscription = $this->currentWorkspace()->billingSubscription();
+        if (! $stripe->configured() || ! $subscription?->isSubscribed()
+            || ($subscription->stripe_updated_at && $subscription->stripe_updated_at->gt(now()->subDay()))) {
+            return;
+        }
+        try {
+            $billing->revalidate($subscription);
+            $subscription->update(['stripe_updated_at' => now()]);
+        } catch (StripeException $exception) {
+            Log::warning('Could not recheck a Stripe subscription.', ['error' => $exception->getMessage()]);
+        }
+    }
+
+    public function startPlan(BillingCheckout $billing): void
+    {
+        $workspace = $this->ownerWorkspace();
+        $this->go(fn () => $billing->planCheckoutUrl($workspace, auth()->user()));
+    }
+
+    public function buyCredits(BillingCheckout $billing, string $pack): void
+    {
+        $workspace = $this->ownerWorkspace();
+        $this->go(fn () => $billing->creditPackCheckoutUrl($workspace, auth()->user(), $pack));
+    }
+
+    public function openPortal(BillingCheckout $billing): void
+    {
+        $workspace = $this->ownerWorkspace(forCheckout: false);
+        $this->go(fn () => $billing->portalUrl($workspace));
+    }
+
+    /**
+     * Applies a finished Checkout straight away, so the page is right even before the webhook lands.
+     * The webhook does the same work later and finds nothing left to do. True only when the session
+     * belongs to this workspace and Stripe reports it paid.
+     */
+    private function reconcile(StripeClient $stripe, StripeWebhookHandler $handler, string $sessionId): bool
+    {
+        $workspace = $this->currentWorkspace();
+        if (! $stripe->configured() || ! WorkspaceSubscription::available()) {
+            return false;
+        }
+        try {
+            $session = $stripe->get('checkout/sessions/'.$sessionId);
+            if ((string) ($session['metadata']['workspace_id'] ?? '') !== (string) $workspace->id
+                || ($session['customer'] ?? null) !== $workspace->billingSubscription()?->stripe_customer_id) {
+                return false;
+            }
+            $handler->checkoutCompleted($session);
+
+            return ($session['status'] ?? null) === 'complete' && in_array($session['payment_status'] ?? null, ['paid', 'no_payment_required'], true);
+        } catch (StripeException $exception) {
+            Log::warning('Could not reconcile a Stripe Checkout session.', ['session' => $sessionId, 'error' => $exception->getMessage()]);
+
+            return false;
+        }
+    }
+
+    private function go(callable $url): void
+    {
+        try {
+            $this->redirect($url());
+        } catch (StripeException $exception) {
+            Log::error('Stripe request failed.', ['error' => $exception->getMessage(), 'code' => $exception->stripeCode]);
+            $this->addError('billing', 'Stripe could not start this right now: '.$exception->getMessage());
+        }
+    }
+
+    /** Checkout needs webhooks too; the portal only needs the API key, so card fixes still work. */
+    private function ownerWorkspace(bool $forCheckout = true): Workspace
+    {
+        $workspace = $this->currentWorkspace();
+        abort_unless(Membership::of(auth()->user(), $workspace)?->isOwner(), 403);
+        $stripe = app(StripeClient::class);
+        abort_unless(($forCheckout ? $stripe->readyForCheckout() : $stripe->configured()) && WorkspaceSubscription::available(), 422);
+
+        return $workspace;
+    }
+
+    public function render(StripeClient $stripe)
+    {
+        $workspace = $this->currentWorkspace();
+        $membership = Membership::of(auth()->user(), $workspace);
+        $subscription = $workspace->billingSubscription();
+
+        return view('livewire.billing-index', [
+            'workspace' => $workspace,
+            'isOwner' => (bool) $membership?->isOwner(),
+            'owner' => $workspace->users()->wherePivot('role', 'owner')->first(),
+            'ready' => $stripe->readyForCheckout() && WorkspaceSubscription::available(),
+            'portalReady' => $stripe->configured() && WorkspaceSubscription::available(),
+            'testMode' => $stripe->testMode(),
+            'subscription' => $subscription,
+            'subscribed' => (bool) $subscription?->isSubscribed(),
+            'locked' => (bool) $subscription?->isLocked(),
+            'plan' => config('billing.plan'),
+            'packs' => config('billing.credit_packs'),
+            'creditBalance' => $workspace->creditBalance(),
+            'spendableCredits' => $workspace->spendableCredits(),
+            'billingEvents' => $workspace->credits()
+                ->whereIn('event', ['beta_allocation', 'plan_allocation', 'credit_pack_purchase', 'credit_pack_refund', 'credit_dispute', 'credit_dispute_won', 'concierge_adjustment'])
+                ->latest()->limit(12)->get(),
+        ])->layout('components.layouts.app');
+    }
+}

@@ -66,8 +66,12 @@ class WorkspaceSettings extends Component
             'members' => $workspace->users()->orderByPivot('created_at')->get(),
             'memberCount' => $workspace->users()->count(),
             'brandCount' => $workspace->brands()->count(),
-            'creditBalance' => $workspace->creditBalance(),
-            'billingConnected' => false,
+            'creditBalance' => $workspace->spendableCredits(),
+            'billingStatus' => match (true) {
+                (bool) $workspace->billingSubscription()?->isSubscribed() => 'Plan active',
+                $workspace->billingLocked() => 'Plan ended',
+                default => 'Beta credits · no plan yet',
+            },
             'canSeeCosts' => (bool) Membership::of(auth()->user(), $workspace)?->canSeeCosts(),
         ])->layout('components.layouts.app');
     }

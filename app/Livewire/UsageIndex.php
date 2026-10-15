@@ -26,7 +26,7 @@ class UsageIndex extends Component
             'jobs' => (clone $jobsQuery)->with('campaignPack.product.brand')->latest()->limit(25)->get(),
             'bannerBatches' => $bannerBatches,
             'creditEvents' => $workspace->credits()->with('campaignPack')->latest()->limit(20)->get(),
-            'creditBalance' => $workspace->creditBalance(),
+            'creditBalance' => $workspace->spendableCredits(),
             'creditsSpent' => abs((int) $workspace->credits()->where('amount', '<', 0)->sum('amount')),
             'totalCost' => (float) (clone $jobsQuery)->sum('estimated_cost') + (float) ($bannerBatchesQuery ? (clone $bannerBatchesQuery)->sum('estimated_cost') : 0),
             'costAlerts' => (clone $jobsQuery)->where('cost_alert', true)->count() + ($bannerBatchesQuery ? (clone $bannerBatchesQuery)->where('cost_alert', true)->count() : 0),

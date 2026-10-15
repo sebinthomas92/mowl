@@ -1,5 +1,5 @@
 @php($sideMembership = \App\Support\Membership::of(auth()->user(), $workspace))
-@php($creditBalance = $workspace->creditBalance())
+@php($creditBalance = $workspace->spendableCredits())
 @php($monthlyCredits = config('campaigns.monthly_credits'))
 @php($creditsUsed = max(0, $monthlyCredits - $creditBalance))
 @php($userWorkspaces = auth()->user()->workspaces)
@@ -19,6 +19,7 @@
 @php($secondary = array_filter([
     $navLink('team.index', 'team.*', 'Team', 'users'),
     $sideMembership?->canSeeCosts() ? $navLink('usage.index', 'usage.*', 'Usage', 'chart-bar') : null,
+    $sideMembership?->canSeeCosts() ? $navLink('billing.index', 'billing.*', 'Billing', 'credit-card') : null,
     $navLink('workspace.settings', 'workspace.settings', 'Settings', 'settings'),
     $navLink('help.index', 'help.*', 'Help', 'help-circle'),
     $isConcierge ? $navLink('concierge.index', 'concierge.*', 'Concierge', 'lifebuoy') : null,

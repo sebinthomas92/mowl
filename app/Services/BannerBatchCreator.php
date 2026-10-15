@@ -54,7 +54,7 @@ class BannerBatchCreator
             $this->ensureEligible($lockedWorkspace, $lockedPack);
             $this->ensureNoActiveBatch($lockedPack);
             $creditCost = (int) config('campaigns.banners.additional_credit_cost');
-            if ($lockedWorkspace->creditBalance() < $creditCost) {
+            if ($lockedWorkspace->spendableCredits() < $creditCost) {
                 throw ValidationException::withMessages(['banner' => 'This workspace does not have enough credits for another banner.']);
             }
 
@@ -127,6 +127,9 @@ class BannerBatchCreator
         abort_unless($pack->product->brand->workspace_id === $workspace->id, 404);
         if (! config('campaigns.banners.enabled')) {
             abort(404);
+        }
+        if ($workspace->billingLocked()) {
+            throw ValidationException::withMessages(['banner' => Workspace::BILLING_LOCKED_MESSAGE]);
         }
         if ($pack->status !== 'approved' || $pack->current_version < 1) {
             throw ValidationException::withMessages(['banner' => 'Approve the current campaign-pack version before generating banners.']);

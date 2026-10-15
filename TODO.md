@@ -61,21 +61,21 @@ Acceptance criteria:
 
 Dependencies: Stripe account, product/price IDs, webhook secret.
 
-- [ ] Install the official Stripe PHP SDK or Laravel Cashier after checking current compatibility.
-- [ ] Add billing/subscription fields without storing sensitive payment data.
-- [ ] Create the $129/month concierge beta price.
-- [ ] Build owner-only checkout and billing-management flows.
-- [ ] Implement signed Stripe webhooks with idempotency.
-- [ ] Handle checkout completion, renewal, cancellation, failed payment, and refund events.
-- [ ] Gate paid features using server-side subscription entitlement checks.
-- [ ] Keep existing workspaces accessible in a safe read-only state after payment failure/cancellation.
-- [ ] Add monthly allocation of 50 pack credits exactly once per paid billing cycle.
-- [ ] Add $2 per-credit overage metering and reconciliation.
+- [x] Call the Stripe API directly over Laravel's HTTP client (no SDK or Cashier needed; prices are created inline at Checkout).
+- [x] Add billing/subscription fields without storing sensitive payment data.
+- [x] Create the $129/month concierge beta price (inline price_data; `STRIPE_PLAN_PRICE` can point at a dashboard Price).
+- [x] Build owner-only checkout and billing-management flows.
+- [x] Implement signed Stripe webhooks with idempotency.
+- [x] Handle checkout completion, renewal, cancellation, failed payment, and refund events.
+- [x] Gate paid features using server-side subscription entitlement checks.
+- [x] Keep existing workspaces accessible in a safe read-only state after payment failure/cancellation.
+- [x] Add monthly allocation of 50 pack credits exactly once per paid billing cycle.
+- [x] Sell extra credits up front at $2 each (10/25/50 packs) instead of metered overage, so balances never go negative.
 - [ ] Ensure premium deep analysis consumes three credits.
 - [ ] Ensure one pack credit includes the initial generation plus three section regenerations within 24 hours.
-- [ ] Prevent unlimited or negative-credit usage.
-- [ ] Add Billing UI showing plan, seats, brands, credits, overages, next renewal, and payment status.
-- [ ] Test webhook replays, out-of-order events, duplicate events, and failed renewals.
+- [x] Prevent unlimited or negative-credit usage.
+- [x] Add Billing UI showing plan, seats, brands, credits, overages, next renewal, and payment status.
+- [x] Test webhook replays, out-of-order events, duplicate events, and failed renewals.
 - [ ] Run Stripe test-mode checkout and webhook QA on Vercel preview.
 
 Acceptance criteria:
