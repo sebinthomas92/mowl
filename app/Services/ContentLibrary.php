@@ -366,7 +366,16 @@ class ContentLibrary
         $mentioned = $this->prices($text);
         if ($price && $mentioned) {
             $confirmed = $this->prices($price) ?: [$this->number($price)];
-            $wrong = collect($mentioned)->reject(fn ($amount) => in_array($amount, $confirmed, true))->first();
+            // Other amounts the page shows beside the product's price (a struck-out MRP, a free-shipping
+            // threshold) are not claims about the price. The page's own price is not one of them when
+            // it disagrees with the confirmed one: that disagreement is what this check is for.
+            $source = $item->campaignPack?->sourceSnapshot;
+            $pagePrice = filled($source?->extracted_truth['price'] ?? null) ? $this->number((string) $source->extracted_truth['price']) : null;
+            $nearby = collect($source ? app(CampaignPackSafetyValidator::class)->supportedPrices($source) ?? [] : [])
+                ->map(fn (string $supported) => $this->number(explode(' ', $supported, 2)[1] ?? ''))
+                ->reject(fn (string $amount) => $amount === $pagePrice && ! in_array($amount, $confirmed, true))
+                ->all();
+            $wrong = collect($mentioned)->reject(fn ($amount) => in_array($amount, [...$confirmed, ...$nearby], true))->first();
             $checks[] = ['ok' => $wrong === null, 'blocking' => true, 'label' => $wrong === null
                 ? "Price matches confirmed Knowledge ({$price})"
                 : "Price {$wrong} differs from confirmed Knowledge ({$price})"];

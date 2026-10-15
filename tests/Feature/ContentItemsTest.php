@@ -142,6 +142,27 @@ class ContentItemsTest extends TestCase
         $library->approve($version->fresh(), $owner);
     }
 
+    public function test_a_shipping_threshold_or_struck_out_price_beside_the_product_price_is_not_a_wrong_price(): void
+    {
+        [$owner, $workspace, $pack] = $this->fixture();
+        $pack->sourceSnapshot->update([
+            'approved_by_user_id' => $owner->id, 'approved_at' => now(),
+            'extracted_content' => 'Kindle Stand ₹750₹699 Inclusive of all taxes. Free shipping on orders over ₹499. '.str_repeat('Care notes. ', 60).'You may also like: Cloud Organiser ₹899',
+            'extracted_truth' => ['price' => '699.00', 'currency' => 'INR'],
+        ]);
+        $pack->product->facts()->create(['workspace_id' => $workspace->id, 'key' => 'price', 'confirmed_value' => 'INR 699.00', 'status' => 'ok', 'confirmed_at' => now()]);
+        $library = app(ContentLibrary::class);
+        $library->syncPack($pack);
+        $version = $pack->contentItems()->where('section', 'positioning')->firstOrFail()->latestVersion;
+        $priceCheck = fn () => collect($library->checks($version->fresh()))->first(fn (array $check) => str_starts_with($check['label'], 'Price'));
+
+        $library->saveDraft($version, ['value_proposition' => 'Now INR 699, down from ₹750, with free shipping over INR 499.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Now only ₹899.']);
+        $this->assertSame('Price 899 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
+    }
+
     public function test_a_named_client_link_shows_only_review_items_and_records_decisions(): void
     {
         [$owner, $workspace, $pack] = $this->fixture();
