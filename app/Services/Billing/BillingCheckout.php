@@ -69,7 +69,8 @@ class BillingCheckout
                 throw $exception;
             }
             // Only the subscription is known to be gone; the customer is checked separately before checkout.
-            $subscription->update(['stripe_subscription_id' => null, 'status' => null, 'cancel_at_period_end' => false]);
+            // The workspace had a plan, so it stays locked as ended until a new one starts.
+            $subscription->update(['stripe_subscription_id' => null, 'status' => 'canceled', 'cancel_at_period_end' => false, 'canceled_at' => now()]);
         }
     }
 
@@ -95,6 +96,10 @@ class BillingCheckout
             return;
         }
         foreach ($subscriptions['data'] ?? [] as $subscription) {
+            // Only this workspace's plan; anything else on the customer is left alone.
+            if ((string) ($subscription['metadata']['workspace_id'] ?? '') !== (string) $workspace->id) {
+                continue;
+            }
             // An unpaid first attempt, or an unpaid or paused plan that could later be paid or resumed,
             // is cancelled so it can never run alongside the new one.
             if (in_array($subscription['status'] ?? null, ['incomplete', 'unpaid', 'paused'], true)) {

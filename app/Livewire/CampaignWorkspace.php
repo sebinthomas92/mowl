@@ -594,7 +594,7 @@ class CampaignWorkspace extends Component
                 ->where('metadata->origin', 'product_page')
                 ->oldest()
                 ->first(),
-            'bannerCreditBalance' => $workspace->creditBalance(),
+            'bannerCreditBalance' => $workspace->spendableCredits(),
             'bannerProcessUrl' => $nextBannerCreative && config('campaigns.processing_mode') === 'request'
                 ? URL::temporarySignedRoute('banner-creatives.process', now()->addMinutes(30), ['bannerCreative' => $nextBannerCreative])
                 : null,

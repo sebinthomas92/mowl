@@ -1,5 +1,5 @@
 @php($sideMembership = \App\Support\Membership::of(auth()->user(), $workspace))
-@php($creditBalance = $workspace->creditBalance())
+@php($creditBalance = $workspace->spendableCredits())
 @php($monthlyCredits = config('campaigns.monthly_credits'))
 @php($creditsUsed = max(0, $monthlyCredits - $creditBalance))
 @php($userWorkspaces = auth()->user()->workspaces)

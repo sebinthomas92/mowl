@@ -8,7 +8,7 @@
 
         @if(!$pack)
             @php
-                $balance = $workspace->creditBalance();
+                $balance = $workspace->spendableCredits();
                 $canSeeCosts = (bool) \App\Support\Membership::of(auth()->user(), $workspace)?->canSeeCosts();
             @endphp
             <div class="lib-page">

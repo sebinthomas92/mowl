@@ -232,7 +232,7 @@ class BillingTest extends TestCase
         [$owner, $workspace] = $this->workspaceUser();
         $workspace->subscription()->create(['stripe_customer_id' => 'cus_1']);
         Http::fake([
-            'api.stripe.com/v1/subscriptions?*' => Http::response(['data' => [['id' => 'sub_old', 'status' => 'incomplete']]]),
+            'api.stripe.com/v1/subscriptions?*' => Http::response(['data' => [['id' => 'sub_old', 'status' => 'incomplete', 'metadata' => ['workspace_id' => (string) $workspace->id]]]]),
             'api.stripe.com/v1/subscriptions/sub_old' => Http::response(['id' => 'sub_old', 'status' => 'canceled']),
             'api.stripe.com/v1/checkout/sessions/cs_old/expire' => Http::response(['id' => 'cs_old', 'status' => 'expired']),
             'api.stripe.com/v1/checkout/sessions?*' => Http::response(['data' => [['id' => 'cs_old', 'mode' => 'subscription'], ['id' => 'cs_pack', 'mode' => 'payment']]]),
@@ -252,7 +252,7 @@ class BillingTest extends TestCase
         $workspace->subscription()->create(['stripe_customer_id' => 'cus_1']);
         $this->stripeSays('sub_1', 'active', $workspace);
         Http::fake([
-            'api.stripe.com/v1/subscriptions?*' => Http::response(['data' => [['id' => 'sub_1', 'status' => 'active']]]),
+            'api.stripe.com/v1/subscriptions?*' => Http::response(['data' => [['id' => 'sub_1', 'status' => 'active', 'metadata' => ['workspace_id' => (string) $workspace->id]]]]),
             'api.stripe.com/v1/subscriptions/sub_1' => Http::response($this->stripeSubscriptions['sub_1']),
             'api.stripe.com/v1/checkout/sessions*' => Http::response(['id' => 'cs_new', 'url' => 'https://checkout.stripe.com/c/pay/cs_new']),
         ]);
@@ -302,6 +302,7 @@ class BillingTest extends TestCase
 
         Livewire::actingAs($owner)->test(BillingIndex::class)->call('startPlan')->assertRedirect('https://checkout.stripe.com/c/pay/cs_new');
         $this->assertSame('cus_new', $workspace->subscription()->value('stripe_customer_id'));
+        $this->assertTrue($workspace->refresh()->billingLocked());
     }
 
     public function test_an_unreachable_stripe_shows_an_error_instead_of_failing(): void
@@ -354,7 +355,11 @@ class BillingTest extends TestCase
         [$owner, $workspace] = $this->workspaceUser();
         $workspace->subscription()->create(['stripe_customer_id' => 'cus_1', 'stripe_subscription_id' => 'sub_unpaid', 'status' => 'unpaid']);
         Http::fake([
-            'api.stripe.com/v1/subscriptions?*' => Http::response(['data' => [['id' => 'sub_unpaid', 'status' => 'unpaid'], ['id' => 'sub_paused', 'status' => 'paused']]]),
+            'api.stripe.com/v1/subscriptions?*' => Http::response(['data' => [
+                ['id' => 'sub_unpaid', 'status' => 'unpaid', 'metadata' => ['workspace_id' => (string) $workspace->id]],
+                ['id' => 'sub_paused', 'status' => 'paused', 'metadata' => ['workspace_id' => (string) $workspace->id]],
+                ['id' => 'sub_other', 'status' => 'unpaid', 'metadata' => []],
+            ]]),
             'api.stripe.com/v1/subscriptions/*' => Http::response(['id' => 'sub_x', 'status' => 'canceled']),
             'api.stripe.com/v1/checkout/sessions?*' => Http::response(['data' => []]),
             'api.stripe.com/v1/checkout/sessions' => Http::response(['id' => 'cs_new', 'url' => 'https://checkout.stripe.com/c/pay/cs_new']),
@@ -364,6 +369,7 @@ class BillingTest extends TestCase
 
         Http::assertSent(fn (Request $request) => $request->method() === 'DELETE' && str_ends_with($request->url(), '/subscriptions/sub_unpaid'));
         Http::assertSent(fn (Request $request) => $request->method() === 'DELETE' && str_ends_with($request->url(), '/subscriptions/sub_paused'));
+        Http::assertNotSent(fn (Request $request) => str_ends_with($request->url(), '/subscriptions/sub_other'));
     }
 
     public function test_a_customer_from_another_stripe_mode_is_replaced_on_restart(): void
