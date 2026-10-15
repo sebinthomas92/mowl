@@ -35,8 +35,20 @@ class BannerIntegrityTest extends TestCase
         $validator = app(CampaignPackSafetyValidator::class);
         $supported = $validator->supportedPrices(new SourceSnapshot(['extracted_content' => self::PAGE, 'extracted_truth' => ['price' => '699.00', 'currency' => 'INR']]));
 
-        $this->assertEqualsCanonicalizing(['750', '699', '499'], $supported);
+        $this->assertEqualsCanonicalizing(['INR 750', 'INR 699', 'INR 499'], $supported);
         $this->assertSame(['48'], $validator->unsupportedPrices('Just INR 48 today', $supported), 'A dispatch time is not a price');
+        $this->assertSame(['699'], $validator->unsupportedPrices('Only $699', $supported), 'The currency must match too');
+        $this->assertSame([], $validator->unsupportedPrices('Only Rs. 699.00, was ₹750.', $supported));
+    }
+
+    public function test_decimal_comma_prices_keep_their_value(): void
+    {
+        $validator = app(CampaignPackSafetyValidator::class);
+        $supported = $validator->supportedPrices(new SourceSnapshot(['extracted_content' => 'Nur €1,99 oder €1.299,00', 'extracted_truth' => []]));
+
+        $this->assertEqualsCanonicalizing(['EUR 1.99', 'EUR 1299'], $supported);
+        $this->assertSame(['199'], $validator->unsupportedPrices('Now €199', $supported));
+        $this->assertSame([], $validator->unsupportedPrices('Now EUR 1,299', $supported));
     }
 
     public function test_the_fallback_headline_is_also_checked_for_price(): void
