@@ -181,6 +181,26 @@ class CampaignGenerationJobTest extends TestCase
         $this->assertSame($before['ranked_angles'], $after['ranked_angles']);
     }
 
+    public function test_a_section_regeneration_carries_the_current_price_into_product_truth(): void
+    {
+        [$workspace, $product, , $pack, $job] = $this->generationFixture();
+        Http::fake(['93.184.216.34/*' => Http::response($this->productHtml(), 200, ['Content-Type' => 'text/html'])]);
+        (new GenerateCampaignPack($job->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
+        $v1 = $pack->fresh()->versions()->where('version', 1)->first();
+        $v1->update(['content' => array_replace_recursive($v1->content, ['product_truth' => ['price' => 'USD 79.00'], 'marketing_hub' => ['product_details' => ['price' => 'USD 79.00']]])]);
+
+        $regeneration = CampaignGenerationJob::create([
+            'workspace_id' => $workspace->id, 'campaign_pack_id' => $pack->id, 'source_snapshot_id' => $pack->source_snapshot_id,
+            'section' => 'positioning', 'base_version' => 1, 'credit_cost' => 0,
+        ]);
+        (new GenerateCampaignPack($regeneration->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
+
+        $this->assertSame('completed', $regeneration->fresh()->status);
+        $v2 = $pack->fresh()->versions()->where('version', 2)->value('content');
+        $this->assertStringContainsString('89', $v2['product_truth']['price']);
+        $this->assertSame($v2['product_truth']['price'], $v2['marketing_hub']['product_details']['price']);
+    }
+
     public function test_excluding_a_fact_keeps_it_out_of_a_section_regeneration(): void
     {
         [$workspace, $product, , $pack, $job] = $this->generationFixture();

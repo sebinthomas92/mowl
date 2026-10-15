@@ -118,7 +118,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
 
             $job->update(['phase' => 'generating_pack']);
             if ($section) {
-                $baseContent = $this->baseContent($job);
+                $baseContent = $this->withCurrentPrice($this->baseContent($job), $subject->price);
                 $page['regeneration_section'] = $section;
                 $page['current_content'] = $baseContent;
             }
@@ -168,12 +168,14 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 ? 0.018
                 : $costs->calculate($result->model ?? '', $result->inputTokens, $result->cachedInputTokens, $result->outputTokens);
 
-            DB::transaction(function () use ($job, $result, $cost, $cached, $section): void {
+            $currentPrice = $subject->price;
+            DB::transaction(function () use ($job, $result, $cost, $cached, $section, $currentPrice): void {
                 $pack = $job->campaignPack()->lockForUpdate()->firstOrFail();
                 $nextVersion = ((int) $pack->versions()->max('version')) + 1;
                 $content = app(CampaignPackFinalizer::class)->finalize($section
                     ? $this->replaceSection(
-                        $this->baseContent($job),
+                        // Re-read and re-scrubbed now, so a fact excluded during generation stays out.
+                        $this->withCurrentPrice($this->baseContent($job), $currentPrice),
                         $result->content,
                         $section,
                     )
@@ -300,6 +302,26 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
         $knowledge = app(ProductKnowledge::class);
 
         return $knowledge->scrub($content, $knowledge->excludedValues($job->campaignPack->product, $job->sourceSnapshot?->extracted_truth ?? []));
+    }
+
+    /**
+     * A section regeneration keeps the base version's Product truth and product details, which can
+     * predate a price the team has since confirmed. The new version, and the generator's view of it,
+     * carry today's price. Older copy that still names the old price is left for QA to flag.
+     */
+    private function withCurrentPrice(array $content, ?string $price): array
+    {
+        if (! filled($price)) {
+            return $content;
+        }
+        if (is_array($content['product_truth'] ?? null)) {
+            $content['product_truth']['price'] = $price;
+        }
+        if (is_array($content['marketing_hub']['product_details'] ?? null) && array_key_exists('price', $content['marketing_hub']['product_details'])) {
+            $content['marketing_hub']['product_details']['price'] = $price;
+        }
+
+        return $content;
     }
 
     private function replaceSection(array $current, array $generated, string $section): array
