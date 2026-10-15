@@ -6,6 +6,7 @@ use App\Models\LibraryPrompt;
 use App\Services\LibraryPreviews;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 class WorkflowPreviewController extends Controller
 {
@@ -14,11 +15,21 @@ class WorkflowPreviewController extends Controller
 
     public function __invoke(Request $request, LibraryPrompt $prompt, string $kind, LibraryPreviews $previews)
     {
+        try {
+            return $this->serve($request, $prompt, $kind, $previews);
+        } catch (Throwable $exception) {
+            // A storage or source failure must never break the page; show the preview from its source instead.
+            report($exception);
+
+            return $this->fromSource($prompt, $kind);
+        }
+    }
+
+    private function serve(Request $request, LibraryPrompt $prompt, string $kind, LibraryPreviews $previews)
+    {
         $path = $previews->path($prompt, $kind);
         if ($path === null) {
-            abort_unless($prompt->{$kind.'_url'} && $kind === 'poster', 404);
-
-            return redirect()->away($prompt->{$kind.'_url'});
+            return $this->fromSource($prompt, $kind);
         }
 
         $disk = Storage::disk($previews->disk());
@@ -54,6 +65,14 @@ class WorkflowPreviewController extends Controller
             'Cache-Control' => 'private, max-age=86400',
             'X-Content-Type-Options' => 'nosniff',
         ]));
+    }
+
+    private function fromSource(LibraryPrompt $prompt, string $kind)
+    {
+        $url = LibraryPreviews::safeUrl($prompt->{$kind.'_url'});
+        abort_unless($url && $kind === 'poster', 404);
+
+        return redirect()->away($url)->header('Cache-Control', 'private, max-age=86400');
     }
 
     /** @return array{0: ?int, 1: int} */

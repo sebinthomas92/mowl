@@ -20,8 +20,26 @@ return [
     // Where copies of library preview videos and posters are kept (fetched on first view).
     'media_disk' => env('WORKFLOW_MEDIA_DISK', env('BANNER_STORAGE_DISK', env('CAMPAIGN_MEDIA_DISK', 'local'))),
 
+    // Licensed or openly licensed collections stored in library_prompts, keyed by `collection`.
+    // credit/source_url describe the collection; each prompt can carry its own credit and source.
+    // mirror_previews: false shows previews straight from their source instead of copying them.
+    'collections' => [
+        'motionsites' => [
+            'source_url' => 'https://prompt-showcase.pages.dev/',
+            'source_label' => 'See it on the prompt showcase',
+        ],
+        'opus-videos' => [
+            'credit' => 'From yihui-dev/awesome-opus5-5-videos (MIT licence). Each prompt credits its creator.',
+            'source_url' => 'https://github.com/yihui-dev/awesome-opus5-5-videos',
+            'source_label' => 'See the collection on GitHub',
+            'mirror_previews' => false,
+        ],
+    ],
+
     'categories' => [
-        'motion' => 'Motion & video',
+        // Motion videos are rendered video pieces; motion animations run live in a website or UI.
+        'motion' => 'Motion videos',
+        'animation' => 'Motion animations',
         'web' => 'Website design',
         'image' => 'Images',
         'copy' => 'Copy & pages',

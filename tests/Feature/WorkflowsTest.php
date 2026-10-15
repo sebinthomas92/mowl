@@ -61,7 +61,7 @@ MD);
         $catalog = app(WorkflowCatalog::class);
 
         $kinetic = $catalog->find('kinetic-title');
-        $this->assertSame('Motion & video', $kinetic['category_label']);
+        $this->assertSame('Motion videos', $kinetic['category_label']);
         $this->assertSame('download', $kinetic['availability']);
         $this->assertSame('Animated type for product launches.', $kinetic['description']);
         $this->assertSame(['Title reveal', 'Outro'], array_column($kinetic['prompts'], 'title'));
@@ -166,10 +166,15 @@ MD);
         $this->assertStringContainsString('MotionSites.ai', $hero['credit']);
 
         // Re-importing updates by id and drops prompts the export no longer has.
-        File::put($file, json_encode([['id' => 'a1', 'title' => 'Aurora hero v2', 'category' => 'Hero Section', 'body' => 'New body.']]));
+        File::put($file, json_encode([['id' => 'a1', 'title' => 'Aurora hero v2', 'category' => 'Hero Section', 'body' => 'New body.', 'credit' => 'Prompt by @ana']]));
         $this->artisan('workflows:import-prompts', ['file' => $file])->assertSuccessful();
         $this->assertSame(1, LibraryPrompt::count());
         $this->assertSame('free', LibraryPrompt::first()->tier);
+        $this->assertSame('Prompt by @ana', LibraryPrompt::first()->credit);
+        File::put($file, json_encode([['id' => 'm1', 'title' => 'Orbit', 'category' => 'UI motion', 'body' => 'Animate.', 'library_category' => 'animation'], ['id' => 'm2', 'title' => 'Reel', 'category' => 'Reels', 'body' => 'Render.']]));
+        $this->artisan('workflows:import-prompts', ['file' => $file, '--collection' => 'opus-videos', '--category' => 'motion'])->assertSuccessful();
+        $this->assertSame(['animation', 'motion'], LibraryPrompt::where('collection', 'opus-videos')->orderBy('source_key')->pluck('category')->all());
+        $this->artisan('workflows:import-prompts', ['file' => $file, '--category' => 'nope'])->assertFailed();
         $this->artisan('workflows:import-prompts', ['file' => $this->library.'/missing.json'])->assertFailed();
     }
 
@@ -224,8 +229,8 @@ MD);
         $this->actingAs($user)->withHeader('Range', 'bytes=9000-')->get(route('workflows.preview', [$aurora->id, 'video']))->assertStatus(416);
         $this->flushHeaders();
 
-        // Served from the stored copy without fetching again.
-        Http::assertSentCount(1);
+        // Served from the stored copy without fetching again (one size check, one download).
+        Http::assertSentCount(2);
         $this->actingAs($user)->get(route('workflows.preview', [$aurora->id, 'poster']))->assertOk()->assertHeader('Content-Type', 'image/jpeg');
         $this->actingAs($user)->get(route('workflows.preview', [$plain->id, 'video']))->assertNotFound();
         $this->actingAs($user)->get(route('workflows.preview', [$plain->id, 'poster']))->assertNotFound();
@@ -245,13 +250,24 @@ MD);
         Storage::fake('previews');
         config(['workflows.media_disk' => 'previews']);
         Http::fake([
-            'cdn.example.com/big.gif' => Http::response(str_repeat('g', 4 * 1024 * 1024 + 1), 200, ['Content-Type' => 'image/gif']),
+            'cdn.example.com/big.gif' => Http::response(str_repeat('g', LibraryPreviews::MAX_BYTES['poster'] + 1), 200, ['Content-Type' => 'image/gif']),
+            'cdn.example.com/huge.gif' => Http::response('', 200, ['Content-Type' => 'image/gif', 'Content-Length' => (string) (5 * 1024 * 1024)]),
             'cdn.example.com/gone.gif' => Http::response('', 404),
             '*' => Http::response('unexpected', 500),
         ]);
         $big = LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '1', 'pack' => 'Hero', 'title' => 'Big', 'body' => 'b', 'poster_url' => 'https://cdn.example.com/big.gif', 'video_url' => 'https://stream.mux.com/abc.m3u8']);
         $gone = LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '2', 'pack' => 'Hero', 'title' => 'Gone', 'body' => 'b', 'poster_url' => 'https://cdn.example.com/gone.gif']);
+        $huge = LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '3', 'pack' => 'Hero', 'title' => 'Huge', 'body' => 'b', 'poster_url' => 'https://cdn.example.com/huge.gif']);
+        Storage::disk('previews')->put('library/motionsites/old.gif', str_repeat('o', LibraryPreviews::MAX_BYTES['poster'] + 1));
+        $old = LibraryPrompt::create(['collection' => 'motionsites', 'source_key' => '4', 'pack' => 'Hero', 'title' => 'Old', 'body' => 'b', 'poster_url' => 'https://cdn.example.com/old.gif', 'poster_path' => 'library/motionsites/old.gif']);
         $user = $this->member();
+
+        // Too large by its size header: marked without downloading it. A copy over the cap is not served.
+        $this->actingAs($user)->get(route('workflows.preview', [$huge->id, 'poster']))->assertRedirect('https://cdn.example.com/huge.gif');
+        $this->actingAs($user)->get(route('workflows.preview', [$old->id, 'poster']))->assertRedirect('https://cdn.example.com/old.gif');
+        $this->assertSame(LibraryPreviews::REMOTE, $huge->fresh()->poster_path);
+        $this->assertSame(LibraryPreviews::REMOTE, $old->fresh()->poster_path);
+        Http::assertSentCount(1);
 
         $this->actingAs($user)->get(route('workflows.preview', [$big->id, 'poster']))->assertRedirect('https://cdn.example.com/big.gif');
         $this->actingAs($user)->get(route('workflows.preview', [$big->id, 'poster']))->assertRedirect('https://cdn.example.com/big.gif');
@@ -259,11 +275,70 @@ MD);
         $this->actingAs($user)->get(route('workflows.preview', [$big->id, 'video']))->assertNotFound();
         $this->assertSame(LibraryPreviews::REMOTE, $big->fresh()->poster_path);
         $this->assertSame(LibraryPreviews::REMOTE, $gone->fresh()->poster_path);
-        Http::assertSentCount(2);
+        Http::assertSentCount(5);
+
+        // A storage failure shows the preview from its source instead of breaking the page.
+        $this->mock(LibraryPreviews::class, fn ($mock) => $mock->shouldReceive('path')->andThrow(new \RuntimeException('storage down')));
+        $this->actingAs($user)->get(route('workflows.preview', [$gone->id, 'poster']))->assertRedirect('https://cdn.example.com/gone.gif');
+        $this->app->forgetInstance(LibraryPreviews::class);
+
+        Livewire::actingAs($user)->withQueryParams(['workflow' => 'motionsites-hero'])->test(WorkflowIndex::class)->assertSet('category', 'web');
 
         $hero = app(WorkflowCatalog::class)->find('motionsites-hero');
         $this->assertNull($hero['prompts'][0]['video']);
         $this->assertSame(route('workflows.preview', [$big->id, 'poster']), $hero['prompts'][0]['poster']);
+    }
+
+    public function test_open_collections_credit_each_prompt_and_show_previews_from_the_source(): void
+    {
+        Http::fake();
+        foreach (['ana' => 'Orbit intro', 'ben' => 'Logo reveal'] as $author => $title) {
+            LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => $author, 'pack' => 'UI motion animations', 'category' => 'animation', 'title' => $title, 'body' => "Animate {$title}.", 'credit' => "Prompt by @{$author}", 'source_url' => "https://x.com/{$author}/status/1", 'poster_url' => "https://media.example.com/{$author}.webp"]);
+        }
+        $user = $this->member();
+
+        $pack = app(WorkflowCatalog::class)->find('opus-videos-ui-motion-animations');
+        $this->assertSame('Motion animations', $pack['category_label']);
+        $this->assertStringContainsString('awesome-opus5-5-videos', $pack['credit']);
+        $this->assertSame('https://github.com/yihui-dev/awesome-opus5-5-videos', $pack['source_url']);
+
+        Livewire::actingAs($user)->withQueryParams(['workflow' => 'opus-videos-ui-motion-animations'])->test(WorkflowIndex::class)
+            ->assertSee('Prompt by @ana')
+            ->assertSee('Prompt by @ben')
+            ->assertSee('https://x.com/ben/status/1', false)
+            ->assertSee('See the collection on GitHub');
+
+        $ana = LibraryPrompt::where('source_key', 'ana')->first();
+        $this->actingAs($user)->get(route('workflows.preview', [$ana->id, 'poster']))->assertRedirect('https://media.example.com/ana.webp');
+        Http::assertNothingSent();
+
+        $download = $this->actingAs($user)->get(route('workflows.download', 'opus-videos-ui-motion-animations'))->getContent();
+        $this->assertStringContainsString('_Prompt by @ana https://x.com/ana/status/1_', $download);
+    }
+
+    public function test_source_only_collections_ignore_old_copies_and_unsafe_links(): void
+    {
+        Storage::fake('previews');
+        config(['workflows.media_disk' => 'previews']);
+        Storage::disk('previews')->put('library/opus-videos/old-poster.webp', 'old copy');
+        $prompt = LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => 'cara', 'pack' => 'UI motion animations', 'category' => 'animation', 'title' => 'Card flip', 'body' => 'Flip the card.', 'credit' => 'Prompt by @cara', 'source_url' => 'javascript:alert(1)', 'video_url' => 'https://media.example.com/cara.mp4', 'poster_url' => 'https://media.example.com/cara.webp', 'poster_path' => 'library/opus-videos/old-poster.webp']);
+        LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => 'dev', 'pack' => 'UI motion animations', 'category' => 'animation', 'title' => 'Tab slide', 'body' => 'Slide the tabs.', 'credit' => 'Prompt by @dev', 'poster_url' => 'javascript:alert(2)']);
+        $user = $this->member();
+
+        $pack = app(WorkflowCatalog::class)->find('opus-videos-ui-motion-animations');
+        $this->assertNull($pack['prompts'][0]['video']);
+        $this->actingAs($user)->get(route('workflows.preview', [$prompt->id, 'poster']))->assertRedirect('https://media.example.com/cara.webp');
+        $this->assertSame(LibraryPreviews::REMOTE, $prompt->fresh()->poster_path);
+
+        LibraryPrompt::where('source_key', 'dev')->update(['credit' => 'Prompt by @cara']);
+        $pack = app(WorkflowCatalog::class)->find('opus-videos-ui-motion-animations');
+        $this->assertStringContainsString('awesome-opus5-5-videos', $pack['credit']);
+        $this->assertSame('Prompt by @cara', $pack['prompts'][0]['credit']);
+        Livewire::actingAs($user)->withQueryParams(['workflow' => 'opus-videos-ui-motion-animations'])->test(WorkflowIndex::class)
+            ->assertSee('Prompt by @cara')
+            ->assertDontSee('javascript:', false);
+        $dev = LibraryPrompt::where('source_key', 'dev')->first();
+        $this->actingAs($user)->get(route('workflows.preview', [$dev->id, 'poster']))->assertNotFound();
     }
 
     private function member(): User

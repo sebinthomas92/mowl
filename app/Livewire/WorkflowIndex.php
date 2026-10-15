@@ -17,6 +17,15 @@ class WorkflowIndex extends Component
     #[Url(as: 'workflow', except: '')]
     public string $selected = '';
 
+    public function mount(WorkflowCatalog $catalog): void
+    {
+        // A link straight to a workflow opens its own category tab.
+        $workflow = $this->category === 'all' && $this->selected !== '' ? $catalog->find($this->selected) : null;
+        if ($workflow && array_key_exists($workflow['category'], $catalog->categories())) {
+            $this->category = $workflow['category'];
+        }
+    }
+
     public function setCategory(string $category): void
     {
         $this->category = $category === 'all' || array_key_exists($category, app(WorkflowCatalog::class)->categories()) ? $category : 'all';

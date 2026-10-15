@@ -86,6 +86,10 @@ class WorkflowCatalog
             $lines[] = '';
             $lines[] = '## '.$prompt['title'];
             $lines[] = preg_replace('/^## /m', '### ', $prompt['body']);
+            if (! empty($prompt['credit']) || ! empty($prompt['source_url'])) {
+                $lines[] = '';
+                $lines[] = '_'.trim(($prompt['credit'] ?? '').' '.($prompt['source_url'] ?? '')).'_';
+            }
         }
 
         return implode("\n", $lines)."\n";
@@ -98,7 +102,7 @@ class WorkflowCatalog
             return collect();
         }
 
-        $columns = ['id', 'collection', 'pack', 'category', 'title', 'tier', 'position', 'credit'];
+        $columns = ['id', 'collection', 'pack', 'category', 'title', 'tier', 'position', 'credit', 'source_url'];
         if (Schema::hasColumn('library_prompts', 'video_url')) {
             $columns = [...$columns, 'video_url', 'poster_url', 'video_path', 'poster_path'];
         }
@@ -111,10 +115,15 @@ class WorkflowCatalog
             ->groupBy(fn (LibraryPrompt $prompt) => $prompt->collection.'|'.$prompt->pack)
             ->map(function (Collection $prompts) {
                 $first = $prompts->first();
+                $collection = config('workflows.collections.'.$first->collection, []);
+                // One credit for the pack when every prompt shares it; otherwise each prompt shows its own.
+                $sharedCredit = $prompts->pluck('credit')->unique()->count() === 1 ? $first->credit : null;
                 $premium = $prompts->where('tier', 'premium')->count();
                 $previews = app(LibraryPreviews::class);
+                // Videos play only from our own copy; source-only collections show their poster instead.
+                $sourceOnly = ($collection['mirror_previews'] ?? true) === false;
                 $preview = fn (LibraryPrompt $prompt, string $kind) => ($prompt->{$kind.'_url'} || $prompt->{$kind.'_path'})
-                    && ! ($kind === 'video' && ($prompt->video_path === LibraryPreviews::REMOTE || $previews->isStream($prompt->video_url)))
+                    && ! ($kind === 'video' && ($sourceOnly || $prompt->video_path === LibraryPreviews::REMOTE || $previews->isStream($prompt->video_url)))
                     ? route('workflows.preview', [$prompt->id, $kind])
                     : null;
                 $items = $prompts->map(fn (LibraryPrompt $prompt) => [
@@ -122,6 +131,9 @@ class WorkflowCatalog
                     'title' => $prompt->title,
                     'body' => null,
                     'tier' => $prompt->tier,
+                    // A collection credit sits on the pack, so each prompt keeps its creator's credit beside it.
+                    'credit' => $sharedCredit && empty($collection['credit']) ? null : $prompt->credit,
+                    'source_url' => LibraryPreviews::safeUrl($prompt->source_url),
                     'video' => $preview($prompt, 'video'),
                     'poster' => $preview($prompt, 'poster'),
                 ])->values()->all();
@@ -132,8 +144,9 @@ class WorkflowCatalog
                     'category' => $first->category,
                     'availability' => 'download',
                     'description' => $prompts->count().' '.Str::plural('prompt', $prompts->count()).($premium ? ", {$premium} premium" : '').'.',
-                    'credit' => $first->credit,
-                    'source_url' => config('workflows.source_url'),
+                    'credit' => ($collection['credit'] ?? null) ?: $sharedCredit,
+                    'source_url' => $collection['source_url'] ?? config('workflows.source_url'),
+                    'source_label' => $collection['source_label'] ?? null,
                     'poster' => collect($items)->pluck('poster')->filter()->first(),
                     'prompts' => $items,
                 ]);
@@ -205,6 +218,7 @@ class WorkflowCatalog
             'length' => null,
             'description' => null,
             'source_url' => null,
+            'source_label' => null,
             'credit' => null,
             'action' => null,
             'poster' => null,
