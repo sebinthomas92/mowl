@@ -26,7 +26,7 @@ class ContentBrowser extends Component
     use InteractsWithWorkspace;
 
     /** Keys that hold ids, ranks or timing, never prose a person should retype. */
-    private const LOCKED_KEYS = ['id', 'shot_id', 'status', 'supporting_claim_ids', 'claim_validation_status', 'angle_rank', 'rank', 'voiceover', 'captions', 'shot_plan', 'final_url', 'total_duration_seconds'];
+    public const LOCKED_KEYS = ['id', 'shot_id', 'status', 'supporting_claim_ids', 'claim_validation_status', 'angle_rank', 'rank', 'voiceover', 'captions', 'shot_plan', 'final_url', 'total_duration_seconds'];
 
     #[Locked]
     public ?int $productId = null;
@@ -42,6 +42,10 @@ class ContentBrowser extends Component
 
     #[Url(as: 'q')]
     public string $search = '';
+
+    /** An edit field to open and highlight, set by links from the launch pack QA list. */
+    #[Url(as: 'field')]
+    public ?string $focusField = null;
 
     public string $detailTab = 'preview';
 
@@ -67,11 +71,15 @@ class ContentBrowser extends Component
             abort_unless($this->product(), 404);
         }
         app(ContentLibrary::class)->syncWorkspace($this->currentWorkspace(), $this->product());
+        if ($this->itemId && $this->focusField && $this->scopedItems()->whereKey($this->itemId)->exists() && $this->membership()?->canCreate()) {
+            $this->showTab('edit');
+        }
     }
 
     public function select(int $id): void
     {
         $this->itemId = $this->item($id)->id;
+        $this->focusField = null;
         $this->detailTab = 'preview';
         $this->commentBody = '';
         $this->flash = null;

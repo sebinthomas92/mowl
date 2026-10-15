@@ -120,7 +120,7 @@ class CampaignPackSafetyValidator
             }
         }
 
-        foreach ($this->claimBearingStrings($content) as $text) {
+        foreach ($this->claimBearingStrings($content) as $path => $text) {
             $normalized = $this->normalize($text);
             foreach (self::SPECIFICITY_TERMS as $term) {
                 if (! str_contains($normalized, $term)) {
@@ -134,17 +134,17 @@ class CampaignPackSafetyValidator
                     ])), $term);
                 });
                 if (! $supported) {
-                    $issues[] = $this->issue('claim', "{$text} is more specific than the approved evidence.");
+                    $issues[] = $this->issue('claim', "{$text} is more specific than the approved evidence.", ['path' => $path, 'text' => $text, 'term' => $term]);
                 }
                 break;
             }
         }
 
-        foreach ($this->allStrings($content) as $text) {
+        foreach ($this->stringsWithPaths($content) as $path => $text) {
             $normalized = $this->normalize($text);
             foreach (['limited time', 'only one left', 'only 1 left', 'selling fast', 'today only', 'ends tonight', 'while stocks last'] as $scarcity) {
                 if (str_contains($normalized, $scarcity) && ! str_contains($sourceText, $scarcity)) {
-                    $issues[] = $this->issue('claim', "Unsupported scarcity language detected: {$text}");
+                    $issues[] = $this->issue('claim', "Unsupported scarcity language detected: {$text}", ['path' => $path, 'text' => $text, 'term' => $scarcity]);
                     break 2;
                 }
             }
@@ -206,12 +206,47 @@ class CampaignPackSafetyValidator
             }
         }
 
-        return collect($issues)->unique(fn (array $issue) => $issue['type'].'|'.$issue['message'])->values()->all();
+        return collect($issues)->unique(fn (array $issue) => $issue['type'].'|'.$issue['message'].'|'.($issue['path'] ?? ''))->values()->all();
     }
 
-    private function issue(string $type, string $message): array
+    /** @param  array{path?: string, text?: string, term?: string}  $location  where in the content the wording sits */
+    private function issue(string $type, string $message, array $location = []): array
     {
-        return ['type' => $type, 'message' => $message];
+        return ['type' => $type, 'message' => $message] + $location;
+    }
+
+    /**
+     * The text with an unsupported term taken out, for a one-click fix, or null when removing the
+     * term would not leave a sensible line. Location phrases ("made in …") are left to a person.
+     */
+    public static function withoutTerm(string $text, string $term): ?string
+    {
+        if (str_ends_with($term, ' in')) {
+            return null;
+        }
+        $pattern = implode('\\s*[-\\x{2010}-\\x{2013}]\\s*', array_map(fn ($part) => preg_quote($part, '/'), explode('-', $term)));
+        // "Not guaranteed" without its term reads as a different claim, so a negated term is left to a person.
+        if (preg_match('/\\b(not|no|never|without|non)\\s+'.$pattern.'/iu', $text)) {
+            return null;
+        }
+        $result = (string) preg_replace('/(?<![\\p{L}\\p{N}])'.$pattern.'(?![\\p{L}\\p{N}])/iu', '', $text);
+        if ($result === $text) {
+            return null;
+        }
+        $result = (string) preg_replace('/\\s{2,}/u', ' ', $result);
+        $result = (string) preg_replace('/\\s+([,.;:!?)])/u', '$1', $result);
+        $result = (string) preg_replace('/\\b(and|or)\\s*(,|and\\b|or\\b)/iu', '$1', $result);
+        $result = (string) preg_replace('/([,;:])\\s*([.!?]|$)/u', '$2', $result);
+        $result = trim((string) preg_replace('/^[\\s,;:&-]+|[\\s,;:&-]+$/u', '', $result));
+        $result = (string) preg_replace('/^(and|or)\\s+|\\s+(and|or)$/iu', '', $result);
+        if (preg_match_all('/\\p{L}{2,}/u', $result) < 2) {
+            return null;
+        }
+        if (preg_match('/^\\p{Lu}/u', $text)) {
+            $result = mb_strtoupper(mb_substr($result, 0, 1)).mb_substr($result, 1);
+        }
+
+        return $result;
     }
 
     private function normalize(string $value): string
@@ -238,39 +273,48 @@ class CampaignPackSafetyValidator
         return count($matches[0]);
     }
 
-    private function allStrings(mixed $value): array
+    /** @return array<string, string> dot path => text, for every string in the value */
+    private function stringsWithPaths(mixed $value, string $path = ''): array
     {
         if (is_string($value)) {
-            return [$value];
+            return [$path => $value];
         }
-
         if (! is_array($value)) {
             return [];
         }
-
-        return collect($value)->flatMap(fn ($item) => $this->allStrings($item))->all();
-    }
-
-    private function claimBearingStrings(array $content): array
-    {
-        $values = [
-            collect(data_get($content, 'product_truth.verified_facts', []))->pluck('statement')->all(),
-            data_get($content, 'product_truth.supported_benefits', []),
-            data_get($content, 'product_truth.offers_and_trust_signals', []),
-            collect(data_get($content, 'offers', []))->pluck('wording')->all(),
-            data_get($content, 'marketing_hub', []),
-        ];
-
-        foreach ($content['creative_routes'] ?? [] as $route) {
-            $values[] = $route['marketing_angle'] ?? '';
-            $values[] = $route['core_promise'] ?? '';
-            $values[] = $route['hooks'] ?? [];
-            $values[] = collect($route['voiceover'] ?? [])->pluck('line')->all();
-            $values[] = collect($route['captions'] ?? [])->pluck('text')->all();
-            $values[] = collect($route['shot_plan'] ?? [])->pluck('product_fact_or_benefit')->all();
-            $values[] = $route['platform_assets'] ?? [];
+        $strings = [];
+        foreach ($value as $key => $entry) {
+            $strings += $this->stringsWithPaths($entry, $path === '' ? (string) $key : "{$path}.{$key}");
         }
 
-        return $this->allStrings($values);
+        return $strings;
+    }
+
+    /** @return array<string, string> dot path => text, for the content that makes product claims */
+    private function claimBearingStrings(array $content): array
+    {
+        $paths = ['product_truth.supported_benefits', 'product_truth.offers_and_trust_signals', 'marketing_hub'];
+        foreach (array_keys(data_get($content, 'product_truth.verified_facts', []) ?: []) as $index) {
+            $paths[] = "product_truth.verified_facts.{$index}.statement";
+        }
+        foreach (array_keys(is_array($content['offers'] ?? null) ? $content['offers'] : []) as $index) {
+            $paths[] = "offers.{$index}.wording";
+        }
+        foreach ($content['creative_routes'] ?? [] as $routeIndex => $route) {
+            $prefix = "creative_routes.{$routeIndex}";
+            array_push($paths, "{$prefix}.marketing_angle", "{$prefix}.core_promise", "{$prefix}.hooks", "{$prefix}.platform_assets");
+            foreach (['voiceover' => 'line', 'captions' => 'text', 'shot_plan' => 'product_fact_or_benefit'] as $list => $key) {
+                foreach (array_keys(is_array($route[$list] ?? null) ? $route[$list] : []) as $index) {
+                    $paths[] = "{$prefix}.{$list}.{$index}.{$key}";
+                }
+            }
+        }
+
+        $strings = [];
+        foreach ($paths as $path) {
+            $strings += $this->stringsWithPaths(data_get($content, $path), $path);
+        }
+
+        return $strings;
     }
 }

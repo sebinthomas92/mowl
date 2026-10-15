@@ -149,13 +149,7 @@
                                         @foreach($qaIssues as $issue)
                                             <li>
                                                 <span>{{ $issue['message'] }}</span>
-                                                @if($issue['type'] === 'source')
-                                                    <small>Approve the product source in the <a href="{{ route('review.index') }}" wire:navigate>Review queue</a>.</small>
-                                                @elseif($issue['type'] === 'claim')
-                                                    <small>Edit the output that uses this wording, or regenerate that section.</small>
-                                                @else
-                                                    <small>Regenerate the section with this problem.</small>
-                                                @endif
+                                                @include('content.qa-issue-actions', ['issue' => $issue])
                                             </li>
                                         @endforeach
                                     </ul>
@@ -464,7 +458,7 @@
 
                         <section id="qa-approval" class="pack-section">
                             <div class="section-header"><div><span class="section-label">QA & APPROVAL</span><h3>{{ $qaIssues ? 'Approval is blocked until every issue is fixed.' : 'Claims, scripts, and captions pass deterministic checks.' }}</h3></div><span @class(['qa-status', 'passed' => !$qaIssues, 'blocked' => $qaIssues])>{{ $qaIssues ? count($qaIssues).' blocking '.Str::plural('issue', count($qaIssues)) : '✓ Ready for owner review' }}</span></div>
-                            @if($qaIssues)<div class="qa-issues">@foreach($qaIssues as $issue)<article><span>{{ strtoupper($issue['type']) }}</span><p>{{ $issue['message'] }}</p></article>@endforeach</div>@else<div class="compliance-clear">✓ No unsupported, exaggerated, false-scarcity, or impossible-timing issues were detected.</div>@endif
+                            @if($qaIssues)<div class="qa-issues">@foreach($qaIssues as $issue)<article><span>{{ strtoupper($issue['type']) }}</span><div class="qa-issue-body"><p>{{ $issue['message'] }}</p>@include('content.qa-issue-actions', ['issue' => $issue])</div></article>@endforeach</div>@else<div class="compliance-clear">✓ No unsupported, exaggerated, false-scarcity, or impossible-timing issues were detected.</div>@endif
                             <div class="evidence-list claim-classification">
                                 @forelse($version->evidence ?? [] as $reference)
                                     <article><div><strong>{{ $reference['claim'] }}</strong><span class="claim-status {{ $reference['status'] }}">{{ str($reference['status'])->replace('_', ' ')->title() }}</span></div><blockquote>{{ $reference['excerpt'] ?? 'Source reference retained.' }}</blockquote><a href="{{ $reference['source'] }}" target="_blank" rel="noopener noreferrer">Open source ↗</a></article>

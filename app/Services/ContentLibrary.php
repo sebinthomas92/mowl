@@ -91,6 +91,37 @@ class ContentLibrary
         return $sections;
     }
 
+    /**
+     * The item section and edit-field key for a dot path into pack content, or null when the path
+     * is not part of any item (product truth). Field keys match the editor's "__"-joined keys; a
+     * line in a list of strings is edited as the whole list.
+     *
+     * @return array{section: string, field: string, body_path: string}|null
+     */
+    public function locate(array $content, string $path): ?array
+    {
+        $parts = explode('.', $path);
+        [$section, $rest] = match (true) {
+            $parts[0] === 'creative_routes' && isset($parts[1]) => ["creative_routes.{$parts[1]}", array_slice($parts, 2)],
+            $parts[0] === 'ranked_angles' => ['ranked_angles', ['angles', ...array_slice($parts, 1)]],
+            $parts[0] === 'offers' => ['offers', ['offers', ...array_slice($parts, 1)]],
+            in_array($parts[0], ['positioning', 'marketing_hub'], true) => [$parts[0], array_slice($parts, 1)],
+            default => [null, []],
+        };
+        if (! $section || ! array_key_exists($section, $this->sections($content))) {
+            return null;
+        }
+        $bodyPath = implode('.', $rest);
+        if ($rest !== [] && is_numeric(end($rest))) {
+            $parent = data_get($content, implode('.', array_slice($parts, 0, -1)));
+            if (is_array($parent) && array_is_list($parent) && collect($parent)->every(fn ($entry) => is_string($entry))) {
+                array_pop($rest);
+            }
+        }
+
+        return ['section' => $section, 'field' => implode('__', $rest), 'body_path' => $bodyPath];
+    }
+
     /** Writes an item body back into pack content. */
     public function apply(array $content, string $section, array $body): array
     {
@@ -173,7 +204,11 @@ class ContentLibrary
             $next = ($latest?->version ?? 0) + 1;
             $version = $item->versions()->create([
                 'version' => $next, 'body' => $body, 'status' => $status, 'campaign_pack_version_id' => $packVersion->id,
-                'note' => $latest ? "Regenerated in launch pack v{$packVersion->version}" : "Generated in launch pack v{$packVersion->version}",
+                'note' => match (true) {
+                    ! $latest => "Generated in launch pack v{$packVersion->version}",
+                    $packVersion->generator === 'qa_fix' => "Unsupported wording removed in launch pack v{$packVersion->version}",
+                    default => "Regenerated in launch pack v{$packVersion->version}",
+                },
                 'reviewed_by_user_id' => in_array($status, ['approved', 'changes'], true) ? $packVersion->reviewed_by_user_id : null,
                 'reviewed_at' => in_array($status, ['approved', 'changes'], true) ? $packVersion->reviewed_at : null,
             ]);
@@ -357,8 +392,12 @@ class ContentLibrary
         if ($item->isPackSection()) {
             $pack = $item->campaignPack;
             $latest = $pack->versions()->orderByDesc('version')->first();
-            $content = $this->apply($this->assemble($pack), $item->section, $version->body);
-            $issues = $latest ? app(CampaignPackSafetyValidator::class)->issues($content, $latest->evidence ?? [], $latest->compliance_flags ?? [], $pack->sourceSnapshot) : [];
+            // Checked against every output's current text, so an edit saved on another output
+            // counts; wording issues in another output block that output, not this one.
+            $content = $this->apply($this->current($pack), $item->section, $version->body);
+            $issues = $latest ? collect(app(CampaignPackSafetyValidator::class)->issues($content, $latest->evidence ?? [], $latest->compliance_flags ?? [], $pack->sourceSnapshot))
+                ->reject(fn (array $issue) => isset($issue['path']) && ($section = $this->locate($content, $issue['path'])['section'] ?? null) && $section !== $item->section)
+                ->values()->all() : [];
             $checks[] = ['ok' => $issues === [], 'blocking' => true, 'label' => $issues === [] ? 'Claims, timing and source checks pass' : $issues[0]['message']];
         }
 
@@ -436,7 +475,7 @@ class ContentLibrary
         }
         $normalizer = app(CampaignPackContentNormalizer::class);
 
-        return $pack->versions()->where(fn ($query) => $query->whereNull('generator')->orWhere('generator', '!=', 'assembled'))->get()
+        return $pack->versions()->where(fn ($query) => $query->whereNull('generator')->orWhereNotIn('generator', ['assembled', 'qa_fix']))->get()
             ->map(fn (CampaignPackVersion $packVersion) => $this->sections($normalizer->normalize($packVersion->content ?? [], $pack->product, $pack->sourceSnapshot))[$item->section][2] ?? null)
             ->filter()
             ->values()
@@ -480,6 +519,20 @@ class ContentLibrary
             $approved = $item->versions()->where('status', 'approved')->orderByDesc('version')->first();
             if ($approved) {
                 $content = $this->apply($content, $item->section, $approved->body);
+            }
+        }
+
+        return $content;
+    }
+
+    /** Pack content with every section replaced by its item's latest version, edited drafts included. */
+    public function current(CampaignPack $pack): array
+    {
+        $latest = $pack->versions()->orderByDesc('version')->first();
+        $content = $latest ? app(CampaignPackContentNormalizer::class)->normalize($latest->content ?? [], $pack->product, $pack->sourceSnapshot) : [];
+        foreach ($pack->contentItems()->with('latestVersion')->get()->filter->isPackSection() as $item) {
+            if ($item->latestVersion && array_key_exists($item->section, $this->sections($content))) {
+                $content = $this->apply($content, $item->section, $item->latestVersion->body);
             }
         }
 
