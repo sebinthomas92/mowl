@@ -68,7 +68,8 @@ class BillingCheckout
             if ($exception->stripeCode !== 'resource_missing') {
                 throw $exception;
             }
-            $subscription->update(['stripe_customer_id' => null, 'stripe_subscription_id' => null, 'status' => null, 'cancel_at_period_end' => false]);
+            // Only the subscription is known to be gone; the customer is checked separately before checkout.
+            $subscription->update(['stripe_subscription_id' => null, 'status' => null, 'cancel_at_period_end' => false]);
         }
     }
 

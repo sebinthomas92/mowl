@@ -295,6 +295,7 @@ class BillingTest extends TestCase
         $workspace->subscription()->create(['stripe_customer_id' => 'cus_gone', 'stripe_subscription_id' => 'sub_gone', 'status' => 'active']);
         Http::fake([
             'api.stripe.com/v1/subscriptions/sub_gone' => Http::response(['error' => ['message' => 'No such subscription', 'code' => 'resource_missing']], 404),
+            'api.stripe.com/v1/subscriptions?*' => Http::response(['error' => ['message' => 'No such customer', 'code' => 'resource_missing']], 404),
             'api.stripe.com/v1/customers' => Http::response(['id' => 'cus_new']),
             'api.stripe.com/v1/checkout/sessions' => Http::response(['id' => 'cs_new', 'url' => 'https://checkout.stripe.com/c/pay/cs_new']),
         ]);
@@ -399,6 +400,30 @@ class BillingTest extends TestCase
         ]);
 
         Livewire::actingAs($owner)->test(BillingIndex::class)->call('openPortal')->assertRedirect('https://billing.stripe.com/p/session/1');
+    }
+
+    public function test_a_refunded_pack_with_a_receipt_invoice_takes_its_credits_back(): void
+    {
+        [, $workspace] = $this->subscribedWorkspace(status: 'active');
+        $this->webhook('evt_80', 'checkout.session.completed', ['id' => 'cs_8', 'mode' => 'payment', 'payment_status' => 'paid', 'customer' => 'cus_1',
+            'payment_intent' => 'pi_8', 'amount_total' => 2000, 'currency' => 'usd',
+            'metadata' => ['workspace_id' => (string) $workspace->id, 'kind' => 'credits', 'pack' => 'credits_10']])->assertOk();
+        $this->assertSame(10, $workspace->creditBalance());
+
+        $this->webhook('evt_81', 'charge.refunded', ['id' => 'ch_8', 'customer' => 'cus_1', 'payment_intent' => 'pi_8', 'invoice' => 'in_receipt', 'refunded' => true])->assertOk();
+        $this->assertSame(0, $workspace->creditBalance());
+    }
+
+    public function test_a_dispute_before_the_purchase_lands_grants_nothing(): void
+    {
+        [, $workspace] = $this->subscribedWorkspace(status: 'active');
+        Http::fake(['api.stripe.com/v1/charges/ch_early' => Http::response(['id' => 'ch_early', 'customer' => 'cus_1', 'payment_intent' => 'pi_early', 'invoice' => null])]);
+        $this->webhook('evt_90', 'charge.dispute.funds_withdrawn', ['id' => 'dp_9', 'charge' => 'ch_early'])->assertOk();
+        $this->webhook('evt_91', 'checkout.session.completed', ['id' => 'cs_9', 'mode' => 'payment', 'payment_status' => 'paid', 'customer' => 'cus_1',
+            'payment_intent' => 'pi_early', 'amount_total' => 2000, 'currency' => 'usd',
+            'metadata' => ['workspace_id' => (string) $workspace->id, 'kind' => 'credits', 'pack' => 'credits_10']])->assertOk();
+
+        $this->assertSame(0, $workspace->creditBalance());
     }
 
     public function test_signature_check_rejects_old_timestamps(): void

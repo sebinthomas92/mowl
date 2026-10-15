@@ -66,7 +66,7 @@ class StripeWebhookHandler
 
         $payment = (string) ($session['payment_intent'] ?? $session['id']);
         // A refund that arrived first leaves a marker; then there is nothing to grant.
-        $credits = fn () => WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$payment)->exists() ? null : $pack['credits'];
+        $credits = fn () => WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$payment)->exists() || $this->disputed($payment) ? null : $pack['credits'];
         $this->ledger($workspace, $credits, 'credit_pack_purchase', $pack['credits'].' credits purchased', 'stripe:payment:'.$payment, [
             'checkout_session' => $session['id'] ?? null,
             'payment_intent' => $session['payment_intent'] ?? null,
@@ -193,12 +193,19 @@ class StripeWebhookHandler
         return $this->stripe->get('charges/'.$charge['id']) + $charge;
     }
 
-    /** A pack payment's grant is keyed by payment intent, a plan cycle's by its invoice. */
+    /**
+     * A pack payment's grant is keyed by payment intent, a plan cycle's by its invoice. Packs get a
+     * receipt invoice too, so a payment grant wins whenever one exists.
+     */
     private function grantKey(array $charge): string
     {
+        $paymentKey = 'stripe:payment:'.$charge['payment_intent'];
         $invoice = is_array($charge['invoice'] ?? null) ? ($charge['invoice']['id'] ?? null) : ($charge['invoice'] ?? null);
+        if (! is_string($invoice) || $invoice === '' || WorkspaceCredit::query()->where('idempotency_key', $paymentKey)->exists()) {
+            return $paymentKey;
+        }
 
-        return is_string($invoice) && $invoice !== '' ? 'stripe:invoice:'.$invoice : 'stripe:payment:'.$charge['payment_intent'];
+        return 'stripe:invoice:'.$invoice;
     }
 
     private function chargeWorkspace(array $charge, string $grantKey): ?Workspace
