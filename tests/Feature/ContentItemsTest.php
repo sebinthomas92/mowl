@@ -227,6 +227,68 @@ class ContentItemsTest extends TestCase
         Livewire::actingAs($outsider)->test(ContentBrowser::class, ['productId' => $pack->product_id])->assertNotFound();
     }
 
+    public function test_an_edit_that_adds_an_unsupported_claim_blocks_approval(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        $library = app(ContentLibrary::class);
+        $library->syncPack($pack);
+        $positioning = $pack->contentItems()->where('section', 'positioning')->firstOrFail();
+        $library->saveDraft($positioning->latestVersion, ['value_proposition' => 'Clinically proven to cut eye strain by 40%.']);
+
+        $check = collect($library->checks($positioning->fresh()->latestVersion))->first(fn (array $check) => str_starts_with($check['label'], 'Edited text'));
+        $this->assertFalse($check['ok']);
+        $this->assertTrue($check['blocking']);
+        $this->assertStringContainsString('clinically', $check['label']);
+        $this->assertStringContainsString('40', $check['label']);
+
+        try {
+            $library->approve($positioning->fresh()->latestVersion, $owner);
+            $this->fail('An unsupported edited claim was approved.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('Edited text adds a claim', $exception->errors()['decision'][0]);
+        }
+        $this->assertSame('draft', $positioning->fresh()->status);
+
+        // A plain rewording, and a variation that keeps it, stay approvable.
+        $library->saveDraft($positioning->fresh()->latestVersion, ['value_proposition' => 'A clear, directly supported reason to choose this product.']);
+        $this->assertTrue(collect($library->checks($positioning->fresh()->latestVersion))->firstWhere('label', 'Edited text adds no unsupported claims')['ok']);
+        $library->approve($positioning->fresh()->latestVersion, $owner);
+
+        $variation = $library->variation($positioning->fresh(), $owner);
+        $library->saveDraft($variation->latestVersion, ['value_proposition' => 'The best reading lamp, guaranteed.']);
+        $this->expectException(ValidationException::class);
+        $library->approve($variation->fresh()->latestVersion, $owner);
+    }
+
+    public function test_a_source_whose_content_changes_loses_its_approval(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $source = $pack->sourceSnapshot;
+        $source->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+
+        $source->update(['fetched_at' => now(), 'status' => 'ready', 'extracted_content' => $source->extracted_content]);
+        $this->assertNotNull($source->fresh()->approved_at, 'An unchanged refetch keeps the approval.');
+
+        $source->update(['content_hash' => hash('sha256', 'changed'), 'extracted_content' => 'Now 50% off, clinically proven.', 'fetched_at' => now()]);
+        $this->assertNull($source->fresh()->approved_at);
+        $this->assertNull($source->fresh()->approved_by_user_id);
+
+        $library = app(ContentLibrary::class);
+        $library->syncPack($pack);
+        $this->expectException(ValidationException::class);
+        $library->approve($pack->contentItems()->where('section', 'positioning')->firstOrFail()->latestVersion, $owner);
+    }
+
+    public function test_opening_an_older_pack_creates_its_items(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $this->assertSame(0, $pack->contentItems()->count());
+
+        $this->actingAs($owner)->get(route('campaign-packs.show', $pack))->assertOk()->assertSee('7 items, each reviewed on its own');
+        $this->assertSame(7, $pack->contentItems()->count());
+    }
+
     private function fixture(string $name = 'Review'): array
     {
         $owner = User::factory()->create();

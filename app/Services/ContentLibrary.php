@@ -29,6 +29,20 @@ use Illuminate\Validation\ValidationException;
  */
 class ContentLibrary
 {
+    /**
+     * Words that make a factual or performance claim. Edited text may only use one when the
+     * product page, confirmed Knowledge or the generated (evidence-checked) text already does.
+     */
+    private const CLAIM_TERMS = [
+        'best', '#1', 'number one', 'no. 1', 'leading', 'proven', 'clinically', 'guarantee', 'guaranteed', 'certified',
+        'award', 'patented', 'fastest', 'strongest', 'cheapest', 'lowest price', 'cure', 'cures', 'heal', 'heals',
+        'doctor', 'dermatologist', 'recommended', 'tested', 'warranty', 'lifetime', 'money-back', 'free shipping',
+        'handmade', 'handcrafted', 'made in', 'manufactured in', 'sourced in', 'organic', 'natural', 'vegan',
+        'cruelty-free', 'non-toxic', 'bpa-free', 'hypoallergenic', 'waterproof', 'water-resistant', 'sustainable',
+        'eco-friendly', 'recyclable', 'plastic-free', 'solid wood', 'genuine leather', 'limited time', 'sold out',
+        'selling fast', 'only one left', 'today only', 'percent', 'times faster', 'times more', 'reviews', 'rated',
+    ];
+
     /** Sections a single generation job can regenerate, keyed by item section prefix. */
     public const REGENERABLE = ['positioning' => 'positioning', 'ranked_angles' => 'ranked_angles', 'creative_routes' => 'creative_routes', 'offers' => 'offers'];
 
@@ -333,6 +347,13 @@ class ContentLibrary
             $checks[] = ['ok' => $used === null, 'blocking' => true, 'label' => $used === null ? 'No excluded facts used' : 'Uses an excluded fact: '.mb_strimwidth((string) $used, 0, 60, '…')];
         }
 
+        $unsupported = $this->unsupportedEdits($item, $version, $product);
+        if ($unsupported !== null) {
+            $checks[] = ['ok' => $unsupported === [], 'blocking' => true, 'label' => $unsupported === []
+                ? 'Edited text adds no unsupported claims'
+                : 'Edited text adds a claim the source does not support: “'.implode('”, “', array_slice($unsupported, 0, 3)).'”'];
+        }
+
         if ($item->isPackSection()) {
             $pack = $item->campaignPack;
             $latest = $pack->versions()->orderByDesc('version')->first();
@@ -345,6 +366,109 @@ class ContentLibrary
         $checks[] = ['ok' => (bool) $voice, 'blocking' => false, 'label' => $voice ? "Brand voice: {$product->brand->name}" : "{$product->brand->name} has no brand voice yet"];
 
         return $checks;
+    }
+
+    /**
+     * Claim words and numbers that a person added by editing and that nothing approved supports.
+     * Generated text was checked against evidence when it was made; edited text was not. Returns
+     * null when the version has no edited text.
+     *
+     * @return list<string>|null
+     */
+    private function unsupportedEdits(ContentItem $item, ContentVersion $version, Product $product): ?array
+    {
+        $root = $item;
+        for ($depth = 0; $root->variation_of_id && $depth < 10; $depth++) {
+            $root = $root->variationOf ?? $root;
+        }
+        $generated = collect($this->generatedBodies($root))
+            ->flatMap(fn (array $body) => $this->strings($body))
+            ->map(fn (string $value) => $this->normalizeText($value))
+            ->unique();
+        $edited = collect($this->strings($version->body))
+            ->map(fn (string $value) => $this->normalizeText($value))
+            ->reject(fn (string $value) => $value === '' || $generated->contains($value))
+            ->values();
+        if ($edited->isEmpty()) {
+            return null;
+        }
+
+        $source = $root->campaignPack?->sourceSnapshot ?? $item->campaignPack?->sourceSnapshot;
+        $knowledge = ProductKnowledge::available() ? $product->facts()->where('status', 'ok')->pluck('confirmed_value')->implode("\n") : '';
+        $support = $this->normalizeText(implode("\n", [
+            $source?->extracted_content, json_encode($source?->extracted_truth ?? []), $knowledge,
+            $product->name, $product->price, $product->summary, $generated->implode("\n"),
+        ]));
+        $supportNumbers = $this->numbers($support);
+
+        $unsupported = [];
+        foreach ($edited as $text) {
+            foreach (self::CLAIM_TERMS as $term) {
+                if ($this->containsTerm($text, $term) && ! $this->containsTerm($support, $term)) {
+                    $unsupported[] = $term;
+                }
+            }
+            foreach (array_diff($this->numbers($text), $supportNumbers) as $number) {
+                $unsupported[] = $number;
+            }
+        }
+
+        return array_values(array_unique($unsupported));
+    }
+
+    /**
+     * What the generator produced for an item, before anyone edited it. Drafts are edited in
+     * place, so this reads the pack versions and banner record, never the item's own versions.
+     * Assembled pack versions carry approved edits and are left out.
+     *
+     * @return list<array<mixed>>
+     */
+    private function generatedBodies(ContentItem $item): array
+    {
+        if ($item->banner_creative_id) {
+            $creative = $item->bannerCreative;
+
+            return $creative ? [[$creative->headline, $creative->supporting_text, $creative->cta, $creative->direction]] : [];
+        }
+        $pack = $item->campaignPack;
+        if (! $item->section || ! $pack) {
+            return [];
+        }
+        $normalizer = app(CampaignPackContentNormalizer::class);
+
+        return $pack->versions()->where(fn ($query) => $query->whereNull('generator')->orWhere('generator', '!=', 'assembled'))->get()
+            ->map(fn (CampaignPackVersion $packVersion) => $this->sections($normalizer->normalize($packVersion->content ?? [], $pack->product, $pack->sourceSnapshot))[$item->section][2] ?? null)
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    /** @return list<string> */
+    private function strings(mixed $value): array
+    {
+        if (is_string($value)) {
+            return [$value];
+        }
+
+        return is_array($value) ? collect($value)->flatMap(fn ($entry) => $this->strings($entry))->all() : [];
+    }
+
+    private function normalizeText(?string $value): string
+    {
+        return mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', (string) $value)));
+    }
+
+    private function containsTerm(string $text, string $term): bool
+    {
+        return (bool) preg_match('/(?<![\p{L}\p{N}])'.preg_quote($term, '/').'(?![\p{L}\p{N}])/u', $text);
+    }
+
+    /** @return list<string> plain numbers in a text ("1,499.00" and "1499" are the same number) */
+    private function numbers(string $text): array
+    {
+        preg_match_all('/\d[\d,]*(?:\.\d+)?/u', $text, $matches);
+
+        return array_values(array_unique(array_map(fn (string $match) => $this->number($match), $matches[0])));
     }
 
     /** Pack content with every section replaced by its latest approved item version. */
