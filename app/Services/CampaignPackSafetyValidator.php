@@ -291,6 +291,7 @@ class CampaignPackSafetyValidator
     /**
      * Amounts written with a currency, as "INR 699": "₹699", "INR 899", "Rs. 1,499", "500 rupees".
      * Symbols may follow a digit ("₹750₹699" is a struck-out price beside the sale price); words may not.
+     * A currency never pairs with a number across a line break, since joined fields are separate text.
      *
      * The source's own currencies are always recognised, and settle what "$" or "¥" means.
      *
@@ -301,8 +302,8 @@ class CampaignPackSafetyValidator
     {
         $number = '(\\d(?:[\\d.,]*\\d)?)';
         $codes = implode('|', array_unique([...self::CURRENCY_CODES, ...array_filter($known, fn (string $code) => preg_match('/^[A-Z]{3}$/', $code))]));
-        preg_match_all('/([₹$€£¥]|(?<![\\p{L}\\p{N}])(?:rs\\.?|'.$codes.'))\\s?'.$number.'/iu', $text, $before, PREG_SET_ORDER);
-        preg_match_all('/'.$number.'\\s?(rupees|'.$codes.')(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER);
+        preg_match_all('/([₹$€£¥]|(?<![\\p{L}\\p{N}])(?:rs\\.?|'.$codes.'))[ \\x{00A0}]?'.$number.'/iu', $text, $before, PREG_SET_ORDER);
+        preg_match_all('/'.$number.'[ \\x{00A0}]?(rupees|'.$codes.')(?![\\p{L}])/iu', $text, $after, PREG_SET_ORDER);
         $prices = [
             ...array_map(fn (array $match) => $this->currency($match[1], $known).' '.$this->amount($match[2]), $before),
             ...array_map(fn (array $match) => $this->currency($match[2], $known).' '.$this->amount($match[1]), $after),

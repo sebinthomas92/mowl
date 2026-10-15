@@ -374,10 +374,12 @@ class ContentLibrary
             $checks[] = ['ok' => false, 'blocking' => false, 'label' => 'Mentions a price, but Knowledge has no confirmed price'];
         }
 
-        // Every output, banners included, may only state prices the product page shows.
+        // Every output, banners included, may only state prices the product page shows. A banner is
+        // checked on the text rendered into its image too, which editing the item body does not change.
         if ($source = $item->campaignPack?->sourceSnapshot) {
             $validator = app(CampaignPackSafetyValidator::class);
-            $wrongPrices = $validator->unsupportedPrices($text, $validator->supportedPrices($source));
+            $rendered = $item->banner_creative_id ? trim($item->bannerCreative?->headline.' '.$item->bannerCreative?->supporting_text) : '';
+            $wrongPrices = $validator->unsupportedPrices(trim($text."\n".$rendered), $validator->supportedPrices($source));
             if ($wrongPrices) {
                 $checks[] = ['ok' => false, 'blocking' => true, 'label' => 'States a price the product page does not show ('.implode(', ', $wrongPrices).')'];
             }

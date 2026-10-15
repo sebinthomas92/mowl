@@ -68,6 +68,9 @@ class BannerIntegrityTest extends TestCase
         $checks = fn (string $headline) => $library->checks($pack->contentItems()->where('section', 'like', 'banner.%')->get()
             ->first(fn ($item) => $item->latestVersion->body['headline'] === $headline)->latestVersion);
         $this->assertContains('States a price the product page does not show (899)', collect($checks('INR 899 + Free Shipping'))->where('ok', false)->where('blocking', true)->pluck('label')->all());
+        $flagged = $pack->contentItems()->get()->first(fn ($item) => $item->latestVersion?->body['headline'] === 'INR 899 + Free Shipping');
+        $edited = $flagged->versions()->create(['version' => 2, 'status' => 'draft', 'body' => ['headline' => 'Free Shipping'] + $flagged->latestVersion->body]);
+        $this->assertContains('States a price the product page does not show (899)', collect($library->checks($edited))->where('ok', false)->pluck('label')->all(), 'The PNG still shows the price, so editing the text does not clear it');
         $this->assertEmpty(collect($checks('A stand for one more chapter'))->where('ok', false)->where('blocking', true)->all(), 'An unedited banner, size line included, is not an edit');
     }
 

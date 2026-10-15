@@ -223,7 +223,7 @@
                     <div class="version-history"><span>VERSIONS</span>@foreach($pack->versions->sortBy('version') as $availableVersion)<button type="button" wire:click="selectVersion({{ $availableVersion->version }})" @class(['active' => $version->version === $availableVersion->version])>v{{ $availableVersion->version }}</button>@endforeach</div>
                     <form wire:submit="regenerateSection" class="regeneration-form">
                         <label>Regenerate
-                            <select wire:model="regenerationSection"><option value="positioning">Positioning</option><option value="ranked_angles">Ranked angles</option><option value="creative_routes">Creative routes</option><option value="offers">Offer framing</option><option value="marketing_hub">Channel copy</option><option value="summary">Overview and product details</option></select>
+                            <select wire:model="regenerationSection"><option value="positioning">Positioning</option><option value="ranked_angles">Ranked angles</option><option value="creative_routes">Creative routes</option><option value="offers">Offer framing</option><option value="marketing_hub">Channel copy</option></select>
                         </label>
                         <button type="submit" @disabled($activeJob && in_array($activeJob->status, ['queued', 'processing', 'retrying']))>↻ Generate variation</button>
                     </form>

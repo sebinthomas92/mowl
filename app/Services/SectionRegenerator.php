@@ -11,16 +11,7 @@ use Illuminate\Validation\ValidationException;
 /** Queues a new version of one pack section. The first three in a pack's first day are included. */
 class SectionRegenerator
 {
-    public const SECTIONS = ['positioning', 'ranked_angles', 'creative_routes', 'offers', 'marketing_hub', 'summary'];
-
-    /** Pack content keys each section replaces; "summary" is the overview and product truth together. */
-    public const KEYS = ['summary' => ['overview', 'product_truth']];
-
-    /** @return list<string> */
-    public static function keys(string $section): array
-    {
-        return self::KEYS[$section] ?? [$section];
-    }
+    public const SECTIONS = ['positioning', 'ranked_angles', 'creative_routes', 'offers', 'marketing_hub'];
 
     public const READY_STATUSES = ['draft', 'review', 'rejected', 'approved'];
 
