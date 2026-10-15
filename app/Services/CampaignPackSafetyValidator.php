@@ -150,6 +150,13 @@ class CampaignPackSafetyValidator
             }
         }
 
+        $supportedPrices = $this->supportedPrices($source);
+        foreach ($this->stringsWithPaths($content) as $path => $text) {
+            if ($prices = $this->unsupportedPrices($text, $supportedPrices)) {
+                $issues[] = $this->issue('claim', "{$text} states a price the product page does not show (".implode(', ', $prices).').', ['path' => $path, 'text' => $text]);
+            }
+        }
+
         foreach ($content['creative_routes'] ?? [] as $routeIndex => $route) {
             $routeName = $route['name'] ?? 'Route '.($routeIndex + 1);
             $requiredPlatforms = ['instagram_reels', 'youtube_shorts', 'whatsapp_status', 'meta_ads'];
@@ -207,6 +214,54 @@ class CampaignPackSafetyValidator
         }
 
         return collect($issues)->unique(fn (array $issue) => $issue['type'].'|'.$issue['message'].'|'.($issue['path'] ?? ''))->values()->all();
+    }
+
+    /**
+     * Amounts a price may use: every number on the product page and its structured data, plus a
+     * price the team confirmed in Knowledge. Null source means nothing to check against.
+     *
+     * @return list<string>|null
+     */
+    public function supportedPrices(?SourceSnapshot $source): ?array
+    {
+        if (! $source) {
+            return null;
+        }
+        $text = implode("\n", array_filter([$source->extracted_content, CampaignPackEvidence::json($source->extracted_truth ?? [])]));
+        if (ProductKnowledge::available() && $source->product_id) {
+            $text .= "\n".$source->product?->facts()->where('key', 'price')->where('status', 'ok')->value('confirmed_value');
+        }
+        preg_match_all('/\\d[\\d,]*(?:\\.\\d+)?/u', $text, $matches);
+
+        return array_values(array_unique(array_map(fn (string $number) => $this->amount($number), $matches[0])));
+    }
+
+    /**
+     * Currency amounts in the text that the supported prices do not include.
+     *
+     * @param  list<string>|null  $supported  from supportedPrices()
+     * @return list<string>
+     */
+    public function unsupportedPrices(string $text, ?array $supported): array
+    {
+        if ($supported === null) {
+            return [];
+        }
+        preg_match_all('/(?<![\\p{L}\\p{N}])(?:₹|rs\\.?|inr|usd|eur|gbp|\\$|€|£)\\s?(\\d[\\d,]*(?:\\.\\d+)?)/iu', $text, $before);
+        preg_match_all('/(\\d[\\d,]*(?:\\.\\d+)?)\\s?(?:inr|rupees)(?![\\p{L}])/iu', $text, $after);
+
+        return array_values(array_unique(array_filter(
+            array_map(fn (string $number) => $this->amount($number), [...$before[1], ...$after[1]]),
+            fn (string $amount) => ! in_array($amount, $supported, true),
+        )));
+    }
+
+    /** "1,499.00" and "1499" are the same amount. */
+    private function amount(string $number): string
+    {
+        $number = str_replace(',', '', $number);
+
+        return str_contains($number, '.') ? rtrim(rtrim($number, '0'), '.') : $number;
     }
 
     /** @param  array{path?: string, text?: string, term?: string}  $location  where in the content the wording sits */
