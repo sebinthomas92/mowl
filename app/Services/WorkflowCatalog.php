@@ -124,9 +124,9 @@ class WorkflowCatalog
                 $sourceOnly = ($collection['mirror_previews'] ?? true) === false;
                 $stored = fn (LibraryPrompt $prompt, string $kind) => ! $sourceOnly && $prompt->{$kind.'_path'} && $prompt->{$kind.'_path'} !== LibraryPreviews::REMOTE;
                 $preview = fn (LibraryPrompt $prompt, string $kind) => match (true) {
-                    // Posters without a stored copy load straight from the source, so a page of previews
-                    // doesn't become dozens of app requests.
-                    $kind === 'poster' => $stored($prompt, 'poster') ? route('workflows.preview', [$prompt->id, 'poster']) : LibraryPreviews::safeUrl($prompt->poster_url),
+                    // Posters load straight from their source; serving them through the app failed under
+                    // a page of parallel requests. A stored copy is used only when the source is gone.
+                    $kind === 'poster' => LibraryPreviews::safeUrl($prompt->poster_url) ?? ($stored($prompt, 'poster') ? route('workflows.preview', [$prompt->id, 'poster']) : null),
                     ! $prompt->video_url && ! $prompt->video_path,
                     $sourceOnly,
                     $prompt->video_path === LibraryPreviews::REMOTE,

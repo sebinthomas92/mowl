@@ -233,7 +233,7 @@ MD);
         // Served from the stored copy without fetching again (one size check, one download).
         Http::assertSentCount(2);
         $this->actingAs($user)->get(route('workflows.preview', [$aurora->id, 'poster']))->assertOk()->assertHeader('Content-Type', 'image/jpeg');
-        $this->assertSame(route('workflows.preview', [$aurora->id, 'poster']), app(WorkflowCatalog::class)->find('motionsites-hero-section')['poster']);
+        $this->assertSame('https://cdn.example.com/hero.jpg', app(WorkflowCatalog::class)->find('motionsites-hero-section')['poster']);
         $this->actingAs($user)->get(route('workflows.preview', [$plain->id, 'video']))->assertNotFound();
         $this->actingAs($user)->get(route('workflows.preview', [$plain->id, 'poster']))->assertNotFound();
 
