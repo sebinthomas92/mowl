@@ -32,6 +32,8 @@ class StripeWebhookHandler
             'invoice.paid' => $this->invoicePaid($object),
             'invoice.payment_failed' => $this->refreshSubscription((string) $this->invoiceSubscriptionId($object)),
             'charge.refunded' => $this->chargeRefunded($object),
+            'charge.dispute.funds_withdrawn' => $this->disputeFundsWithdrawn($object),
+            'charge.dispute.funds_reinstated' => $this->disputeFundsReinstated($object),
             default => null,
         };
     }
@@ -99,30 +101,110 @@ class StripeWebhookHandler
         ]);
     }
 
-    /** A fully refunded credit pack takes its credits back. */
+    /** A full refund takes back the credits its payment granted, for a pack or a plan cycle. */
     private function chargeRefunded(array $charge): void
     {
         if (! ($charge['refunded'] ?? false) || ! filled($charge['payment_intent'] ?? null)) {
             return;
         }
-        // A pack payment is keyed by payment intent, a plan cycle by its invoice.
-        $grantKey = filled($charge['invoice'] ?? null) && is_string($charge['invoice'])
-            ? 'stripe:invoice:'.$charge['invoice']
-            : 'stripe:payment:'.$charge['payment_intent'];
-        $workspace = WorkspaceSubscription::query()->where('stripe_customer_id', (string) ($charge['customer'] ?? ''))->first()?->workspace
-            ?? WorkspaceCredit::query()->where('idempotency_key', $grantKey)->first()?->workspace;
+        $charge = $this->withInvoice($charge);
+        $grantKey = $this->grantKey($charge);
+        $workspace = $this->chargeWorkspace($charge, $grantKey);
         if (! $workspace) {
             return;
         }
 
         // Decided under the workspace lock, like the grant, so a refund racing its purchase can't miss it.
         // With no grant yet this writes a zero marker, and a late pack purchase then grants nothing.
-        $this->ledger($workspace, fn () => -(int) WorkspaceCredit::query()->where('idempotency_key', $grantKey)->value('amount'),
+        $this->ledger($workspace, fn () => $this->disputed($charge['payment_intent']) ? null : -(int) WorkspaceCredit::query()->where('idempotency_key', $grantKey)->value('amount'),
             'credit_pack_refund', 'Payment refunded', 'stripe:refund:'.$charge['payment_intent'], [
                 'charge' => $charge['id'] ?? null,
                 'payment_intent' => $charge['payment_intent'],
                 'refunded_grant' => $grantKey,
             ]);
+    }
+
+    /** When a dispute pulls the money back, the credits that payment granted go with it. */
+    private function disputeFundsWithdrawn(array $dispute): void
+    {
+        [$charge, $workspace, $grantKey] = $this->disputeContext($dispute);
+        if (! $workspace) {
+            return;
+        }
+        $this->ledger($workspace, fn () => WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$charge['payment_intent'])->exists()
+            ? null
+            : -(int) WorkspaceCredit::query()->where('idempotency_key', $grantKey)->value('amount'),
+            'credit_dispute', 'Payment disputed', 'stripe:dispute:'.$dispute['id'], [
+                'dispute' => $dispute['id'],
+                'charge' => $charge['id'] ?? null,
+                'payment_intent' => $charge['payment_intent'],
+                'disputed_grant' => $grantKey,
+            ]);
+    }
+
+    /** A won dispute gives back exactly what its withdrawal took. */
+    private function disputeFundsReinstated(array $dispute): void
+    {
+        [$charge, $workspace] = $this->disputeContext($dispute);
+        if (! $workspace) {
+            return;
+        }
+        $this->ledger($workspace, function () use ($dispute): ?int {
+            $withdrawn = WorkspaceCredit::query()->where('idempotency_key', 'stripe:dispute:'.$dispute['id'])->value('amount');
+
+            return $withdrawn === null ? null : -(int) $withdrawn;
+        }, 'credit_dispute_won', 'Dispute won', 'stripe:dispute-won:'.$dispute['id'], [
+            'dispute' => $dispute['id'],
+            'charge' => $charge['id'] ?? null,
+        ]);
+    }
+
+    /** @return array{0: array<string, mixed>, 1: ?Workspace, 2: string} */
+    private function disputeContext(array $dispute): array
+    {
+        $chargeId = is_array($dispute['charge'] ?? null) ? ($dispute['charge']['id'] ?? null) : ($dispute['charge'] ?? null);
+        if (! filled($dispute['id'] ?? null) || ! is_string($chargeId) || $chargeId === '') {
+            return [[], null, ''];
+        }
+        $charge = $this->stripe->get('charges/'.$chargeId);
+        if (! filled($charge['payment_intent'] ?? null)) {
+            return [$charge, null, ''];
+        }
+        $grantKey = $this->grantKey($charge);
+
+        return [$charge, $this->chargeWorkspace($charge, $grantKey), $grantKey];
+    }
+
+    /** Whether a dispute currently holds this payment's money (withdrawn and not yet won back). */
+    private function disputed(string $paymentIntent): bool
+    {
+        return WorkspaceCredit::query()->where('event', 'credit_dispute')->where('idempotency_key', 'like', 'stripe:dispute:%')->get(['idempotency_key', 'metadata'])
+            ->contains(fn (WorkspaceCredit $credit) => ($credit->metadata['payment_intent'] ?? null) === $paymentIntent
+                && ! WorkspaceCredit::query()->where('idempotency_key', 'stripe:dispute-won:'.substr($credit->idempotency_key, strlen('stripe:dispute:')))->exists());
+    }
+
+    /** Payloads on newer API versions omit `invoice`; the pinned API version still returns it. */
+    private function withInvoice(array $charge): array
+    {
+        if (array_key_exists('invoice', $charge) || ! filled($charge['id'] ?? null)) {
+            return $charge;
+        }
+
+        return $this->stripe->get('charges/'.$charge['id']) + $charge;
+    }
+
+    /** A pack payment's grant is keyed by payment intent, a plan cycle's by its invoice. */
+    private function grantKey(array $charge): string
+    {
+        $invoice = is_array($charge['invoice'] ?? null) ? ($charge['invoice']['id'] ?? null) : ($charge['invoice'] ?? null);
+
+        return is_string($invoice) && $invoice !== '' ? 'stripe:invoice:'.$invoice : 'stripe:payment:'.$charge['payment_intent'];
+    }
+
+    private function chargeWorkspace(array $charge, string $grantKey): ?Workspace
+    {
+        return WorkspaceSubscription::query()->where('stripe_customer_id', (string) ($charge['customer'] ?? ''))->first()?->workspace
+            ?? WorkspaceCredit::query()->where('idempotency_key', $grantKey)->first()?->workspace;
     }
 
     /** Re-reads the subscription from Stripe and stores its current state on the workspace. */

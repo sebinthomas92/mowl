@@ -11,6 +11,9 @@ class StripeClient
 {
     private const BASE_URL = 'https://api.stripe.com/v1/';
 
+    /** Pinned so fetched charges still carry their `invoice`, which later API versions dropped. */
+    private const API_VERSION = '2025-02-24.acacia';
+
     public function configured(): bool
     {
         return filled(config('billing.stripe.secret'));
@@ -76,6 +79,7 @@ class StripeClient
     private function request(): PendingRequest
     {
         return Http::withToken((string) config('billing.stripe.secret'))
+            ->withHeaders(['Stripe-Version' => self::API_VERSION])
             ->acceptJson()
             ->timeout(20)
             ->connectTimeout(8);

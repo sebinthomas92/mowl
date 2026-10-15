@@ -55,10 +55,10 @@
                     @if($isOwner)
                         <div class="row">
                             @if($subscribed)
-                                <button type="button" class="pill dark sm" wire:click="openPortal" wire:loading.attr="disabled" @disabled(! $ready)>Manage billing and invoices</button>
+                                <button type="button" class="pill dark sm" wire:click="openPortal" wire:loading.attr="disabled" @disabled(! $portalReady)>Manage billing and invoices</button>
                             @else
                                 <button type="button" class="pill pri sm" wire:click="startPlan" wire:loading.attr="disabled" @disabled(! $ready)>{{ $locked ? 'Restart the plan' : 'Start the plan' }}</button>
-                                @if($subscription?->stripe_customer_id)<button type="button" class="pill ghost sm" wire:click="openPortal" wire:loading.attr="disabled" @disabled(! $ready)>Past invoices</button>@endif
+                                @if($subscription?->stripe_customer_id)<button type="button" class="pill ghost sm" wire:click="openPortal" wire:loading.attr="disabled" @disabled(! $portalReady)>Past invoices</button>@endif
                             @endif
                         </div>
                     @else

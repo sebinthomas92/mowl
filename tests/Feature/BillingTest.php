@@ -138,7 +138,7 @@ class BillingTest extends TestCase
         $this->webhook('evt_11', 'checkout.session.completed', $session)->assertOk();
         $this->assertSame(25, $workspace->creditBalance());
 
-        $charge = ['id' => 'ch_9', 'payment_intent' => 'pi_9', 'refunded' => true];
+        $charge = ['id' => 'ch_9', 'payment_intent' => 'pi_9', 'invoice' => null, 'refunded' => true];
         $this->webhook('evt_12', 'charge.refunded', $charge)->assertOk();
         $this->webhook('evt_13', 'charge.refunded', $charge)->assertOk();
         $this->assertSame(0, $workspace->creditBalance());
@@ -172,7 +172,7 @@ class BillingTest extends TestCase
     {
         [$owner, $workspace] = $this->subscribedWorkspace(status: 'active');
         Http::fake([
-            'api.stripe.com/v1/checkout/sessions/cs_5' => Http::response(['id' => 'cs_5', 'mode' => 'payment', 'payment_status' => 'paid', 'customer' => 'cus_1',
+            'api.stripe.com/v1/checkout/sessions/cs_5' => Http::response(['id' => 'cs_5', 'mode' => 'payment', 'status' => 'complete', 'payment_status' => 'paid', 'customer' => 'cus_1',
                 'payment_intent' => 'pi_5', 'amount_total' => 2000, 'currency' => 'usd',
                 'metadata' => ['workspace_id' => (string) $workspace->id, 'kind' => 'credits', 'pack' => 'credits_10']]),
         ]);
@@ -208,7 +208,7 @@ class BillingTest extends TestCase
     public function test_a_refund_that_arrives_before_the_purchase_grants_nothing(): void
     {
         [, $workspace] = $this->subscribedWorkspace(status: 'active');
-        $this->webhook('evt_50', 'charge.refunded', ['id' => 'ch_1', 'customer' => 'cus_1', 'payment_intent' => 'pi_1', 'refunded' => true])->assertOk();
+        $this->webhook('evt_50', 'charge.refunded', ['id' => 'ch_1', 'customer' => 'cus_1', 'payment_intent' => 'pi_1', 'invoice' => null, 'refunded' => true])->assertOk();
         $this->webhook('evt_51', 'checkout.session.completed', ['id' => 'cs_1', 'mode' => 'payment', 'payment_status' => 'paid', 'customer' => 'cus_1',
             'payment_intent' => 'pi_1', 'amount_total' => 2000, 'currency' => 'usd',
             'metadata' => ['workspace_id' => (string) $workspace->id, 'kind' => 'credits', 'pack' => 'credits_10']])->assertOk();
@@ -309,6 +309,96 @@ class BillingTest extends TestCase
         Http::fake(fn () => throw new ConnectionException('timed out'));
 
         Livewire::actingAs($owner)->test(BillingIndex::class)->call('startPlan')->assertHasErrors('billing')->assertNoRedirect();
+    }
+
+    public function test_an_unconfirmed_checkout_return_does_not_claim_payment(): void
+    {
+        [$owner, $workspace] = $this->subscribedWorkspace(status: 'active');
+        Http::fake([
+            'api.stripe.com/v1/checkout/sessions/cs_6' => Http::response(['id' => 'cs_6', 'mode' => 'payment', 'status' => 'complete', 'payment_status' => 'unpaid', 'customer' => 'cus_1',
+                'metadata' => ['workspace_id' => (string) $workspace->id, 'kind' => 'credits', 'pack' => 'credits_10']]),
+            'api.stripe.com/v1/checkout/sessions/cs_other' => Http::response(['id' => 'cs_other', 'status' => 'complete', 'payment_status' => 'paid', 'customer' => 'cus_x', 'metadata' => ['workspace_id' => '999']]),
+        ]);
+
+        $this->actingAs($owner)->get('/billing?checkout=cs_6')->assertOk()->assertDontSee('Payment received')->assertSee('still confirming');
+        $this->actingAs($owner)->get('/billing?checkout=cs_other')->assertOk()->assertDontSee('Payment received');
+        $this->assertSame(0, $workspace->creditBalance());
+    }
+
+    public function test_a_lost_dispute_takes_credits_back_and_a_won_one_returns_them(): void
+    {
+        [, $workspace] = $this->subscribedWorkspace(status: 'active');
+        $this->webhook('evt_70', 'checkout.session.completed', ['id' => 'cs_7', 'mode' => 'payment', 'payment_status' => 'paid', 'customer' => 'cus_1',
+            'payment_intent' => 'pi_7', 'amount_total' => 2000, 'currency' => 'usd',
+            'metadata' => ['workspace_id' => (string) $workspace->id, 'kind' => 'credits', 'pack' => 'credits_10']])->assertOk();
+        $this->webhook('evt_71', 'invoice.paid', ['id' => 'in_7', 'customer' => 'cus_1', 'subscription' => 'sub_1', 'billing_reason' => 'subscription_cycle'])->assertOk();
+        $this->assertSame(60, $workspace->creditBalance());
+        Http::fake([
+            'api.stripe.com/v1/charges/ch_pack' => Http::response(['id' => 'ch_pack', 'customer' => 'cus_1', 'payment_intent' => 'pi_7', 'invoice' => null]),
+            'api.stripe.com/v1/charges/ch_plan' => Http::response(['id' => 'ch_plan', 'customer' => 'cus_1', 'payment_intent' => 'pi_plan', 'invoice' => 'in_7']),
+        ]);
+
+        $this->webhook('evt_72', 'charge.dispute.funds_withdrawn', ['id' => 'dp_1', 'charge' => 'ch_pack'])->assertOk();
+        $this->webhook('evt_73', 'charge.dispute.funds_withdrawn', ['id' => 'dp_1', 'charge' => 'ch_pack'])->assertOk();
+        $this->webhook('evt_74', 'charge.dispute.funds_withdrawn', ['id' => 'dp_2', 'charge' => 'ch_plan'])->assertOk();
+        $this->assertSame(0, $workspace->creditBalance());
+
+        $this->webhook('evt_75', 'charge.dispute.funds_reinstated', ['id' => 'dp_2', 'charge' => 'ch_plan'])->assertOk();
+        $this->webhook('evt_76', 'charge.dispute.funds_reinstated', ['id' => 'dp_2', 'charge' => 'ch_plan'])->assertOk();
+        $this->assertSame(50, $workspace->creditBalance());
+    }
+
+    public function test_restarting_cancels_an_unpaid_or_paused_plan_first(): void
+    {
+        [$owner, $workspace] = $this->workspaceUser();
+        $workspace->subscription()->create(['stripe_customer_id' => 'cus_1', 'stripe_subscription_id' => 'sub_unpaid', 'status' => 'unpaid']);
+        Http::fake([
+            'api.stripe.com/v1/subscriptions?*' => Http::response(['data' => [['id' => 'sub_unpaid', 'status' => 'unpaid'], ['id' => 'sub_paused', 'status' => 'paused']]]),
+            'api.stripe.com/v1/subscriptions/*' => Http::response(['id' => 'sub_x', 'status' => 'canceled']),
+            'api.stripe.com/v1/checkout/sessions?*' => Http::response(['data' => []]),
+            'api.stripe.com/v1/checkout/sessions' => Http::response(['id' => 'cs_new', 'url' => 'https://checkout.stripe.com/c/pay/cs_new']),
+        ]);
+
+        Livewire::actingAs($owner)->test(BillingIndex::class)->call('startPlan')->assertRedirect('https://checkout.stripe.com/c/pay/cs_new');
+
+        Http::assertSent(fn (Request $request) => $request->method() === 'DELETE' && str_ends_with($request->url(), '/subscriptions/sub_unpaid'));
+        Http::assertSent(fn (Request $request) => $request->method() === 'DELETE' && str_ends_with($request->url(), '/subscriptions/sub_paused'));
+    }
+
+    public function test_a_customer_from_another_stripe_mode_is_replaced_on_restart(): void
+    {
+        [$owner, $workspace] = $this->workspaceUser();
+        $workspace->subscription()->create(['stripe_customer_id' => 'cus_test', 'stripe_subscription_id' => 'sub_test', 'status' => 'canceled']);
+        Http::fake([
+            'api.stripe.com/v1/subscriptions?*' => Http::response(['error' => ['message' => 'No such customer', 'code' => 'resource_missing']], 404),
+            'api.stripe.com/v1/customers' => Http::response(['id' => 'cus_live']),
+            'api.stripe.com/v1/checkout/sessions' => Http::response(['id' => 'cs_new', 'url' => 'https://checkout.stripe.com/c/pay/cs_new']),
+        ]);
+
+        Livewire::actingAs($owner)->test(BillingIndex::class)->call('startPlan')->assertRedirect('https://checkout.stripe.com/c/pay/cs_new');
+        $this->assertSame('cus_live', $workspace->subscription()->value('stripe_customer_id'));
+    }
+
+    public function test_credit_packs_recheck_a_stale_active_plan_with_stripe(): void
+    {
+        [$owner, $workspace] = $this->subscribedWorkspace(status: 'active');
+        $this->stripeSays('sub_1', 'canceled', $workspace);
+
+        Livewire::actingAs($owner)->test(BillingIndex::class)->call('buyCredits', 'credits_10')->assertHasErrors('billing')->assertNoRedirect();
+        $this->assertSame('canceled', $workspace->subscription()->value('status'));
+    }
+
+    public function test_the_portal_still_opens_without_a_webhook_secret(): void
+    {
+        config(['billing.stripe.webhook_secret' => null]);
+        [$owner, $workspace] = $this->workspaceUser();
+        $workspace->subscription()->create(['stripe_customer_id' => 'cus_1', 'status' => 'past_due']);
+        Http::fake([
+            'api.stripe.com/v1/billing_portal/configurations' => Http::response(['id' => 'bpc_1']),
+            'api.stripe.com/v1/billing_portal/sessions' => Http::response(['url' => 'https://billing.stripe.com/p/session/1']),
+        ]);
+
+        Livewire::actingAs($owner)->test(BillingIndex::class)->call('openPortal')->assertRedirect('https://billing.stripe.com/p/session/1');
     }
 
     public function test_signature_check_rejects_old_timestamps(): void

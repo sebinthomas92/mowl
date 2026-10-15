@@ -82,10 +82,21 @@ class BillingCheckout
         if (! $customer) {
             return;
         }
-        $subscriptions = $this->stripe->get('subscriptions', ['customer' => $customer, 'status' => 'all', 'limit' => 20]);
+        try {
+            $subscriptions = $this->stripe->get('subscriptions', ['customer' => $customer, 'status' => 'all', 'limit' => 20]);
+        } catch (StripeException $exception) {
+            // A customer from another Stripe mode or account: forget it, and checkout makes a fresh one.
+            if ($exception->stripeCode !== 'resource_missing') {
+                throw $exception;
+            }
+            $workspace->subscription()->update(['stripe_customer_id' => null]);
+
+            return;
+        }
         foreach ($subscriptions['data'] ?? [] as $subscription) {
-            // An unpaid first attempt is cancelled so it can't be paid alongside the new one.
-            if (($subscription['status'] ?? null) === 'incomplete') {
+            // An unpaid first attempt, or an unpaid or paused plan that could later be paid or resumed,
+            // is cancelled so it can never run alongside the new one.
+            if (in_array($subscription['status'] ?? null, ['incomplete', 'unpaid', 'paused'], true)) {
                 $this->stripe->delete('subscriptions/'.$subscription['id']);
 
                 continue;
@@ -117,6 +128,10 @@ class BillingCheckout
         $pack = config('billing.credit_packs.'.$packKey);
         if (! is_array($pack)) {
             throw ValidationException::withMessages(['billing' => 'Choose one of the credit packs.']);
+        }
+        $subscription = $workspace->billingSubscription();
+        if ($subscription?->isSubscribed()) {
+            $this->revalidate($subscription);
         }
         if (! $workspace->billingSubscription()?->isSubscribed()) {
             throw ValidationException::withMessages(['billing' => 'Start the plan before buying extra credits.']);

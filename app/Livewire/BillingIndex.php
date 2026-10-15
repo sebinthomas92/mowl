@@ -26,8 +26,9 @@ class BillingIndex extends Component
         if ($checkout === 'cancelled') {
             $this->notice = 'Checkout was cancelled. Nothing was charged.';
         } elseif (preg_match('/^cs_[A-Za-z0-9_]+$/', $checkout)) {
-            $this->notice = 'Payment received. Your plan and credits are below.';
-            $this->reconcile($stripe, $handler, $checkout);
+            $this->notice = $this->reconcile($stripe, $handler, $checkout)
+                ? 'Payment received. Your plan and credits are below.'
+                : 'Stripe is still confirming this payment. Your plan and credits update here as soon as it does.';
         }
     }
 
@@ -45,28 +46,34 @@ class BillingIndex extends Component
 
     public function openPortal(BillingCheckout $billing): void
     {
-        $workspace = $this->ownerWorkspace();
+        $workspace = $this->ownerWorkspace(forCheckout: false);
         $this->go(fn () => $billing->portalUrl($workspace));
     }
 
     /**
      * Applies a finished Checkout straight away, so the page is right even before the webhook lands.
-     * The webhook does the same work later and finds nothing left to do.
+     * The webhook does the same work later and finds nothing left to do. True only when the session
+     * belongs to this workspace and Stripe reports it paid.
      */
-    private function reconcile(StripeClient $stripe, StripeWebhookHandler $handler, string $sessionId): void
+    private function reconcile(StripeClient $stripe, StripeWebhookHandler $handler, string $sessionId): bool
     {
         $workspace = $this->currentWorkspace();
         if (! $stripe->configured() || ! WorkspaceSubscription::available()) {
-            return;
+            return false;
         }
         try {
             $session = $stripe->get('checkout/sessions/'.$sessionId);
-            if ((string) ($session['metadata']['workspace_id'] ?? '') === (string) $workspace->id
-                && ($session['customer'] ?? null) === $workspace->billingSubscription()?->stripe_customer_id) {
-                $handler->checkoutCompleted($session);
+            if ((string) ($session['metadata']['workspace_id'] ?? '') !== (string) $workspace->id
+                || ($session['customer'] ?? null) !== $workspace->billingSubscription()?->stripe_customer_id) {
+                return false;
             }
+            $handler->checkoutCompleted($session);
+
+            return ($session['status'] ?? null) === 'complete' && in_array($session['payment_status'] ?? null, ['paid', 'no_payment_required'], true);
         } catch (StripeException $exception) {
             Log::warning('Could not reconcile a Stripe Checkout session.', ['session' => $sessionId, 'error' => $exception->getMessage()]);
+
+            return false;
         }
     }
 
@@ -80,11 +87,13 @@ class BillingIndex extends Component
         }
     }
 
-    private function ownerWorkspace(): Workspace
+    /** Checkout needs webhooks too; the portal only needs the API key, so card fixes still work. */
+    private function ownerWorkspace(bool $forCheckout = true): Workspace
     {
         $workspace = $this->currentWorkspace();
         abort_unless(Membership::of(auth()->user(), $workspace)?->isOwner(), 403);
-        abort_unless(app(StripeClient::class)->readyForCheckout() && WorkspaceSubscription::available(), 422);
+        $stripe = app(StripeClient::class);
+        abort_unless(($forCheckout ? $stripe->readyForCheckout() : $stripe->configured()) && WorkspaceSubscription::available(), 422);
 
         return $workspace;
     }
@@ -100,6 +109,7 @@ class BillingIndex extends Component
             'isOwner' => (bool) $membership?->isOwner(),
             'owner' => $workspace->users()->wherePivot('role', 'owner')->first(),
             'ready' => $stripe->readyForCheckout() && WorkspaceSubscription::available(),
+            'portalReady' => $stripe->configured() && WorkspaceSubscription::available(),
             'testMode' => $stripe->testMode(),
             'subscription' => $subscription,
             'subscribed' => (bool) $subscription?->isSubscribed(),
@@ -109,7 +119,7 @@ class BillingIndex extends Component
             'creditBalance' => $workspace->creditBalance(),
             'spendableCredits' => $workspace->spendableCredits(),
             'billingEvents' => $workspace->credits()
-                ->whereIn('event', ['beta_allocation', 'plan_allocation', 'credit_pack_purchase', 'credit_pack_refund', 'concierge_adjustment'])
+                ->whereIn('event', ['beta_allocation', 'plan_allocation', 'credit_pack_purchase', 'credit_pack_refund', 'credit_dispute', 'credit_dispute_won', 'concierge_adjustment'])
                 ->latest()->limit(12)->get(),
         ])->layout('components.layouts.app');
     }
