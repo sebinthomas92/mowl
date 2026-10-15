@@ -231,6 +231,28 @@ class CampaignPackSafetyValidator
         if (! $source) {
             return null;
         }
+        [$onPage, $anchored, $own] = $this->pagePrices($source);
+
+        return array_values(array_unique([...array_column($anchored ?? $onPage, 0), ...$own]));
+    }
+
+    /**
+     * Amounts the page shows within reach of an occurrence of the product's own price (a struck-out
+     * MRP, a free-shipping threshold). Empty when the page never shows the product's price, since
+     * then nothing ties any amount on it to this product.
+     *
+     * @return list<string>
+     */
+    public function pricesBesideProductPrice(SourceSnapshot $source): array
+    {
+        return array_values(array_unique(array_column($this->pagePrices($source)[1] ?? [], 0)));
+    }
+
+    /**
+     * @return array{0: list<array{0: string, 1: int}>, 1: list<array{0: string, 1: int}>|null, 2: list<string>}
+     */
+    private function pagePrices(SourceSnapshot $source): array
+    {
         $truth = $source->extracted_truth ?? [];
         $code = strtoupper(trim((string) data_get($truth, 'currency', '')));
         $currency = $this->currency($code) ?? (preg_match('/^[A-Z]{3}$/', $code) ? $code : '*');
@@ -254,7 +276,7 @@ class CampaignPackSafetyValidator
         $page = (string) $source->extracted_content;
         $onPage = $this->currencyAmountsAt($page, $known);
         $anchors = array_filter($onPage, fn (array $found) => $this->matchesAny($found[0], $own));
-        $nearby = $anchors === [] ? $onPage : array_filter($onPage, function (array $found) use ($anchors): bool {
+        $anchored = $anchors === [] ? null : array_values(array_filter($onPage, function (array $found) use ($anchors): bool {
             foreach ($anchors as $anchor) {
                 if (abs($found[1] - $anchor[1]) <= self::PRICE_BLOCK_BYTES) {
                     return true;
@@ -262,9 +284,9 @@ class CampaignPackSafetyValidator
             }
 
             return false;
-        });
+        }));
 
-        return array_values(array_unique([...array_column($nearby, 0), ...$own]));
+        return [$onPage, $anchored, $own];
     }
 
     /**

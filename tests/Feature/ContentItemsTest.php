@@ -161,6 +161,11 @@ class ContentItemsTest extends TestCase
 
         $library->saveDraft($version->fresh(), ['value_proposition' => 'Now only ₹899.']);
         $this->assertSame('Price 899 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
+
+        // A page that never shows the product's price ties no other amount on it to the product.
+        $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand. Was ₹899. You may also like: Cloud Organiser ₹750', 'extracted_truth' => []]);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Now ₹899.']);
+        $this->assertSame('Price 899 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
     }
 
     public function test_a_named_client_link_shows_only_review_items_and_records_decisions(): void

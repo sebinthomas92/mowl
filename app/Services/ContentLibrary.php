@@ -368,10 +368,11 @@ class ContentLibrary
             $confirmed = $this->prices($price) ?: [$this->number($price)];
             // Other amounts the page shows beside the product's price (a struck-out MRP, a free-shipping
             // threshold) are not claims about the price. The page's own price is not one of them when
-            // it disagrees with the confirmed one: that disagreement is what this check is for.
+            // it disagrees with the confirmed one: that disagreement is what this check is for. A page
+            // that never shows the product's price ties no amount to it, so none is exempt.
             $source = $item->campaignPack?->sourceSnapshot;
             $pagePrice = filled($source?->extracted_truth['price'] ?? null) ? $this->number((string) $source->extracted_truth['price']) : null;
-            $nearby = collect($source ? app(CampaignPackSafetyValidator::class)->supportedPrices($source) ?? [] : [])
+            $nearby = collect($source ? app(CampaignPackSafetyValidator::class)->pricesBesideProductPrice($source) : [])
                 ->map(fn (string $supported) => $this->number(explode(' ', $supported, 2)[1] ?? ''))
                 ->reject(fn (string $amount) => $amount === $pagePrice && ! in_array($amount, $confirmed, true))
                 ->all();
