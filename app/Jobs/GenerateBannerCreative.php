@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\BannerCreative;
 use App\Services\BannerBatchStatus;
@@ -73,7 +74,9 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
             $result = $generators->driver()->generate($creative, $images);
             $cost = $result->provider === 'mock'
                 ? 0.0
-                : $costs->calculateBanner($result->inputTokens, $result->outputTextTokens, $result->outputImageTokens);
+                : round($costs->calculateBanner($result->inputTokens, $result->outputTextTokens, $result->outputImageTokens) + $result->additionalCost, 6);
+            // Earlier attempts whose backgrounds were rejected already recorded their spend.
+            $cost = round((float) $creative->estimated_cost + $cost, 6);
             $basePath = "campaign-banners/{$creative->batch->workspace_id}/{$creative->campaign_pack_id}/{$creative->id}";
             $backgroundPath = $basePath.'/background.'.($result->mimeType === 'image/webp' ? 'webp' : 'png');
             Storage::disk($creative->disk)->put($backgroundPath, $result->imageBytes);
@@ -111,7 +114,8 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
         } catch (Throwable $exception) {
             $creative->update([
                 'status' => 'retrying',
-                'error_code' => $exception instanceof VertexAIResponseException ? $exception->errorCode : class_basename($exception),
+                'estimated_cost' => round((float) $creative->estimated_cost + ($exception instanceof BannerAttemptFailed ? $exception->spentCost : 0.0), 6),
+                'error_code' => $exception instanceof VertexAIResponseException || $exception instanceof BannerAttemptFailed ? $exception->errorCode : class_basename($exception),
                 'error_message' => mb_substr($exception->getMessage(), 0, 2000),
             ]);
             $batchStatus->refresh($creative->batch->fresh());
@@ -146,7 +150,7 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
             $firstTerminalFailure = $creative->status !== 'failed';
             $creative->update([
                 'status' => 'failed',
-                'error_code' => $exception instanceof VertexAIResponseException ? $exception->errorCode : ($exception ? class_basename($exception) : $creative->error_code),
+                'error_code' => $exception instanceof VertexAIResponseException || $exception instanceof BannerAttemptFailed ? $exception->errorCode : ($exception ? class_basename($exception) : $creative->error_code),
                 'error_message' => $exception ? mb_substr($exception->getMessage(), 0, 2000) : $creative->error_message,
                 'completed_at' => now(),
             ]);

@@ -2,16 +2,23 @@
 
 namespace Tests\Feature;
 
+use App\Contracts\BannerGenerator;
+use App\Data\BannerGenerationResult;
+use App\Exceptions\BannerAttemptFailed;
 use App\Jobs\GenerateBannerCreative;
 use App\Livewire\CampaignWorkspace;
+use App\Models\BannerCreative;
 use App\Models\CampaignPack;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\BannerBatchCreator;
 use App\Services\BannerJobDispatcher;
 use App\Services\BannerJobRunner;
+use App\Services\MockBannerGenerator;
+use App\Services\ProviderCostCalculator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
@@ -286,6 +293,45 @@ class BannerStudioTest extends TestCase
             ->assertOk()
             ->assertSee('Banner studio')
             ->assertSee('$0.201');
+    }
+
+    public function test_spend_from_a_rejected_attempt_is_kept_when_a_later_attempt_succeeds(): void
+    {
+        [$user, $workspace, $pack] = $this->fixture();
+        $batch = app(BannerBatchCreator::class)->createIncluded($workspace, $pack, $user);
+        $creative = $batch->creatives()->firstOrFail();
+        $mock = app(MockBannerGenerator::class);
+        $this->app->instance(MockBannerGenerator::class, new class($mock) implements BannerGenerator
+        {
+            public int $calls = 0;
+
+            public function __construct(private MockBannerGenerator $mock) {}
+
+            public function generate(BannerCreative $creative, Collection $productImages): BannerGenerationResult
+            {
+                if (++$this->calls === 1) {
+                    throw new BannerAttemptFailed('banner_third_party_text', 'Every generated background showed readable third-party text or marks: The Hobbit', 0.15);
+                }
+                $result = $this->mock->generate($creative, $productImages);
+
+                return new BannerGenerationResult($result->imageBytes, $result->mimeType, 'google', 'gemini-3.1-flash-image', 400, 10, 1290, additionalCost: 0.001);
+            }
+        });
+
+        try {
+            app(BannerJobRunner::class)->run($creative);
+            $this->fail('The first attempt is rejected.');
+        } catch (BannerAttemptFailed) {
+        }
+        $this->assertSame('retrying', $creative->fresh()->status);
+        $this->assertSame('banner_third_party_text', $creative->fresh()->error_code);
+        $this->assertEqualsWithDelta(0.15, (float) $creative->fresh()->estimated_cost, 0.000001);
+
+        app(BannerJobRunner::class)->run($creative->fresh());
+
+        $expected = 0.15 + app(ProviderCostCalculator::class)->calculateBanner(400, 10, 1290) + 0.001;
+        $this->assertSame('completed', $creative->fresh()->status);
+        $this->assertEqualsWithDelta($expected, (float) $creative->fresh()->estimated_cost, 0.000001);
     }
 
     private function fixture(string $status = 'approved', string $reviewStatus = 'approved'): array
