@@ -189,6 +189,59 @@ class BillingTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_a_restart_whose_first_payment_fails_stays_locked(): void
+    {
+        [, $workspace] = $this->subscribedWorkspace(status: 'canceled');
+        $workspace->credits()->create(['amount' => 20, 'event' => 'plan_allocation', 'description' => 'Monthly plan credits']);
+        $this->stripeSays('sub_2', 'incomplete', $workspace);
+
+        $this->webhook('evt_40', 'customer.subscription.created', ['id' => 'sub_2', 'customer' => 'cus_1'])->assertOk();
+        $this->assertTrue($workspace->refresh()->billingLocked());
+
+        $this->stripeSays('sub_2', 'active', $workspace);
+        $this->webhook('evt_41', 'customer.subscription.updated', ['id' => 'sub_2', 'customer' => 'cus_1'])->assertOk();
+        $this->assertFalse($workspace->refresh()->billingLocked());
+        $this->assertSame(20, $workspace->spendableCredits());
+    }
+
+    public function test_a_refund_that_arrives_before_the_purchase_grants_nothing(): void
+    {
+        [, $workspace] = $this->subscribedWorkspace(status: 'active');
+        $this->webhook('evt_50', 'charge.refunded', ['id' => 'ch_1', 'customer' => 'cus_1', 'payment_intent' => 'pi_1', 'refunded' => true])->assertOk();
+        $this->webhook('evt_51', 'checkout.session.completed', ['id' => 'cs_1', 'mode' => 'payment', 'payment_status' => 'paid', 'customer' => 'cus_1',
+            'payment_intent' => 'pi_1', 'amount_total' => 2000, 'currency' => 'usd',
+            'metadata' => ['workspace_id' => (string) $workspace->id, 'kind' => 'credits', 'pack' => 'credits_10']])->assertOk();
+
+        $this->assertSame(0, $workspace->creditBalance());
+    }
+
+    public function test_checkout_stays_off_without_a_webhook_secret(): void
+    {
+        config(['billing.stripe.webhook_secret' => null]);
+        [$owner] = $this->workspaceUser();
+        Http::fake();
+
+        $this->actingAs($owner)->get('/billing')->assertOk()->assertSee('Payments are not switched on yet');
+        Livewire::actingAs($owner)->test(BillingIndex::class)->call('startPlan')->assertStatus(422);
+        Http::assertNothingSent();
+    }
+
+    public function test_starting_the_plan_again_expires_the_earlier_open_checkout(): void
+    {
+        [$owner, $workspace] = $this->workspaceUser();
+        $workspace->subscription()->create(['stripe_customer_id' => 'cus_1']);
+        Http::fake([
+            'api.stripe.com/v1/checkout/sessions/cs_old/expire' => Http::response(['id' => 'cs_old', 'status' => 'expired']),
+            'api.stripe.com/v1/checkout/sessions?*' => Http::response(['data' => [['id' => 'cs_old', 'mode' => 'subscription'], ['id' => 'cs_pack', 'mode' => 'payment']]]),
+            'api.stripe.com/v1/checkout/sessions' => Http::response(['id' => 'cs_new', 'url' => 'https://checkout.stripe.com/c/pay/cs_new']),
+        ]);
+
+        Livewire::actingAs($owner)->test(BillingIndex::class)->call('startPlan')->assertRedirect('https://checkout.stripe.com/c/pay/cs_new');
+
+        Http::assertSent(fn (Request $request) => str_ends_with($request->url(), '/checkout/sessions/cs_old/expire'));
+        Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'cs_pack/expire'));
+    }
+
     public function test_signature_check_rejects_old_timestamps(): void
     {
         $payload = '{"id":"evt"}';
@@ -207,22 +260,31 @@ class BillingTest extends TestCase
         ], $payload);
     }
 
+    /** What Stripe currently reports for sub_1; tests change it to move the subscription along. */
+    private array $stripeSubscriptions = [];
+
     /** A workspace with a Stripe customer whose subscription Stripe reports with the given status. */
     private function subscribedWorkspace(string $status): array
     {
         [$owner, $workspace] = $this->workspaceUser();
         $workspace->subscription()->create(['stripe_customer_id' => 'cus_1']);
+        $this->stripeSays('sub_1', $status, $workspace);
         Http::fake([
-            'api.stripe.com/v1/subscriptions/sub_1' => Http::response([
-                'id' => 'sub_1', 'object' => 'subscription', 'customer' => 'cus_1', 'status' => $status,
-                'cancel_at_period_end' => false, 'canceled_at' => $status === 'canceled' ? time() : null,
-                'metadata' => ['workspace_id' => (string) $workspace->id],
-                'items' => ['data' => [['price' => ['id' => 'price_1'], 'current_period_end' => time() + 30 * 86400]]],
-            ]),
+            'api.stripe.com/v1/subscriptions/*' => fn (Request $request) => Http::response($this->stripeSubscriptions[basename(parse_url($request->url(), PHP_URL_PATH))] ?? [], 200),
         ]);
         $this->webhook('evt_seed_'.$workspace->id, 'customer.subscription.created', ['id' => 'sub_1', 'customer' => 'cus_1'])->assertOk();
 
         return [$owner, $workspace->refresh()];
+    }
+
+    private function stripeSays(string $id, string $status, Workspace $workspace): void
+    {
+        $this->stripeSubscriptions[$id] = [
+            'id' => $id, 'object' => 'subscription', 'customer' => 'cus_1', 'status' => $status,
+            'cancel_at_period_end' => false, 'canceled_at' => $status === 'canceled' ? time() : null,
+            'metadata' => ['workspace_id' => (string) $workspace->id],
+            'items' => ['data' => [['price' => ['id' => 'price_1'], 'current_period_end' => time() + 30 * 86400]]],
+        ];
     }
 
     private function workspaceUser(): array

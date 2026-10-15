@@ -63,6 +63,9 @@ class StripeWebhookHandler
         }
 
         $payment = (string) ($session['payment_intent'] ?? $session['id']);
+        if (WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$payment)->exists()) {
+            return; // Refunded before the purchase event arrived: nothing to grant.
+        }
         $this->ledger($workspace, $pack['credits'], 'credit_pack_purchase', $pack['credits'].' credits purchased', 'stripe:payment:'.$payment, [
             'checkout_session' => $session['id'] ?? null,
             'payment_intent' => $session['payment_intent'] ?? null,
@@ -104,7 +107,19 @@ class StripeWebhookHandler
             return;
         }
         $grant = WorkspaceCredit::query()->where('idempotency_key', 'stripe:payment:'.$charge['payment_intent'])->first();
-        if (! $grant || ! $grant->workspace) {
+        if (! $grant) {
+            // The refund beat the purchase event. Record it so the late purchase grants nothing.
+            $workspace = WorkspaceSubscription::query()->where('stripe_customer_id', (string) ($charge['customer'] ?? ''))->first()?->workspace;
+            if ($workspace) {
+                $this->ledger($workspace, 0, 'credit_pack_refund', 'Credit pack refunded before credits were granted', 'stripe:refund:'.$charge['payment_intent'], [
+                    'charge' => $charge['id'] ?? null,
+                    'payment_intent' => $charge['payment_intent'],
+                ]);
+            }
+
+            return;
+        }
+        if (! $grant->workspace) {
             return;
         }
 
@@ -126,12 +141,18 @@ class StripeWebhookHandler
             return;
         }
 
-        DB::transaction(function () use ($workspace, $subscription): void {
+        DB::transaction(function () use ($workspace, $subscriptionId): void {
             $row = WorkspaceSubscription::query()->lockForUpdate()->firstOrCreate(['workspace_id' => $workspace->id]);
+            // Read again under the lock, so a slower request can't write back an older state.
+            $subscription = $this->stripe->get('subscriptions/'.$subscriptionId);
+            $replacing = $row->stripe_subscription_id && $row->stripe_subscription_id !== $subscription['id'];
 
             // A newer subscription in good standing is not overwritten by an older one ending.
-            if ($row->stripe_subscription_id && $row->stripe_subscription_id !== $subscription['id']
-                && $row->isSubscribed() && ! in_array($subscription['status'] ?? null, WorkspaceSubscription::GOOD_STANDING, true)) {
+            if ($replacing && $row->isSubscribed() && ! in_array($subscription['status'] ?? null, WorkspaceSubscription::GOOD_STANDING, true)) {
+                return;
+            }
+            // A restart whose first payment hasn't gone through keeps the ended plan's lock until it does.
+            if ($replacing && ($subscription['status'] ?? null) === 'incomplete') {
                 return;
             }
 

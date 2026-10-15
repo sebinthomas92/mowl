@@ -84,7 +84,7 @@ class BillingIndex extends Component
     {
         $workspace = $this->currentWorkspace();
         abort_unless(Membership::of(auth()->user(), $workspace)?->isOwner(), 403);
-        abort_unless(app(StripeClient::class)->configured() && WorkspaceSubscription::available(), 422);
+        abort_unless(app(StripeClient::class)->readyForCheckout() && WorkspaceSubscription::available(), 422);
 
         return $workspace;
     }
@@ -99,7 +99,7 @@ class BillingIndex extends Component
             'workspace' => $workspace,
             'isOwner' => (bool) $membership?->isOwner(),
             'owner' => $workspace->users()->wherePivot('role', 'owner')->first(),
-            'ready' => $stripe->configured() && WorkspaceSubscription::available(),
+            'ready' => $stripe->readyForCheckout() && WorkspaceSubscription::available(),
             'testMode' => $stripe->testMode(),
             'subscription' => $subscription,
             'subscribed' => (bool) $subscription?->isSubscribed(),
@@ -107,6 +107,7 @@ class BillingIndex extends Component
             'plan' => config('billing.plan'),
             'packs' => config('billing.credit_packs'),
             'creditBalance' => $workspace->creditBalance(),
+            'spendableCredits' => $workspace->spendableCredits(),
             'billingEvents' => $workspace->credits()
                 ->whereIn('event', ['beta_allocation', 'plan_allocation', 'credit_pack_purchase', 'credit_pack_refund', 'concierge_adjustment'])
                 ->latest()->limit(12)->get(),

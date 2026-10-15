@@ -15,6 +15,12 @@ class StripeClient
         return filled(config('billing.stripe.secret'));
     }
 
+    /** Payments can start only when webhooks can also be verified, or renewals would never land. */
+    public function readyForCheckout(): bool
+    {
+        return $this->configured() && filled(config('billing.stripe.webhook_secret'));
+    }
+
     public function testMode(): bool
     {
         return str_starts_with((string) config('billing.stripe.secret'), 'sk_test_') || str_starts_with((string) config('billing.stripe.secret'), 'rk_test_');

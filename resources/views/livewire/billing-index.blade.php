@@ -68,7 +68,8 @@
 
                 <section class="card col c5 billing-credits" aria-labelledby="credits-heading">
                     <span class="eyebrow" id="credits-heading">Credits</span>
-                    <p class="billing-balance"><strong class="num">{{ $creditBalance }}</strong><span class="muted">available</span></p>
+                    <p class="billing-balance"><strong class="num">{{ $spendableCredits }}</strong><span class="muted">available</span></p>
+                    @if($locked && $creditBalance > 0)<p class="small muted">{{ $creditBalance }} credits are kept for when the plan restarts.</p>@endif
                     <div class="billing-packs">
                         @foreach($packs as $key => $pack)
                             <div class="billing-pack" wire:key="pack-{{ $key }}">

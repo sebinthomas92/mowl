@@ -31,13 +31,39 @@ class BillingCheckout
                 'product_data' => ['name' => $plan['name'], 'description' => $plan['credits'].' launch pack credits every month'],
             ]];
 
-        return $this->checkoutUrl($workspace, $owner, [
-            'mode' => 'subscription',
-            'line_items' => [$lineItem],
-            'allow_promotion_codes' => 'true',
-            'metadata' => ['workspace_id' => (string) $workspace->id, 'kind' => 'plan'],
-            'subscription_data' => ['metadata' => ['workspace_id' => (string) $workspace->id]],
-        ]);
+        $lock = Cache::lock('billing.plan-checkout.'.$workspace->id, 20);
+        if (! $lock->get()) {
+            throw ValidationException::withMessages(['billing' => 'A checkout is already being opened for this workspace.']);
+        }
+
+        try {
+            $this->expireOpenPlanSessions($workspace);
+
+            return $this->checkoutUrl($workspace, $owner, [
+                'mode' => 'subscription',
+                'line_items' => [$lineItem],
+                'allow_promotion_codes' => 'true',
+                'metadata' => ['workspace_id' => (string) $workspace->id, 'kind' => 'plan'],
+                'subscription_data' => ['metadata' => ['workspace_id' => (string) $workspace->id]],
+            ]);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /** Expires earlier plan checkouts still open, so two tabs can never start two subscriptions. */
+    private function expireOpenPlanSessions(Workspace $workspace): void
+    {
+        $customer = $workspace->subscription()->value('stripe_customer_id');
+        if (! $customer) {
+            return;
+        }
+        $sessions = $this->stripe->get('checkout/sessions', ['customer' => $customer, 'status' => 'open', 'limit' => 20]);
+        foreach ($sessions['data'] ?? [] as $session) {
+            if (($session['mode'] ?? null) === 'subscription') {
+                $this->stripe->post('checkout/sessions/'.$session['id'].'/expire');
+            }
+        }
     }
 
     public function creditPackCheckoutUrl(Workspace $workspace, User $owner, string $packKey): string
