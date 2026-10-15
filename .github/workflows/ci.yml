@@ -61,11 +61,7 @@ jobs:
           sudo apt-get install --yes ffmpeg
 
       - name: Install PHP dependencies
-        # GitHub's archive download for rize/uri-template returns 404, so that one package is cloned with git.
-        run: |
-          composer config --global preferred-install.rize/uri-template source
-          composer config --global 'preferred-install.*' dist
-          composer install --no-interaction --no-progress
+        run: composer install --no-interaction --prefer-dist --no-progress
 
       - name: Install JavaScript dependencies
         run: npm ci
