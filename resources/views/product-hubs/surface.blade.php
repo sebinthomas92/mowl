@@ -4,7 +4,7 @@
     $mediaUrl = $image ? ($isPublic ? route('product-hubs.shared-media', [$shareToken, $image]) : route('products.hub-media', [$product, $image])) : null;
     $exportBase = fn (string $type) => $isPublic ? route('product-hubs.shared-export', [$shareToken, $type]) : route('products.hub-export', [$product, $type]);
     $google = $content ? data_get($content, 'channels.google_ads', []) : [];
-    $creatives = $version ? $version->bannerCreatives->where('status', 'completed')->filter(fn ($creative) => filled($creative->output_path))->take(3) : collect();
+    $creatives = $version ? $version->bannerCreatives->where('status', 'completed')->filter(fn ($creative) => filled($creative->output_path) && app(\App\Services\CampaignPackSafetyValidator::class)->bannerPrices($creative) === [])->take(3) : collect();
 @endphp
 
 @unless($isPublic)

@@ -144,3 +144,7 @@ button { cursor:pointer; }
 }
 
 .qa-chip{position:relative}.qa-chip>summary{list-style:none;cursor:pointer}.qa-chip>summary::-webkit-details-marker{display:none}.qa-chip-panel{position:absolute;right:0;top:calc(100% + 6px);z-index:30;width:min(380px,calc(100vw - 32px));padding:12px 14px;border:1px solid var(--line-strong);background:var(--surface);border-radius:6px;box-shadow:0 10px 30px rgba(0,0,0,.12)}.qa-chip-panel ul{margin:0;padding:0;list-style:none;display:grid;gap:10px}.qa-chip-panel li{display:grid;gap:3px;font-size:12px;line-height:1.45;color:var(--ink)}.qa-chip-panel small{color:var(--muted);font-size:11px}.qa-chip-panel a{color:var(--link)}
+.qa-where{color:var(--ink-2)!important;font-weight:500}.qa-fix{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:2px}.qa-fix a{font-size:12px}.qa-issue-body{display:grid;gap:4px}.qa-issue-body small{color:var(--muted);font-size:11px}.qa-issue-body a{color:var(--link)}
+.field.is-focus .input{box-shadow:0 0 0 2px var(--accent)}.field.is-focus label{color:var(--link)}
+
+.banner-card-body .banner-price-issue { display: block; margin-top: 4px; color: var(--bad-fg); }

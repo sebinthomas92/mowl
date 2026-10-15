@@ -250,6 +250,63 @@ class CampaignWorkspace extends Component
         $this->audit('campaign_pack_regeneration_requested', $pack, null, ['section' => $data['regenerationSection'], 'generation_job_id' => $job->id]);
     }
 
+    /**
+     * The one-click QA fix: takes an unsupported term out of one line. The line is changed where
+     * people edit it, on its output's draft (a revision is started for an output with requested
+     * changes); text outside any output gets a new draft pack version. Only a term the checks still
+     * flag can be removed, and removing words never adds a claim.
+     */
+    public function removeUnsupportedWording(string $path, string $term, ContentLibrary $library): void
+    {
+        abort_unless($this->membership()?->canCreate(), 403);
+        $pack = $this->workspacePack();
+        abort_if($pack->generationJobs()->whereIn('status', ['queued', 'processing', 'retrying'])->exists(), 422);
+        $latest = $pack->versions()->orderByDesc('version')->firstOrFail();
+        abort_if($latest->review_status === 'approved', 422);
+        $content = ContentLibrary::available()
+            ? $library->current($pack)
+            : app(CampaignPackContentNormalizer::class)->normalize($latest->content ?? [], $pack->product, $pack->sourceSnapshot);
+        $flagged = collect(app(CampaignPackSafetyValidator::class)->issues($content, $latest->evidence ?? [], $latest->compliance_flags ?? [], $pack->sourceSnapshot))
+            ->contains(fn (array $issue) => ($issue['path'] ?? null) === $path && ($issue['term'] ?? null) === $term);
+        abort_unless($flagged, 422);
+        abort_if((bool) preg_match('/^creative_routes\.\d+\.(voiceover|captions|shot_plan)\./', $path), 422);
+        $text = data_get($content, $path);
+        $fixed = is_string($text) ? CampaignPackSafetyValidator::withoutTerm($text, $term) : null;
+        abort_unless($fixed !== null, 422);
+
+        $location = ContentLibrary::available() ? $library->locate($content, $path) : null;
+        $item = $location ? $pack->contentItems()->where('section', $location['section'])->with('latestVersion')->first() : null;
+        if ($item?->latestVersion) {
+            abort_if($item->latestVersion->status === 'review', 422, 'This output is in review. Request changes first, then fix it.');
+            $draft = $item->latestVersion->status === 'draft' ? $item->latestVersion : $library->revise($item, auth()->user());
+            $body = $draft->body;
+            abort_unless(data_get($body, $location['body_path']) === $text, 422);
+            data_set($body, $location['body_path'], $fixed);
+            $draft->update(['body' => $body]);
+            $this->audit('content_wording_removed', $draft, null, ['path' => $path, 'term' => $term]);
+
+            return;
+        }
+
+        $version = DB::transaction(function () use ($pack, $latest, $content, $path, $fixed, $text, $term): CampaignPackVersion {
+            $lockedPack = CampaignPack::query()->lockForUpdate()->findOrFail($pack->id);
+            abort_unless($lockedPack->versions()->max('version') === $latest->version, 409);
+            data_set($content, $path, $fixed);
+            $version = $lockedPack->versions()->create([
+                'version' => $latest->version + 1, 'content' => $content, 'evidence' => $latest->evidence,
+                'compliance_flags' => $latest->compliance_flags, 'generator' => 'qa_fix', 'review_status' => 'draft',
+                'review_note' => "Removed unsupported “{$term}” from: {$text}",
+            ]);
+            $lockedPack->update(['current_version' => $version->version, 'status' => 'draft']);
+
+            return $version;
+        });
+
+        $this->selectedVersion = null;
+        $this->audit('campaign_pack_wording_removed', $version, null, ['path' => $path, 'term' => $term]);
+        $library->syncPack($pack->fresh());
+    }
+
     public function selectVersion(int $version): void
     {
         $pack = CampaignPack::query()
@@ -275,7 +332,12 @@ class CampaignWorkspace extends Component
         $this->ensureReviewer();
         $version = $this->selectedPackVersion();
         abort_unless(in_array($version->review_status, $this->decidableStatuses()), 422);
-        app(CampaignPackSafetyValidator::class)->assertApprovable($version, $version->campaignPack->sourceSnapshot);
+        $pack = $version->campaignPack;
+        if (ContentLibrary::available() && $version->version === $pack->versions()->max('version') && $pack->contentItems()->exists()
+            && app(ContentLibrary::class)->current($pack) != app(CampaignPackContentNormalizer::class)->normalize($version->content ?? [], $pack->product, $pack->sourceSnapshot)) {
+            throw ValidationException::withMessages(['reviewNote' => 'Some outputs were edited after this version was generated. Approve each output in the Review queue so the edits are kept.']);
+        }
+        app(CampaignPackSafetyValidator::class)->assertApprovable($version, $pack->sourceSnapshot);
         $version->update([
             'review_status' => 'approved',
             'reviewed_by_user_id' => auth()->id(),
@@ -567,21 +629,61 @@ class CampaignWorkspace extends Component
         $displayContent = $selectedPackVersion
             ? app(CampaignPackContentNormalizer::class)->normalize($selectedPackVersion->content ?? [], $pack->product, $pack->sourceSnapshot)
             : [];
+        $isLatestVersion = $selectedPackVersion && $selectedPackVersion->version === $pack->versions->max('version');
+        // The latest version is checked as its outputs read now, so edits saved on an output count.
+        $qaContent = $isLatestVersion && ContentLibrary::available() ? app(ContentLibrary::class)->current($pack) : $displayContent;
         $qaIssues = $selectedPackVersion
             ? app(CampaignPackSafetyValidator::class)->issues(
-                $displayContent,
+                $qaContent,
                 $selectedPackVersion->evidence ?? [],
                 $selectedPackVersion->compliance_flags ?? [],
                 $pack->sourceSnapshot,
             )
             : [];
 
+        $contentItems = $pack && ContentLibrary::available() ? $pack->contentItems()->with('latestVersion')->orderBy('id')->get() : null;
+        $canEdit = $isLatestVersion && (bool) $this->membership()?->canCreate();
+        $canFix = $isLatestVersion && $selectedPackVersion->review_status !== 'approved'
+            && ! in_array($pack->latestGenerationJob?->status, ['queued', 'processing', 'retrying'], true)
+            && $this->membership()?->canCreate();
+        $qaIssues = array_map(function (array $issue) use ($pack, $qaContent, $contentItems, $canFix, $canEdit): array {
+            if (! isset($issue['path'])) {
+                return $issue;
+            }
+            $location = app(ContentLibrary::class)->locate($qaContent, $issue['path']);
+            $item = $location ? $contentItems?->firstWhere('section', $location['section']) : null;
+            $parts = explode('.', $issue['path']);
+            if ($item) {
+                $parts = [Str::before($item->title, ' · '), ...array_slice($parts, str_starts_with($location['section'], 'creative_routes.') ? 2 : 1)];
+            }
+            $issue['where'] = collect($parts)->map(fn ($part) => is_numeric($part) ? '#'.($part + 1) : (string) Str::of($part)->replace('_', ' ')->ucfirst())->implode(' › ');
+            // Timed lines (voiceover, captions, shots) change only through Regenerate, so their timing stays checked.
+            $timed = $location && in_array(explode('__', $location['field'])[0], ContentBrowser::LOCKED_KEYS, true);
+            $issue['edit_url'] = $item && $canEdit ? route('products.show', array_filter(['product' => $pack->product_id, 'tab' => 'content', 'item' => $item->id, 'field' => $timed ? null : ($location['field'] ?: null)])) : null;
+            $issue['fixed'] = $canFix && ! $timed && isset($issue['term']) ? CampaignPackSafetyValidator::withoutTerm($issue['text'], $issue['term']) : null;
+
+            return $issue;
+        }, $qaIssues);
+
+        // Banner text was picked from an earlier pack version, so it is price-checked on its own.
+        $bannerPriceIssues = [];
+        if ($pack && $bannerStudioAvailable) {
+            $validator = app(CampaignPackSafetyValidator::class);
+            foreach ($pack->bannerGenerationBatches->flatMap->creatives as $creative) {
+                $creative->setRelation('campaignPack', $pack);
+                if ($wrong = $validator->bannerPrices($creative)) {
+                    $bannerPriceIssues[$creative->id] = $wrong;
+                }
+            }
+        }
+
         return view('livewire.campaign-workspace', [
+            'bannerPriceIssues' => $bannerPriceIssues,
             'workspace' => $workspace,
             'products' => $pack ? collect() : $this->scopedProducts()
                 ->with(['brand', 'mediaAssets'])->orderBy('name')->get(),
             'briefProduct' => ! $pack && $this->productId ? $this->workspaceProduct($this->productId)->load('brand') : null,
-            'contentItems' => $pack && ContentLibrary::available() ? $pack->contentItems()->with('latestVersion')->orderBy('id')->get() : null,
+            'contentItems' => $contentItems,
             'pack' => $pack,
             'processJobUrl' => $pack?->latestGenerationJob && config('campaigns.processing_mode') === 'request'
                 ? URL::temporarySignedRoute('campaign-jobs.process', now()->addMinutes(30), ['generationJob' => $pack->latestGenerationJob])

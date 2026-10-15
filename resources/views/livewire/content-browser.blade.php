@@ -79,7 +79,7 @@
                             @forelse($editable as $key => $value)
                                 @php($label = collect(explode('__', $key))->reject(fn ($part) => is_numeric($part))->map(fn ($part) => str($part)->replace('_', ' ')->ucfirst())->implode(' · '))
                                 @php($index = collect(explode('__', $key))->first(fn ($part) => is_numeric($part)))
-                                <div class="field">
+                                <div @class(['field', 'is-focus' => $key === $focusField]) @if($key === $focusField) x-init="$nextTick(() => { $el.scrollIntoView({ block: 'center' }); $el.querySelector('.input')?.focus() })" @endif>
                                     <label for="cf-{{ $key }}">{{ $label }}@if($index !== null) <span class="muted">#{{ $index + 1 }}</span>@endif</label>
                                     @if(str_contains($value, "\n") || mb_strlen($value) > 90)
                                         <textarea id="cf-{{ $key }}" class="input" rows="3" wire:model="fields.{{ $key }}" @disabled($latest->status !== 'draft')></textarea>

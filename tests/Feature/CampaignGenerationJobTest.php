@@ -162,6 +162,25 @@ class CampaignGenerationJobTest extends TestCase
         $this->assertSame('completed', $regeneration->fresh()->status);
     }
 
+    public function test_channel_copy_can_be_regenerated_on_its_own(): void
+    {
+        [$workspace, , , $pack, $job] = $this->generationFixture();
+        Http::fake(['93.184.216.34/*' => Http::response($this->productHtml(), 200, ['Content-Type' => 'text/html'])]);
+        (new GenerateCampaignPack($job->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
+        $before = $pack->fresh()->versions()->where('version', 1)->value('content');
+
+        $regeneration = CampaignGenerationJob::create([
+            'workspace_id' => $workspace->id, 'campaign_pack_id' => $pack->id, 'source_snapshot_id' => $pack->source_snapshot_id,
+            'section' => 'marketing_hub', 'base_version' => 1, 'credit_cost' => 0,
+        ]);
+        (new GenerateCampaignPack($regeneration->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
+
+        $after = $pack->fresh()->versions()->where('version', 2)->value('content');
+        $this->assertSame('completed', $regeneration->fresh()->status);
+        $this->assertSame('A fresh, source-grounded channel copy variation.', $after['marketing_hub']['key_messaging']['value_proposition']);
+        $this->assertSame($before['ranked_angles'], $after['ranked_angles']);
+    }
+
     public function test_excluding_a_fact_keeps_it_out_of_a_section_regeneration(): void
     {
         [$workspace, $product, , $pack, $job] = $this->generationFixture();

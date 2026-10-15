@@ -39,5 +39,6 @@ class BannerCopySelectorTest extends TestCase
         $this->assertStringContainsString('Use the first supplied product image as the exact product reference', $selected['prompt']);
         $this->assertStringContainsString('Verified benefit', $selected['prompt']);
         $this->assertStringContainsString('Do not include any text', $selected['prompt']);
+        $this->assertStringContainsString('no real book covers', $selected['prompt']);
     }
 }

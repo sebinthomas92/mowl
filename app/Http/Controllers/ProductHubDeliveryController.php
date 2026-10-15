@@ -7,6 +7,7 @@ use App\Models\CampaignPackVersion;
 use App\Models\MediaAsset;
 use App\Models\Product;
 use App\Models\ProductHubShare;
+use App\Services\CampaignPackSafetyValidator;
 use App\Services\ProductHubContentAdapter;
 use App\Services\ProductHubCsvExporter;
 use Illuminate\Http\Request;
@@ -121,6 +122,8 @@ class ProductHubDeliveryController extends Controller
         abort_unless($creative->campaignPack?->product_id === $product->id, 404);
         abort_unless($creative->campaignPackVersion?->review_status === 'approved', 404);
         abort_unless($creative->status === 'completed' && $creative->output_path, 404);
+        // A banner showing a price the product page does not is never delivered to clients.
+        abort_unless(app(CampaignPackSafetyValidator::class)->bannerPrices($creative) === [], 404);
         abort_unless(Storage::disk($creative->disk)->exists($creative->output_path), 404);
         $stream = Storage::disk($creative->disk)->readStream($creative->output_path);
         abort_unless(is_resource($stream), 404);

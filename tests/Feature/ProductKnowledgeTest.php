@@ -54,6 +54,35 @@ class ProductKnowledgeTest extends TestCase
         $this->assertSame('USD 64.00', $product->fresh()->price);
     }
 
+    public function test_an_unresolved_price_conflict_sends_the_page_price_not_the_saved_one(): void
+    {
+        [, , $product] = $this->fixture();
+        $knowledge = app(ProductKnowledge::class);
+        $knowledge->facts($product);
+        $knowledge->syncFromSource($product, $this->snapshot($product, ['name' => 'Desk Lamp', 'price' => '64.00', 'currency' => 'USD']));
+
+        [$subject, $page] = $knowledge->prepare($product->fresh(), ['product_truth' => ['name' => 'Desk Lamp', 'price' => '64.00', 'currency' => 'USD']]);
+
+        $this->assertSame('USD 64.00', $subject->price);
+        $this->assertArrayNotHasKey('price', $page['team_knowledge'] ?? []);
+        $this->assertSame('$54.00', $product->fresh()->price);
+    }
+
+    public function test_an_unresolved_conflict_uses_the_page_name_and_drops_a_price_the_page_no_longer_shows(): void
+    {
+        [, , $product] = $this->fixture();
+        $knowledge = app(ProductKnowledge::class);
+        $knowledge->facts($product);
+        $knowledge->syncFromSource($product, $this->snapshot($product, ['name' => 'Desk Lamp Pro', 'price' => '64.00', 'currency' => 'USD']));
+        $this->assertSame('conflict', $product->facts()->where('key', 'name')->value('status'));
+
+        [$subject, $page] = $knowledge->prepare($product->fresh(), ['product_truth' => ['name' => 'Desk Lamp Pro']]);
+
+        $this->assertSame('Desk Lamp Pro', $subject->name);
+        $this->assertNull($subject->price, 'The saved $54.00 is not sent once the page shows no price');
+        $this->assertArrayNotHasKey('price', $page['team_knowledge'] ?? []);
+    }
+
     public function test_team_can_confirm_keep_exclude_and_restore_facts(): void
     {
         [$owner, , $product] = $this->fixture();

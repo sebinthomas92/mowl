@@ -36,7 +36,7 @@ class BannerComposer
 
         $layout = $this->layout($creative->layout, $width, $height);
         $this->drawReadabilityLayer($canvas, $creative->layout, $width, $height);
-        $this->drawBrand($canvas, $brand, $layout['x'], $layout['brand_y'], $layout['max_width']);
+        $this->drawBrand($canvas, $brand, $layout['x'], $layout['brand_y'], isset($layout['brand_right']) ? 360 : $layout['max_width'], $layout['brand_right'] ?? null);
 
         $white = imagecolorallocate($canvas, 255, 255, 255);
         $muted = imagecolorallocate($canvas, 231, 235, 241);
@@ -81,32 +81,38 @@ class BannerComposer
     {
         return match ($layout) {
             'split_left' => ['x' => 80, 'brand_y' => 105, 'headline_y' => 330, 'cta_y' => 1135, 'max_width' => 475, 'headline_height' => 450, 'support_height' => 200],
-            'bottom_panel' => ['x' => 80, 'brand_y' => 825, 'headline_y' => 960, 'cta_y' => 1230, 'max_width' => $width - 160, 'headline_height' => 220, 'support_height' => 110],
+            // The wordmark sits on the dark panel, right-aligned on the CTA row, not over the photo.
+            'bottom_panel' => ['x' => 80, 'brand_y' => 1230 + 58, 'brand_right' => $width - 80, 'headline_y' => 960, 'cta_y' => 1230, 'max_width' => $width - 160, 'headline_height' => 220, 'support_height' => 110],
             default => ['x' => 80, 'brand_y' => 95, 'headline_y' => 240, 'cta_y' => 555, 'max_width' => 520, 'headline_height' => 300, 'support_height' => 130],
         };
     }
 
+    /**
+     * A smooth dark gradient behind the text. Drawn one pixel row or column at a time: GD rectangle
+     * bounds are inclusive, so wider strips overlap by a pixel and show as dark scan lines.
+     */
     private function drawReadabilityLayer(\GdImage $canvas, string $layout, int $width, int $height): void
     {
         if ($layout === 'split_left') {
-            for ($x = 0; $x < 650; $x += 5) {
+            for ($x = 0; $x < 650; $x++) {
                 $alpha = min(127, 18 + (int) (($x / 650) * 109));
-                imagefilledrectangle($canvas, $x, 0, $x + 5, $height, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
+                imageline($canvas, $x, 0, $x, $height - 1, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
             }
         } elseif ($layout === 'bottom_panel') {
-            for ($y = 720; $y < $height; $y += 5) {
-                $alpha = max(16, 115 - (int) ((($y - 720) / ($height - 720)) * 99));
-                imagefilledrectangle($canvas, 0, $y, $width, $y + 5, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
+            for ($y = 720; $y < $height; $y++) {
+                $alpha = max(16, 127 - (int) ((($y - 720) / ($height - 720)) * 111));
+                imageline($canvas, 0, $y, $width - 1, $y, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
             }
         } else {
-            for ($y = 0; $y < 720; $y += 5) {
+            for ($y = 0; $y < 720; $y++) {
                 $alpha = min(127, 20 + (int) (($y / 720) * 107));
-                imagefilledrectangle($canvas, 0, $y, 690, $y + 5, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
+                imageline($canvas, 0, $y, 689, $y, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
             }
         }
     }
 
-    private function drawBrand(\GdImage $canvas, Brand $brand, int $x, int $baseline, int $maxWidth): void
+    /** Draws the logo or name at $x, or ending at $right when given. */
+    private function drawBrand(\GdImage $canvas, Brand $brand, int $x, int $baseline, int $maxWidth, ?int $right = null): void
     {
         if ($brand->banner_logo_path && $brand->banner_logo_disk) {
             $bytes = Storage::disk($brand->banner_logo_disk)->get($brand->banner_logo_path);
@@ -117,6 +123,9 @@ class BannerComposer
                 $scale = min($maxWidth / $sourceWidth, 72 / $sourceHeight, 1.0);
                 $logoWidth = max(1, (int) round($sourceWidth * $scale));
                 $logoHeight = max(1, (int) round($sourceHeight * $scale));
+                if ($right !== null) {
+                    $x = $right - $logoWidth;
+                }
                 imagecopyresampled($canvas, $logo, $x, $baseline - $logoHeight, 0, 0, $logoWidth, $logoHeight, $sourceWidth, $sourceHeight);
                 imagedestroy($logo);
 
@@ -124,7 +133,19 @@ class BannerComposer
             }
         }
 
-        imagettftext($canvas, 29, 0, $x, $baseline, imagecolorallocate($canvas, 255, 255, 255), $this->font, $brand->name);
+        $name = $brand->name;
+        $size = 29;
+        while ($size > 18 && $this->textWidth($name, $size) > $maxWidth) {
+            $size -= 2;
+        }
+        // A name too long even at the smallest size is cut short so it never runs into the CTA.
+        while (mb_strlen($name) > 1 && $this->textWidth($name, $size) > $maxWidth) {
+            $name = rtrim(mb_substr($name, 0, -2)).'…';
+        }
+        if ($right !== null) {
+            $x = $right - $this->textWidth($name, $size);
+        }
+        imagettftext($canvas, $size, 0, $x, $baseline, imagecolorallocate($canvas, 255, 255, 255), $this->font, $name);
     }
 
     private function drawCta(\GdImage $canvas, string $hex, string $cta, int $x, int $y): void
