@@ -366,7 +366,23 @@ class ContentLibrary
         $mentioned = $this->prices($text);
         if ($price && $mentioned) {
             $confirmed = $this->prices($price) ?: [$this->number($price)];
-            $wrong = collect($mentioned)->reject(fn ($amount) => in_array($amount, $confirmed, true))->first();
+            // Other amounts the page shows beside the product's price (a struck-out MRP, a free-shipping
+            // threshold) are not claims about the price when the copy says the same thing about them the
+            // page does. An amount the page states as a price carries no such role, so a stale page price
+            // that disagrees with the confirmed one still fails here.
+            $source = $item->campaignPack?->sourceSnapshot;
+            $validator = app(CampaignPackSafetyValidator::class);
+            $roles = [];
+            foreach ($source ? $validator->pricesBesideProductPrice($source) : [] as $supported => $pageRoles) {
+                $amount = $this->number(explode(' ', $supported, 2)[1] ?? '');
+                $roles[$amount] = [...$roles[$amount] ?? [], ...$pageRoles];
+            }
+            // Field by field, so wording ending one field never describes an amount starting the next.
+            $wrong = collect($this->strings($version->body))
+                ->flatMap(fn (string $field) => $this->pricesInContext($field))
+                ->reject(fn (array $found) => in_array($found[0], $confirmed, true)
+                    || in_array($validator->priceRole($found[1], $found[2]), $roles[$found[0]] ?? [], true))
+                ->pluck(0)->first();
             $checks[] = ['ok' => $wrong === null, 'blocking' => true, 'label' => $wrong === null
                 ? "Price matches confirmed Knowledge ({$price})"
                 : "Price {$wrong} differs from confirmed Knowledge ({$price})"];
@@ -674,6 +690,24 @@ class ContentLibrary
         preg_match_all('/(?:[$€£₹]|\b(?:USD|EUR|GBP|INR|Rs\.?))\s?(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s?(?:USD|EUR|GBP|INR)\b/u', $text, $matches, PREG_SET_ORDER);
 
         return array_values(array_unique(array_map(fn (array $match) => $this->number($match[1] !== '' ? $match[1] : ($match[2] ?? '')), $matches)));
+    }
+
+    /**
+     * Each price in the text with the words just before and after it.
+     *
+     * @return list<array{0: string, 1: string, 2: string}>
+     */
+    private function pricesInContext(string $text): array
+    {
+        preg_match_all('/(?:[$€£₹]|\b(?:USD|EUR|GBP|INR|Rs\.?))\s?(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s?(?:USD|EUR|GBP|INR)\b/u', $text, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+
+        // Byte offsets, so mb_strcut keeps the windows valid UTF-8.
+        return array_map(function (array $match) use ($text): array {
+            [$whole, $offset] = $match[0];
+            $amount = ($match[1][1] ?? -1) >= 0 ? $match[1][0] : ($match[2][0] ?? '');
+
+            return [$this->number($amount), mb_strcut($text, max(0, $offset - 40), min(40, $offset)), mb_strcut($text, $offset + strlen($whole), 16)];
+        }, $matches);
     }
 
     private function number(string $value): string

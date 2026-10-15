@@ -142,6 +142,73 @@ class ContentItemsTest extends TestCase
         $library->approve($version->fresh(), $owner);
     }
 
+    public function test_a_shipping_threshold_or_struck_out_price_beside_the_product_price_is_not_a_wrong_price(): void
+    {
+        [$owner, $workspace, $pack] = $this->fixture();
+        $pack->sourceSnapshot->update([
+            'approved_by_user_id' => $owner->id, 'approved_at' => now(),
+            'extracted_content' => 'Kindle Stand ₹750₹699 Inclusive of all taxes. Free shipping on orders over ₹499. '.str_repeat('Care notes. ', 60).'You may also like: Cloud Organiser ₹899',
+            'extracted_truth' => ['price' => '699.00', 'currency' => 'INR'],
+        ]);
+        $pack->product->facts()->create(['workspace_id' => $workspace->id, 'key' => 'price', 'confirmed_value' => 'INR 699.00', 'status' => 'ok', 'confirmed_at' => now()]);
+        $library = app(ContentLibrary::class);
+        $library->syncPack($pack);
+        $version = $pack->contentItems()->where('section', 'positioning')->firstOrFail()->latestVersion;
+        $priceCheck = fn () => collect($library->checks($version->fresh()))->first(fn (array $check) => str_starts_with($check['label'], 'Price'));
+
+        $library->saveDraft($version, ['value_proposition' => 'Now INR 699, down from ₹750, with free shipping over INR 499.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Now only ₹899.']);
+        $this->assertSame('Price 899 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
+
+        // The struck-out amount stated as the price is still a wrong price.
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Was great value. Now only ₹750.']);
+        $this->assertSame('Price 750 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Free shipping, ₹750 only.']);
+        $this->assertSame('Price 750 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Get it for ₹750 MRP, now ₹699, free shipping on orders over ₹499.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+        // The copy must say what the page says about the amount, within one field.
+        foreach (['Free shipping over ₹750.', 'Save ₹750 today.', 'Was ₹499, now ₹699.'] as $wrong) {
+            $library->saveDraft($version->fresh(), ['value_proposition' => $wrong]);
+            $this->assertFalse($priceCheck()['ok'], $wrong);
+        }
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Free shipping', 'brand_position' => '₹750 only']);
+        $this->assertSame('Price 750 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
+        $library->saveDraft($version->fresh(), ['value_proposition' => '₹750 (MRP), now ₹699.', 'brand_position' => 'Quiet design for readers.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+
+        // A shipping fee is not an order threshold, and a marked saving is not an old price.
+        $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand. Save ₹100 ₹699. Shipping: ₹49. Free shipping over ₹499.']);
+        foreach (['Shipping over ₹49.', 'Was ₹100, now ₹699.', 'Now costs over ₹499.'] as $wrong) {
+            $library->saveDraft($version->fresh(), ['value_proposition' => $wrong]);
+            $this->assertFalse($priceCheck()['ok'], $wrong);
+        }
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Save ₹100: now ₹699, free shipping over ₹499.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+        // A fee ending one sentence is not struck out by the price starting the next.
+        $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand. Shipping ₹49. ₹699 in stock.']);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Was ₹49, now ₹699.']);
+        $this->assertFalse($priceCheck()['ok']);
+        // A stale page price that matches a threshold keeps the threshold role, and still fails as a price.
+        $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand ₹499. Free shipping over ₹499.', 'extracted_truth' => ['price' => '499.00', 'currency' => 'INR']]);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Now ₹699 with free shipping over ₹499.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Now ₹499.']);
+        $this->assertFalse($priceCheck()['ok']);
+        $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand ₹750₹699 Inclusive of all taxes. Free shipping on orders over ₹499.', 'extracted_truth' => ['price' => '699.00', 'currency' => 'INR']]);
+
+        // Wording from a live pack.
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Launch price of INR 699.00 with complimentary shipping (order value exceeds INR 499 threshold). The price of INR 699.00 exceeds the complimentary shipping threshold of INR 499.00. Free delivery over INR 499. Applies strictly to orders with subtotals above INR 499.00.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+
+        // A page that never shows the product's price ties no other amount on it to the product.
+        $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand. Was ₹899. You may also like: Cloud Organiser ₹750', 'extracted_truth' => []]);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Now ₹899.']);
+        $this->assertSame('Price 899 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
+    }
+
     public function test_a_named_client_link_shows_only_review_items_and_records_decisions(): void
     {
         [$owner, $workspace, $pack] = $this->fixture();
