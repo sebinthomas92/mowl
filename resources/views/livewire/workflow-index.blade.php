@@ -85,7 +85,7 @@
                                             @if(($prompt['credit'] ?? null) || ($prompt['source_url'] ?? null))
                                                 <p class="muted xs wf-credit">{{ $prompt['credit'] }}@if($prompt['source_url'] ?? null) <a class="linkbtn" href="{{ $prompt['source_url'] }}" target="_blank" rel="noopener">Original post</a>@endif</p>
                                             @endif
-                                            <button type="button" class="pill ghost sm" @click="navigator.clipboard.writeText(@js($prompt['body'])); copied = {{ $index }}; setTimeout(() => copied = null, 1600)">
+                                            <button type="button" class="pill ghost sm" @click="navigator.clipboard.writeText($el.closest('details').querySelector('.wf-body').textContent); copied = {{ $index }}; setTimeout(() => copied = null, 1600)">
                                                 <i class="ti ti-copy" aria-hidden="true"></i><span x-text="copied === {{ $index }} ? 'Copied' : 'Copy prompt'">Copy prompt</span>
                                             </button>
                                         </details>
