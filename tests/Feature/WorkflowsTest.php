@@ -214,7 +214,8 @@ MD);
         $user = $this->member();
 
         $hero = app(WorkflowCatalog::class)->find('motionsites-hero-section');
-        $this->assertSame(route('workflows.preview', [$aurora->id, 'poster']), $hero['poster']);
+        // Not copied yet: the poster loads straight from its source.
+        $this->assertSame('https://cdn.example.com/hero.jpg', $hero['poster']);
         Livewire::actingAs($user)->withQueryParams(['workflow' => 'motionsites-hero-section'])->test(WorkflowIndex::class)
             ->assertSee(route('workflows.preview', [$aurora->id, 'video']), false);
 
@@ -232,6 +233,7 @@ MD);
         // Served from the stored copy without fetching again (one size check, one download).
         Http::assertSentCount(2);
         $this->actingAs($user)->get(route('workflows.preview', [$aurora->id, 'poster']))->assertOk()->assertHeader('Content-Type', 'image/jpeg');
+        $this->assertSame(route('workflows.preview', [$aurora->id, 'poster']), app(WorkflowCatalog::class)->find('motionsites-hero-section')['poster']);
         $this->actingAs($user)->get(route('workflows.preview', [$plain->id, 'video']))->assertNotFound();
         $this->actingAs($user)->get(route('workflows.preview', [$plain->id, 'poster']))->assertNotFound();
 
@@ -286,7 +288,7 @@ MD);
 
         $hero = app(WorkflowCatalog::class)->find('motionsites-hero');
         $this->assertNull($hero['prompts'][0]['video']);
-        $this->assertSame(route('workflows.preview', [$big->id, 'poster']), $hero['prompts'][0]['poster']);
+        $this->assertSame('https://cdn.example.com/big.gif', $hero['prompts'][0]['poster']);
     }
 
     public function test_open_collections_credit_each_prompt_and_show_previews_from_the_source(): void

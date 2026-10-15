@@ -122,10 +122,17 @@ class WorkflowCatalog
                 $previews = app(LibraryPreviews::class);
                 // Videos play only from our own copy; source-only collections show their poster instead.
                 $sourceOnly = ($collection['mirror_previews'] ?? true) === false;
-                $preview = fn (LibraryPrompt $prompt, string $kind) => ($prompt->{$kind.'_url'} || $prompt->{$kind.'_path'})
-                    && ! ($kind === 'video' && ($sourceOnly || $prompt->video_path === LibraryPreviews::REMOTE || $previews->isStream($prompt->video_url)))
-                    ? route('workflows.preview', [$prompt->id, $kind])
-                    : null;
+                $stored = fn (LibraryPrompt $prompt, string $kind) => ! $sourceOnly && $prompt->{$kind.'_path'} && $prompt->{$kind.'_path'} !== LibraryPreviews::REMOTE;
+                $preview = fn (LibraryPrompt $prompt, string $kind) => match (true) {
+                    // Posters without a stored copy load straight from the source, so a page of previews
+                    // doesn't become dozens of app requests.
+                    $kind === 'poster' => $stored($prompt, 'poster') ? route('workflows.preview', [$prompt->id, 'poster']) : LibraryPreviews::safeUrl($prompt->poster_url),
+                    ! $prompt->video_url && ! $prompt->video_path,
+                    $sourceOnly,
+                    $prompt->video_path === LibraryPreviews::REMOTE,
+                    $previews->isStream($prompt->video_url) => null,
+                    default => route('workflows.preview', [$prompt->id, 'video']),
+                };
                 $items = $prompts->map(fn (LibraryPrompt $prompt) => [
                     'id' => $prompt->id,
                     'title' => $prompt->title,
