@@ -31,8 +31,21 @@ class BrandEditor extends Component
 
     public string $defaultAudience = '';
 
+    /**
+     * Palette colours keyed by a stable id ("c1", "c2", ...), in display order. Rows bind to
+     * colors.{id}, so removing a colour never shifts another row's binding, and a late update
+     * from a removed row can be recognised and dropped.
+     *
+     * @var array<string, string>
+     */
+    public array $colors = [];
+
+    #[Locked]
+    public int $nextColor = 0;
+
     /** @var list<string> */
-    public array $palette = [];
+    #[Locked]
+    public array $removedColors = [];
 
     public $logo = null;
 
@@ -41,7 +54,7 @@ class BrandEditor extends Component
         $workspace = $this->currentWorkspace();
         if (! $brand?->exists) {
             abort_if($workspace->brands()->count() >= config('campaigns.brand_limit'), 403, 'This workspace has reached its brand limit.');
-            $this->palette = ['#D9381E'];
+            $this->setPalette(['#D9381E']);
 
             return;
         }
@@ -52,49 +65,76 @@ class BrandEditor extends Component
         $this->website = (string) $brand->website;
         $this->voice = (string) ($brand->voice ?? '');
         $this->defaultAudience = (string) ($brand->default_audience ?? '');
-        $this->palette = array_map('strtoupper', $brand->colors());
+        $this->setPalette(array_map('strtoupper', $brand->colors()));
     }
 
     public function addColor(): void
     {
-        if (count($this->palette) < self::MAX_COLORS) {
-            $this->palette[] = '#FFFFFF';
+        if (count($this->colors) < self::MAX_COLORS) {
+            $this->colors['c'.(++$this->nextColor)] = '#FFFFFF';
         }
     }
 
-    public function removeColor(int $index): void
+    public function removeColor(string $id): void
     {
-        unset($this->palette[$index]);
-        $this->palette = array_values($this->palette);
+        if (array_key_exists($id, $this->colors)) {
+            unset($this->colors[$id]);
+            $this->removedColors[] = $id;
+            $this->resetValidation('colors.'.$id);
+        }
+    }
+
+    /**
+     * Colour inputs send updates on a debounce, so one can arrive after its row was removed. Livewire
+     * has already written it by now; drop it so a removed colour never comes back, and keep every
+     * value a plain string under an id this editor issued.
+     */
+    public function updatedColors(mixed $value, ?string $key = null): void
+    {
+        $this->colors = array_filter(
+            array_map(fn ($color) => is_scalar($color) ? (string) $color : '', $this->colors),
+            fn ($id) => $this->issuedColor($id),
+            ARRAY_FILTER_USE_KEY,
+        );
+    }
+
+    /** @return list<string> */
+    public function palette(): array
+    {
+        return array_values(array_map(fn ($color) => is_scalar($color) ? strtoupper(trim((string) $color)) : '', $this->colors));
     }
 
     public function save()
     {
-        $this->palette = array_values(array_map(fn ($color) => strtoupper(trim((string) $color)), $this->palette));
+        $this->colors = array_combine(array_keys($this->colors), $this->palette());
         $data = $this->validate([
             'name' => ['required', 'string', 'max:120'],
             'website' => ['nullable', 'url:http,https', 'max:255'],
             'voice' => ['nullable', 'string', 'max:1000'],
             'defaultAudience' => ['nullable', 'string', 'max:500'],
-            'palette' => ['array', 'max:'.self::MAX_COLORS],
-            'palette.*' => ['required', 'regex:/^#[0-9A-F]{6}$/'],
+            'colors' => ['array', 'max:'.self::MAX_COLORS],
+            'colors.*' => ['required', 'string', 'regex:/^#[0-9A-F]{6}$/'],
             'logo' => ['nullable', 'file', 'mimetypes:image/png,image/webp', 'max:5120'],
         ], [
-            'palette.*.regex' => 'Use a six-digit hex colour, such as #D9381E.',
-            'palette.*.required' => 'Use a six-digit hex colour, such as #D9381E.',
+            'colors.max' => 'A brand can have up to '.self::MAX_COLORS.' colours.',
+            'colors.*.regex' => 'Use a six-digit hex colour, such as #D9381E.',
+            'colors.*.required' => 'Use a six-digit hex colour, such as #D9381E.',
+            'colors.*.string' => 'Use a six-digit hex colour, such as #D9381E.',
         ]);
+        $palette = array_values($data['colors'] ?? []);
 
         $workspace = $this->currentWorkspace();
         $attributes = [
             'name' => trim($data['name']),
             'website' => filled($data['website']) ? trim($data['website']) : null,
-            'primary_color' => $data['palette'][0] ?? null,
+            'primary_color' => $palette[0] ?? null,
         ];
         if (Brand::profileAvailable()) {
             $attributes += [
                 'voice' => filled($data['voice']) ? trim($data['voice']) : null,
                 'default_audience' => filled($data['defaultAudience']) ? trim($data['defaultAudience']) : null,
-                'palette' => $data['palette'] ?: null,
+                // An empty list (not null) records that the palette was cleared on purpose.
+                'palette' => $palette,
             ];
         }
 
@@ -131,6 +171,21 @@ class BrandEditor extends Component
         return $this->redirectRoute('brands.index', navigate: true);
     }
 
+    private function issuedColor(int|string $id): bool
+    {
+        return is_string($id) && preg_match('/^c[1-9]\d*$/', $id) && (int) substr($id, 1) <= $this->nextColor
+            && ! in_array($id, $this->removedColors, true);
+    }
+
+    /** @param list<string> $palette */
+    private function setPalette(array $palette): void
+    {
+        $this->colors = [];
+        foreach (array_slice($palette, 0, self::MAX_COLORS) as $color) {
+            $this->colors['c'.(++$this->nextColor)] = $color;
+        }
+    }
+
     public function render()
     {
         $workspace = $this->currentWorkspace();
@@ -140,7 +195,7 @@ class BrandEditor extends Component
             'workspace' => $workspace,
             'brand' => $brand,
             'profileAvailable' => Brand::profileAvailable(),
-            'validPalette' => array_values(array_filter($this->palette, fn ($color) => is_string($color) && preg_match('/^#[0-9A-Fa-f]{6}$/', $color))),
+            'validPalette' => array_values(array_filter($this->palette(), fn ($color) => preg_match('/^#[0-9A-F]{6}$/', $color))),
         ])->layout('components.layouts.app');
     }
 }
