@@ -54,9 +54,9 @@ class BrandEditorTest extends TestCase
             ->set('website', 'https://kettle.example')
             ->set('voice', 'Warm and playful, never cute.')
             ->set('defaultAudience', 'Students and makers')
-            ->set('palette', ['#3b2e5a'])
+            ->set('colors.c1', '#3b2e5a')
             ->call('addColor')
-            ->set('palette.1', '#F4E7D4')
+            ->set('colors.c2', '#F4E7D4')
             ->call('save')
             ->assertHasNoErrors()
             ->assertRedirect(route('brands.index'));
@@ -75,13 +75,74 @@ class BrandEditorTest extends TestCase
 
         $component = Livewire::actingAs($user)->test(BrandEditor::class)
             ->set('name', 'Brand')
-            ->set('palette', ['red'])
+            ->set('colors.c1', 'red')
             ->call('save')
-            ->assertHasErrors('palette.0');
+            ->assertHasErrors('colors.c1');
 
-        $component->set('palette', ['#111111'])
+        $component->set('colors.c1', '#111111')
             ->call('addColor')->call('addColor')->call('addColor')->call('addColor')->call('addColor');
-        $this->assertCount(BrandEditor::MAX_COLORS, $component->get('palette'));
+        $this->assertCount(BrandEditor::MAX_COLORS, $component->get('colors'));
+    }
+
+    public function test_the_last_colour_can_be_removed_and_an_empty_palette_is_saved(): void
+    {
+        [$user, $workspace] = $this->workspaceUser();
+        $brand = $workspace->brands()->create(['name' => 'Northline', 'primary_color' => '#C7643A', 'palette' => ['#C7643A']]);
+
+        Livewire::actingAs($user)->test(BrandEditor::class, ['brand' => $brand])
+            ->assertSee('Remove colour 1')
+            ->call('removeColor', 'c1')
+            ->assertSet('colors', [])
+            ->assertSee('No colours yet.')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $brand->refresh();
+        $this->assertSame([], $brand->palette);
+        $this->assertNull($brand->primary_color, 'Banners fall back to the default accent');
+        $this->assertSame([], $brand->colors());
+
+        Livewire::actingAs($user)->test(BrandEditor::class, ['brand' => $brand])
+            ->assertSet('colors', [])
+            ->call('addColor')
+            ->assertSet('colors', ['c1' => '#FFFFFF']);
+    }
+
+    public function test_removing_a_colour_never_shifts_another_rows_binding(): void
+    {
+        [$user, $workspace] = $this->workspaceUser();
+        $brand = $workspace->brands()->create(['name' => 'Northline', 'palette' => ['#111111', '#222222', '#333333']]);
+
+        Livewire::actingAs($user)->test(BrandEditor::class, ['brand' => $brand])
+            ->call('removeColor', 'c1')
+            ->call('removeColor', 'c2')
+            ->set('colors.c3', '#444444')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame(['#444444'], $brand->refresh()->palette);
+        $this->assertSame('#444444', $brand->primary_color);
+    }
+
+    public function test_a_late_update_from_a_removed_colour_is_dropped(): void
+    {
+        [$user, $workspace] = $this->workspaceUser();
+        $brand = $workspace->brands()->create(['name' => 'Northline', 'palette' => ['#111111', '#222222']]);
+
+        Livewire::actingAs($user)->test(BrandEditor::class, ['brand' => $brand])
+            ->call('removeColor', 'c2')
+            // A debounced input from the removed row arrives after the removal.
+            ->set('colors.c2', '#ABCDEF')
+            // Keys the editor never issued, and non-string values, are ignored too.
+            ->set('colors.c9', '#ABCDEF')
+            ->set('colors.c1', ['#ABCDEF'])
+            ->assertSet('colors', ['c1' => ''])
+            ->set('colors.c1', '#123456')
+            ->call('removeColor', 'c2')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame(['#123456'], $brand->refresh()->palette);
     }
 
     public function test_an_existing_brand_is_edited_and_its_logo_replaced(): void
@@ -92,7 +153,7 @@ class BrandEditorTest extends TestCase
         $brand = $workspace->brands()->create(['name' => 'Northline', 'primary_color' => '#C7643A']);
 
         Livewire::actingAs($user)->test(BrandEditor::class, ['brand' => $brand])
-            ->assertSet('palette', ['#C7643A'])
+            ->assertSet('colors', ['c1' => '#C7643A'])
             ->set('voice', 'Short sentences.')
             ->set('logo', UploadedFile::fake()->image('logo.png', 200, 200))
             ->call('save')
