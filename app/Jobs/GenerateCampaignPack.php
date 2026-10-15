@@ -117,7 +117,6 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             }
 
             $job->update(['phase' => 'generating_pack']);
-            $baseContent = null;
             if ($section) {
                 $baseContent = $this->withCurrentPrice($this->baseContent($job), $subject->price);
                 $page['regeneration_section'] = $section;
@@ -169,12 +168,14 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
                 ? 0.018
                 : $costs->calculate($result->model ?? '', $result->inputTokens, $result->cachedInputTokens, $result->outputTokens);
 
-            DB::transaction(function () use ($job, $result, $cost, $cached, $section, $baseContent): void {
+            $currentPrice = $subject->price;
+            DB::transaction(function () use ($job, $result, $cost, $cached, $section, $currentPrice): void {
                 $pack = $job->campaignPack()->lockForUpdate()->firstOrFail();
                 $nextVersion = ((int) $pack->versions()->max('version')) + 1;
                 $content = app(CampaignPackFinalizer::class)->finalize($section
                     ? $this->replaceSection(
-                        $baseContent,
+                        // Re-read and re-scrubbed now, so a fact excluded during generation stays out.
+                        $this->withCurrentPrice($this->baseContent($job), $currentPrice),
                         $result->content,
                         $section,
                     )
@@ -304,13 +305,20 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
     }
 
     /**
-     * A section regeneration keeps the base version's Product truth, which can predate a price the
-     * team has since confirmed. The new version, and the generator's view of it, carry today's price.
+     * A section regeneration keeps the base version's Product truth and product details, which can
+     * predate a price the team has since confirmed. The new version, and the generator's view of it,
+     * carry today's price. Older copy that still names the old price is left for QA to flag.
      */
     private function withCurrentPrice(array $content, ?string $price): array
     {
-        if (filled($price) && is_array($content['product_truth'] ?? null)) {
+        if (! filled($price)) {
+            return $content;
+        }
+        if (is_array($content['product_truth'] ?? null)) {
             $content['product_truth']['price'] = $price;
+        }
+        if (is_array($content['marketing_hub']['product_details'] ?? null) && array_key_exists('price', $content['marketing_hub']['product_details'])) {
+            $content['marketing_hub']['product_details']['price'] = $price;
         }
 
         return $content;
