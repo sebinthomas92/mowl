@@ -217,8 +217,9 @@ class CampaignPackSafetyValidator
     }
 
     /**
-     * Amounts a price may use: every number on the product page and its structured data, plus a
-     * price the team confirmed in Knowledge. Null source means nothing to check against.
+     * Amounts a price may use: currency amounts written on the product page, the page's structured
+     * price, and a price the team confirmed in Knowledge. Other numbers on the page (dispatch times,
+     * sizes, review counts) are not prices. Null source means nothing to check against.
      *
      * @return list<string>|null
      */
@@ -227,13 +228,16 @@ class CampaignPackSafetyValidator
         if (! $source) {
             return null;
         }
-        $text = implode("\n", array_filter([$source->extracted_content, CampaignPackEvidence::json($source->extracted_truth ?? [])]));
+        $explicit = [(string) data_get($source->extracted_truth ?? [], 'price', '')];
         if (ProductKnowledge::available() && $source->product_id) {
-            $text .= "\n".$source->product?->facts()->where('key', 'price')->where('status', 'ok')->value('confirmed_value');
+            $explicit[] = (string) $source->product?->facts()->where('key', 'price')->where('status', 'ok')->value('confirmed_value');
         }
-        preg_match_all('/\\d[\\d,]*(?:\\.\\d+)?/u', $text, $matches);
+        preg_match_all('/\\d[\\d,]*(?:\\.\\d+)?/u', implode("\n", $explicit), $numbers);
 
-        return array_values(array_unique(array_map(fn (string $number) => $this->amount($number), $matches[0])));
+        return array_values(array_unique([
+            ...$this->currencyAmounts((string) $source->extracted_content),
+            ...array_map(fn (string $number) => $this->amount($number), $numbers[0]),
+        ]));
     }
 
     /**
@@ -247,13 +251,26 @@ class CampaignPackSafetyValidator
         if ($supported === null) {
             return [];
         }
-        preg_match_all('/(?<![\\p{L}\\p{N}])(?:₹|rs\\.?|inr|usd|eur|gbp|\\$|€|£)\\s?(\\d[\\d,]*(?:\\.\\d+)?)/iu', $text, $before);
-        preg_match_all('/(\\d[\\d,]*(?:\\.\\d+)?)\\s?(?:inr|rupees)(?![\\p{L}])/iu', $text, $after);
 
         return array_values(array_unique(array_filter(
-            array_map(fn (string $number) => $this->amount($number), [...$before[1], ...$after[1]]),
+            $this->currencyAmounts($text),
             fn (string $amount) => ! in_array($amount, $supported, true),
         )));
+    }
+
+    /**
+     * Amounts written with a currency: "₹699", "INR 899", "Rs. 1,499", "500 rupees". Symbols may
+     * follow a digit ("₹750₹699" is a struck-out price beside the sale price); words may not.
+     *
+     * @return list<string>
+     */
+    private function currencyAmounts(string $text): array
+    {
+        $number = '(\\d[\\d,]*(?:\\.\\d+)?)';
+        preg_match_all('/(?:[₹$€£]|(?<![\\p{L}\\p{N}])(?:rs\\.?|inr|usd|eur|gbp))\\s?'.$number.'/iu', $text, $before);
+        preg_match_all('/'.$number.'\\s?(?:inr|rupees)(?![\\p{L}])/iu', $text, $after);
+
+        return array_values(array_unique(array_map(fn (string $number) => $this->amount($number), [...$before[1], ...$after[1]])));
     }
 
     /** "1,499.00" and "1499" are the same amount. */

@@ -138,6 +138,10 @@ class BannerComposer
         while ($size > 18 && $this->textWidth($name, $size) > $maxWidth) {
             $size -= 2;
         }
+        // A name too long even at the smallest size is cut short so it never runs into the CTA.
+        while (mb_strlen($name) > 1 && $this->textWidth($name, $size) > $maxWidth) {
+            $name = rtrim(mb_substr($name, 0, -2)).'…';
+        }
         if ($right !== null) {
             $x = $right - $this->textWidth($name, $size);
         }

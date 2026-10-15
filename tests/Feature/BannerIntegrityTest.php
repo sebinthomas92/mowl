@@ -30,6 +30,50 @@ class BannerIntegrityTest extends TestCase
         $this->assertSame('creative_routes.0.platform_assets.meta_ads.headlines.0', $issues->first()['path']);
     }
 
+    public function test_only_currency_amounts_on_the_page_count_as_prices(): void
+    {
+        $validator = app(CampaignPackSafetyValidator::class);
+        $supported = $validator->supportedPrices(new SourceSnapshot(['extracted_content' => self::PAGE, 'extracted_truth' => ['price' => '699.00', 'currency' => 'INR']]));
+
+        $this->assertEqualsCanonicalizing(['750', '699', '499'], $supported);
+        $this->assertSame(['48'], $validator->unsupportedPrices('Just INR 48 today', $supported), 'A dispatch time is not a price');
+    }
+
+    public function test_the_fallback_headline_is_also_checked_for_price(): void
+    {
+        $workspace = Workspace::create(['name' => 'Banner Agency']);
+        $product = $workspace->brands()->create(['name' => 'Plush'])->products()->create(['name' => 'Kindle Stand']);
+        $source = $product->sourceSnapshots()->create(['url' => 'https://example.com/stand', 'content_hash' => 'h', 'status' => 'ready', 'extracted_content' => self::PAGE, 'extracted_truth' => ['price' => '699.00', 'currency' => 'INR']]);
+        $pack = CampaignPack::create(['product_id' => $product->id, 'source_snapshot_id' => $source->id, 'name' => 'Pack', 'status' => 'approved', 'current_version' => 1, 'analysis_mode' => 'standard']);
+        $version = $pack->versions()->create(['version' => 1, 'content' => [
+            'product_truth' => ['name' => 'Kindle Stand'],
+            'direction' => ['title' => 'Now INR 899'],
+            'ranked_angles' => [['title' => 'Read hands-free']],
+        ]]);
+
+        $this->assertSame('Read hands-free', app(BannerCopySelector::class)->select($version, 1)['headline']);
+    }
+
+    public function test_a_long_brand_name_is_cut_short_before_the_cta(): void
+    {
+        $background = imagecreatetruecolor(1080, 1350);
+        imagefill($background, 0, 0, imagecolorallocate($background, 0, 0, 0));
+        ob_start();
+        imagepng($background);
+        $bytes = ob_get_clean();
+        $brand = new Brand(['name' => str_repeat('Wonderfully Long Brand Name ', 4), 'primary_color' => '#0000FF']);
+        $creative = new BannerCreative(['headline' => 'A stand', 'supporting_text' => null, 'cta' => 'Shop now', 'layout' => 'bottom_panel']);
+
+        $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, $creative));
+
+        // The CTA ends at x = 80 + 230; nothing white may sit between it and the reserved 360px.
+        for ($x = 320; $x < 1000 - 360; $x++) {
+            for ($y = 1250; $y < 1300; $y++) {
+                $this->assertNotSame(255, (imagecolorat($image, $x, $y) >> 16) & 255, "White wordmark pixel at {$x},{$y}");
+            }
+        }
+    }
+
     public function test_banner_copy_skips_lines_with_an_unsupported_price(): void
     {
         $workspace = Workspace::create(['name' => 'Banner Agency']);
