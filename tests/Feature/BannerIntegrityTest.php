@@ -283,6 +283,34 @@ class BannerIntegrityTest extends TestCase
         $this->assertLessThanOrEqual(110, (imagecolorat($image, 905, 1262) >> 16) & 255);
     }
 
+    public function test_a_dark_uploaded_logo_gets_a_light_backing_over_a_dark_background(): void
+    {
+        Storage::fake('local');
+        $logo = imagecreatetruecolor(300, 60);
+        imagesavealpha($logo, true);
+        imagefill($logo, 0, 0, imagecolorallocatealpha($logo, 0, 0, 0, 127));
+        imagefilledrectangle($logo, 20, 10, 280, 50, imagecolorallocate($logo, 15, 15, 15));
+        ob_start();
+        imagepng($logo);
+        Storage::disk('local')->put('logo.png', ob_get_clean());
+        $brand = new Brand(['name' => 'Plush', 'primary_color' => '#F4B942', 'banner_logo_disk' => 'local', 'banner_logo_path' => 'logo.png']);
+        $behindLogo = [];
+        foreach (['bright' => [245, 240, 230], 'dark' => [20, 20, 20]] as $tone => [$red, $green, $blue]) {
+            $background = imagecreatetruecolor(1080, 1350);
+            imagefill($background, 0, 0, imagecolorallocate($background, $red, $green, $blue));
+            ob_start();
+            imagepng($background);
+            $bytes = ob_get_clean();
+            $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, new BannerCreative(['headline' => 'A stand', 'cta' => 'Shop now', 'layout' => 'hero_top'])));
+            // Just left of the logo, where only the backing is drawn.
+            $behindLogo[$tone] = (imagecolorat($image, 650, 1262) >> 16) & 255;
+        }
+
+        // A bright photo stays bright behind a dark logo; a dark photo is lifted so the logo still reads.
+        $this->assertGreaterThan(230, $behindLogo['bright']);
+        $this->assertGreaterThanOrEqual(150, $behindLogo['dark']);
+    }
+
     public function test_the_readability_gradient_has_no_scan_lines_and_the_bottom_wordmark_sits_on_the_panel(): void
     {
         $background = imagecreatetruecolor(1080, 1350);
