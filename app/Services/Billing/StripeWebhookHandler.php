@@ -105,7 +105,10 @@ class StripeWebhookHandler
         if (! ($charge['refunded'] ?? false) || ! filled($charge['payment_intent'] ?? null)) {
             return;
         }
-        $grantKey = 'stripe:payment:'.$charge['payment_intent'];
+        // A pack payment is keyed by payment intent, a plan cycle by its invoice.
+        $grantKey = filled($charge['invoice'] ?? null) && is_string($charge['invoice'])
+            ? 'stripe:invoice:'.$charge['invoice']
+            : 'stripe:payment:'.$charge['payment_intent'];
         $workspace = WorkspaceSubscription::query()->where('stripe_customer_id', (string) ($charge['customer'] ?? ''))->first()?->workspace
             ?? WorkspaceCredit::query()->where('idempotency_key', $grantKey)->first()?->workspace;
         if (! $workspace) {
@@ -113,11 +116,12 @@ class StripeWebhookHandler
         }
 
         // Decided under the workspace lock, like the grant, so a refund racing its purchase can't miss it.
-        // With no grant yet this writes a zero marker, and the late purchase then grants nothing.
+        // With no grant yet this writes a zero marker, and a late pack purchase then grants nothing.
         $this->ledger($workspace, fn () => -(int) WorkspaceCredit::query()->where('idempotency_key', $grantKey)->value('amount'),
-            'credit_pack_refund', 'Credit pack refunded', 'stripe:refund:'.$charge['payment_intent'], [
+            'credit_pack_refund', 'Payment refunded', 'stripe:refund:'.$charge['payment_intent'], [
                 'charge' => $charge['id'] ?? null,
                 'payment_intent' => $charge['payment_intent'],
+                'refunded_grant' => $grantKey,
             ]);
     }
 
@@ -144,7 +148,7 @@ class StripeWebhookHandler
                 return;
             }
             // A restart whose first payment hasn't gone through keeps the ended plan's lock until it does.
-            if ($replacing && ($subscription['status'] ?? null) === 'incomplete') {
+            if ($replacing && in_array($subscription['status'] ?? null, ['incomplete', 'incomplete_expired'], true)) {
                 return;
             }
 

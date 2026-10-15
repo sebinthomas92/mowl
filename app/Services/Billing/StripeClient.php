@@ -2,6 +2,7 @@
 
 namespace App\Services\Billing;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 
@@ -55,11 +56,15 @@ class StripeClient
         if ($idempotencyKey) {
             $request = $request->withHeaders(['Idempotency-Key' => $idempotencyKey]);
         }
-        $response = match ($method) {
-            'GET' => $request->get(self::BASE_URL.$path, $params),
-            'DELETE' => $request->delete(self::BASE_URL.$path),
-            default => $request->asForm()->post(self::BASE_URL.$path, $params),
-        };
+        try {
+            $response = match ($method) {
+                'GET' => $request->get(self::BASE_URL.$path, $params),
+                'DELETE' => $request->delete(self::BASE_URL.$path),
+                default => $request->asForm()->post(self::BASE_URL.$path, $params),
+            };
+        } catch (ConnectionException $exception) {
+            throw new StripeException('Stripe could not be reached. Try again in a moment.', 0, 'connection_error');
+        }
 
         if ($response->failed()) {
             throw new StripeException((string) ($response->json('error.message') ?: 'Stripe request failed.'), $response->status(), (string) $response->json('error.code'));

@@ -18,6 +18,9 @@ class BillingCheckout
     {
         $subscription = $workspace->billingSubscription();
         if ($subscription?->isSubscribed()) {
+            $this->revalidate($subscription);
+        }
+        if ($workspace->billingSubscription()?->isSubscribed()) {
             throw ValidationException::withMessages(['billing' => 'This workspace already has an active plan. Manage it in the billing portal.']);
         }
 
@@ -31,7 +34,8 @@ class BillingCheckout
                 'product_data' => ['name' => $plan['name'], 'description' => $plan['credits'].' launch pack credits every month'],
             ]];
 
-        $lock = Cache::lock('billing.plan-checkout.'.$workspace->id, 20);
+        // Outlasts the worst case of the Stripe calls below (each times out at 20s).
+        $lock = Cache::lock('billing.plan-checkout.'.$workspace->id, 180);
         if (! $lock->get()) {
             throw ValidationException::withMessages(['billing' => 'A checkout is already being opened for this workspace.']);
         }
@@ -49,6 +53,22 @@ class BillingCheckout
             ]);
         } finally {
             $lock->release();
+        }
+    }
+
+    /** A row that says "active" may have missed its final webhook, or point at a customer that is gone. */
+    private function revalidate(WorkspaceSubscription $subscription): void
+    {
+        if (! $subscription->stripe_subscription_id) {
+            return;
+        }
+        try {
+            app(StripeWebhookHandler::class)->refreshSubscription($subscription->stripe_subscription_id);
+        } catch (StripeException $exception) {
+            if ($exception->stripeCode !== 'resource_missing') {
+                throw $exception;
+            }
+            $subscription->update(['stripe_customer_id' => null, 'stripe_subscription_id' => null, 'status' => null, 'cancel_at_period_end' => false]);
         }
     }
 

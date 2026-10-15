@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Billing\WebhookSignature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Livewire\Livewire;
@@ -267,6 +268,47 @@ class BillingTest extends TestCase
         [$owner] = $this->subscribedWorkspace(status: 'canceled');
 
         $this->actingAs($owner)->get('/billing')->assertSee('Ended '.now()->format('M j, Y'));
+    }
+
+    public function test_a_refunded_plan_invoice_takes_its_credits_back(): void
+    {
+        [, $workspace] = $this->subscribedWorkspace(status: 'active');
+        $this->webhook('evt_60', 'invoice.paid', ['id' => 'in_9', 'customer' => 'cus_1', 'subscription' => 'sub_1', 'billing_reason' => 'subscription_cycle'])->assertOk();
+        $this->assertSame(50, $workspace->creditBalance());
+
+        $this->webhook('evt_61', 'charge.refunded', ['id' => 'ch_9', 'customer' => 'cus_1', 'payment_intent' => 'pi_inv', 'invoice' => 'in_9', 'refunded' => true])->assertOk();
+        $this->assertSame(0, $workspace->creditBalance());
+    }
+
+    public function test_an_expired_first_attempt_keeps_beta_credits(): void
+    {
+        [, $workspace] = $this->subscribedWorkspace(status: 'incomplete_expired');
+        $workspace->credits()->create(['amount' => 50, 'event' => 'beta_allocation', 'description' => 'Initial beta pack credits']);
+
+        $this->assertFalse($workspace->refresh()->billingLocked());
+        $this->assertSame(50, $workspace->spendableCredits());
+    }
+
+    public function test_a_stale_active_row_is_checked_with_stripe_before_blocking_checkout(): void
+    {
+        [$owner, $workspace] = $this->workspaceUser();
+        $workspace->subscription()->create(['stripe_customer_id' => 'cus_gone', 'stripe_subscription_id' => 'sub_gone', 'status' => 'active']);
+        Http::fake([
+            'api.stripe.com/v1/subscriptions/sub_gone' => Http::response(['error' => ['message' => 'No such subscription', 'code' => 'resource_missing']], 404),
+            'api.stripe.com/v1/customers' => Http::response(['id' => 'cus_new']),
+            'api.stripe.com/v1/checkout/sessions' => Http::response(['id' => 'cs_new', 'url' => 'https://checkout.stripe.com/c/pay/cs_new']),
+        ]);
+
+        Livewire::actingAs($owner)->test(BillingIndex::class)->call('startPlan')->assertRedirect('https://checkout.stripe.com/c/pay/cs_new');
+        $this->assertSame('cus_new', $workspace->subscription()->value('stripe_customer_id'));
+    }
+
+    public function test_an_unreachable_stripe_shows_an_error_instead_of_failing(): void
+    {
+        [$owner] = $this->workspaceUser();
+        Http::fake(fn () => throw new ConnectionException('timed out'));
+
+        Livewire::actingAs($owner)->test(BillingIndex::class)->call('startPlan')->assertHasErrors('billing')->assertNoRedirect();
     }
 
     public function test_signature_check_rejects_old_timestamps(): void

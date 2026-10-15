@@ -11,8 +11,12 @@ class WorkspaceSubscription extends Model
     /** Stripe statuses that keep a subscribed workspace able to spend credits. past_due is the retry window. */
     public const GOOD_STANDING = ['active', 'trialing', 'past_due'];
 
-    /** Statuses after which a workspace that once subscribed becomes read-only until it subscribes again. */
-    public const LOCKED = ['canceled', 'unpaid', 'incomplete_expired', 'paused'];
+    /**
+     * Statuses after which a workspace that once subscribed becomes read-only until it subscribes again.
+     * A first attempt that never paid (incomplete, incomplete_expired) leaves beta credits alone; a failed
+     * restart never replaces the ended plan on the row, so that stays locked.
+     */
+    public const LOCKED = ['canceled', 'unpaid', 'paused'];
 
     protected $fillable = [
         'workspace_id', 'stripe_customer_id', 'stripe_subscription_id', 'stripe_price_id', 'status',
