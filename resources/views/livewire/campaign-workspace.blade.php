@@ -223,7 +223,7 @@
                     <div class="version-history"><span>VERSIONS</span>@foreach($pack->versions->sortBy('version') as $availableVersion)<button type="button" wire:click="selectVersion({{ $availableVersion->version }})" @class(['active' => $version->version === $availableVersion->version])>v{{ $availableVersion->version }}</button>@endforeach</div>
                     <form wire:submit="regenerateSection" class="regeneration-form">
                         <label>Regenerate
-                            <select wire:model="regenerationSection"><option value="positioning">Positioning</option><option value="ranked_angles">Ranked angles</option><option value="creative_routes">Creative routes</option><option value="offers">Offer framing</option></select>
+                            <select wire:model="regenerationSection"><option value="positioning">Positioning</option><option value="ranked_angles">Ranked angles</option><option value="creative_routes">Creative routes</option><option value="offers">Offer framing</option><option value="marketing_hub">Channel copy</option><option value="summary">Overview and product details</option></select>
                         </label>
                         <button type="submit" @disabled($activeJob && in_array($activeJob->status, ['queued', 'processing', 'retrying']))>↻ Generate variation</button>
                     </form>
@@ -382,7 +382,7 @@
                                                         <div class="banner-working"><i></i><strong>{{ $creative->status === 'processing' ? 'Creating composition…' : 'Waiting to generate…' }}</strong><p>Attempt {{ min($creative->attempts + ($creative->status === 'queued' ? 1 : 0), config('campaigns.banners.retry_attempts')) }} of {{ config('campaigns.banners.retry_attempts') }}</p></div>
                                                     @endif
                                                 </div>
-                                                <div class="banner-card-body"><div><span>PACK V{{ $creative->campaignPackVersion->version }}</span><strong>{{ $creative->direction }}</strong><small>{{ str($creative->status)->replace('_', ' ')->title() }} · {{ $creative->headline }}</small></div>@if($creative->status === 'completed')<a href="{{ route('campaign-banners.download', [$pack, $creative]) }}">Download PNG ↓</a>@endif</div>
+                                                <div class="banner-card-body"><div><span>PACK V{{ $creative->campaignPackVersion->version }}</span><strong>{{ $creative->direction }}</strong><small>{{ str($creative->status)->replace('_', ' ')->title() }} · {{ $creative->headline }}</small>@if($bannerPriceIssues[$creative->id] ?? null)<small class="banner-price-issue">✕ Shows a price the product page does not show ({{ implode(', ', $bannerPriceIssues[$creative->id]) }}). Approval is blocked; generate new banners.</small>@endif</div>@if($creative->status === 'completed')<a href="{{ route('campaign-banners.download', [$pack, $creative]) }}">Download PNG ↓</a>@endif</div>
                                             </article>
                                         @endforeach
                                     </div>

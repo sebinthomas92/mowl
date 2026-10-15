@@ -14,6 +14,7 @@ use App\Services\ProductImageImporter;
 use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
 use App\Services\ProviderCostCalculator;
+use App\Services\SectionRegenerator;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -119,7 +120,7 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
             $job->update(['phase' => 'generating_pack']);
             if ($section) {
                 $baseContent = $this->baseContent($job);
-                $page['regeneration_section'] = $section;
+                $page['regeneration_section'] = implode(' and ', SectionRegenerator::keys($section));
                 $page['current_content'] = $baseContent;
             }
             $cacheKey = hash('sha256', implode(':', [
@@ -304,8 +305,10 @@ class GenerateCampaignPack implements ShouldBeUnique, ShouldQueue
 
     private function replaceSection(array $current, array $generated, string $section): array
     {
-        if (array_key_exists($section, $generated)) {
-            $current[$section] = $generated[$section];
+        foreach (SectionRegenerator::keys($section) as $key) {
+            if (array_key_exists($key, $generated)) {
+                $current[$key] = $generated[$key];
+            }
         }
 
         return $current;

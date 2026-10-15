@@ -2,16 +2,21 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\CampaignWorkspace;
 use App\Models\BannerCreative;
 use App\Models\Brand;
 use App\Models\CampaignPack;
 use App\Models\SourceSnapshot;
+use App\Models\User;
 use App\Models\Workspace;
 use App\Services\BannerComposer;
 use App\Services\BannerCopySelector;
 use App\Services\CampaignPackSafetyValidator;
+use App\Services\ContentLibrary;
+use App\Services\MockCampaignPackGenerator;
 use App\Services\ProductKnowledge;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class BannerIntegrityTest extends TestCase
@@ -29,6 +34,41 @@ class BannerIntegrityTest extends TestCase
 
         $this->assertSame(['INR 899 + Free Shipping states a price the product page does not show (899).'], $issues->pluck('message')->values()->all());
         $this->assertSame('creative_routes.0.platform_assets.meta_ads.headlines.0', $issues->first()['path']);
+    }
+
+    public function test_a_banner_with_an_unsupported_price_is_flagged_and_cannot_be_approved(): void
+    {
+        config(['campaigns.banners.enabled' => true]);
+        $owner = User::factory()->create();
+        $workspace = Workspace::create(['name' => 'Banner Agency']);
+        $workspace->users()->attach($owner, ['role' => 'owner']);
+        $product = $workspace->brands()->create(['name' => 'Plush'])->products()->create(['name' => 'Kindle Stand']);
+        $source = $product->sourceSnapshots()->create(['url' => 'https://example.com/stand', 'content_hash' => 'h', 'status' => 'ready', 'extracted_content' => self::PAGE, 'extracted_truth' => ['price' => '699.00', 'currency' => 'INR']]);
+        $pack = CampaignPack::create(['product_id' => $product->id, 'source_snapshot_id' => $source->id, 'name' => 'Pack', 'status' => 'approved', 'current_version' => 1, 'analysis_mode' => 'standard']);
+        $result = app(MockCampaignPackGenerator::class)->generate($product, $source, ['description' => 'Stand']);
+        $version = $pack->versions()->create(['version' => 1, 'generator' => 'mock', 'content' => $result->content, 'evidence' => $result->evidence, 'compliance_flags' => [], 'review_status' => 'approved']);
+        $batch = $workspace->bannerGenerationBatches()->create([
+            'campaign_pack_id' => $pack->id, 'campaign_pack_version_id' => $version->id,
+            'requested_by_user_id' => $owner->id, 'kind' => 'included', 'requested_count' => 2, 'status' => 'completed',
+        ]);
+        foreach (['INR 899 + Free Shipping', 'A stand for one more chapter'] as $index => $headline) {
+            $batch->creatives()->create([
+                'campaign_pack_id' => $pack->id, 'campaign_pack_version_id' => $version->id, 'sequence' => $index + 1,
+                'direction' => 'Product first', 'layout' => 'bottom_panel', 'headline' => $headline, 'cta' => 'Shop now',
+                'prompt' => 'p', 'status' => 'completed', 'disk' => 'local', 'output_path' => 'creatives/'.($index + 1).'.png', 'width' => 1080, 'height' => 1350,
+            ]);
+        }
+
+        Livewire::actingAs($owner)->test(CampaignWorkspace::class, ['pack' => $pack])
+            ->assertSeeText('Shows a price the product page does not show (899)')
+            ->assertViewHas('bannerPriceIssues', fn (array $issues) => count($issues) === 1);
+
+        $library = app(ContentLibrary::class);
+        $library->syncPack($pack);
+        $checks = fn (string $headline) => $library->checks($pack->contentItems()->where('section', 'like', 'banner.%')->get()
+            ->first(fn ($item) => $item->latestVersion->body['headline'] === $headline)->latestVersion);
+        $this->assertContains('States a price the product page does not show (899)', collect($checks('INR 899 + Free Shipping'))->where('ok', false)->where('blocking', true)->pluck('label')->all());
+        $this->assertEmpty(collect($checks('A stand for one more chapter'))->where('ok', false)->where('blocking', true)->all(), 'An unedited banner, size line included, is not an edit');
     }
 
     public function test_only_currency_amounts_on_the_page_count_as_prices(): void

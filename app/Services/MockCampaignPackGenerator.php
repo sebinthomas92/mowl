@@ -205,6 +205,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
                 return $route;
             }, $content['creative_routes']),
             'offers' => $content['offers'][0]['wording'] = 'See the verified product details and decide whether it fits.',
+            'marketing_hub' => $content['marketing_hub']['key_messaging']['value_proposition'] = 'A fresh, source-grounded channel copy variation.',
             default => null,
         };
 

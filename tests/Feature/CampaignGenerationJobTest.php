@@ -162,6 +162,35 @@ class CampaignGenerationJobTest extends TestCase
         $this->assertSame('completed', $regeneration->fresh()->status);
     }
 
+    public function test_channel_copy_and_the_overview_can_be_regenerated_on_their_own(): void
+    {
+        [$workspace, , , $pack, $job] = $this->generationFixture();
+        Http::fake(['93.184.216.34/*' => Http::response($this->productHtml(), 200, ['Content-Type' => 'text/html'])]);
+        (new GenerateCampaignPack($job->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
+        $first = $pack->fresh()->versions()->where('version', 1)->firstOrFail();
+        $content = $first->content;
+        $content['product_truth']['price'] = 'INR 899';
+        $content['overview']['summary'] = 'Stale summary';
+        $first->update(['content' => $content]);
+
+        foreach (['marketing_hub' => 1, 'summary' => 2] as $section => $base) {
+            $regeneration = CampaignGenerationJob::create([
+                'workspace_id' => $workspace->id, 'campaign_pack_id' => $pack->id, 'source_snapshot_id' => $pack->source_snapshot_id,
+                'section' => $section, 'base_version' => $base, 'credit_cost' => 0,
+            ]);
+            (new GenerateCampaignPack($regeneration->id))->handle(app(ProductPageFetcher::class), app(CampaignGeneratorManager::class), app(ProviderCostCalculator::class));
+            $this->assertSame('completed', $regeneration->fresh()->status);
+        }
+
+        $second = $pack->fresh()->versions()->where('version', 2)->value('content');
+        $this->assertSame('A fresh, source-grounded channel copy variation.', $second['marketing_hub']['key_messaging']['value_proposition']);
+        $this->assertSame('INR 899', $second['product_truth']['price'], 'Channel copy leaves the product details alone');
+        $third = $pack->fresh()->versions()->where('version', 3)->value('content');
+        $this->assertNotSame('INR 899', $third['product_truth']['price']);
+        $this->assertNotSame('Stale summary', $third['overview']['summary']);
+        $this->assertSame($second['marketing_hub'], $third['marketing_hub'], 'The overview leaves channel copy alone');
+    }
+
     public function test_excluding_a_fact_keeps_it_out_of_a_section_regeneration(): void
     {
         [$workspace, $product, , $pack, $job] = $this->generationFixture();
