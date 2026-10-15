@@ -211,6 +211,27 @@ class BannerIntegrityTest extends TestCase
         $this->assertSame('Dispatches within 48 hours', $selected['supporting_text']);
     }
 
+    public function test_banner_headlines_skip_listing_titles_and_the_product_name_and_support_lines_avoid_amounts(): void
+    {
+        $workspace = Workspace::create(['name' => 'Banner Agency']);
+        $product = $workspace->brands()->create(['name' => 'Plush'])->products()->create(['name' => 'Kindle Stand', 'price' => 'INR 699.00']);
+        $source = $product->sourceSnapshots()->create(['url' => 'https://example.com/stand', 'content_hash' => 'h', 'status' => 'ready', 'extracted_content' => 'Kindle Stand ₹699. Free shipping over ₹499.', 'extracted_truth' => ['price' => '699.00', 'currency' => 'INR']]);
+        $pack = CampaignPack::create(['product_id' => $product->id, 'source_snapshot_id' => $source->id, 'name' => 'Pack', 'status' => 'approved', 'current_version' => 1, 'analysis_mode' => 'standard']);
+        $version = $pack->versions()->create(['version' => 1, 'content' => [
+            'product_truth' => ['name' => 'Book-Shaped Kindle & E-Reader Stand – Minimal Open Book Display Stand for Kindle & Kobo'],
+            'creative_routes' => [
+                ['hooks' => ['This Diwali, gift a beautiful, dedicated home for their favorite e-reader.'], 'platform_assets' => ['meta_ads' => ['title' => 'Book-Shaped Kindle Stand | Cozy Reading', 'headlines' => ['E-Reader Stand - Minimal Open Book Display', 'Stop Hiding Your Kindle | Book-Shaped Stand', 'Comfy hands-free reading'], 'description_lines' => ['Complimentary shipping over INR 499', 'Small-batch minimal design']]]],
+            ],
+        ]]);
+
+        $selector = app(BannerCopySelector::class);
+        foreach (range(1, 4) as $sequence) {
+            $selected = $selector->select($version, $sequence);
+            $this->assertSame('Comfy hands-free reading', $selected['headline']);
+            $this->assertSame('Small-batch minimal design', $selected['supporting_text']);
+        }
+    }
+
     public function test_the_readability_gradient_has_no_scan_lines_and_the_bottom_wordmark_sits_on_the_panel(): void
     {
         $background = imagecreatetruecolor(1080, 1350);
@@ -223,8 +244,9 @@ class BannerIntegrityTest extends TestCase
         foreach (['split_left' => fn ($image, $i) => imagecolorat($image, $i, 900), 'bottom_panel' => fn ($image, $i) => imagecolorat($image, 1060, 720 + $i)] as $layout => $pixel) {
             $creative = new BannerCreative(['headline' => 'A stand', 'supporting_text' => null, 'cta' => 'Shop now', 'layout' => $layout]);
             $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, $creative));
-            $red = array_map(fn ($i) => (($pixel($image, $i) >> 16) & 255), range(0, 400));
-            $steps = array_map(fn ($i) => $red[$i] - $red[$i - 1], range(1, 400));
+            // Stops short of the wordmark's corner scrim, which starts 240px above the bottom.
+            $red = array_map(fn ($i) => (($pixel($image, $i) >> 16) & 255), range(0, 380));
+            $steps = array_map(fn ($i) => $red[$i] - $red[$i - 1], range(1, 380));
             $this->assertLessThanOrEqual(2, max($steps) - min($steps), "{$layout} gradient should be smooth");
 
             if ($layout === 'bottom_panel') {
@@ -242,7 +264,7 @@ class BannerIntegrityTest extends TestCase
         }
     }
 
-    public function test_every_layout_puts_the_wordmark_on_the_cta_row_keeps_words_whole_and_fades_the_panel_edge(): void
+    public function test_every_layout_puts_the_wordmark_in_the_bottom_right_corner_keeps_words_whole_and_fades_the_panel_edge(): void
     {
         $background = imagecreatetruecolor(1080, 1350);
         imagefill($background, 0, 0, imagecolorallocate($background, 200, 160, 120));
@@ -252,20 +274,27 @@ class BannerIntegrityTest extends TestCase
         $brand = new Brand(['name' => 'The Plush Republic', 'primary_color' => '#F4B942']);
         $white = fn ($image, $x, $y) => (imagecolorat($image, $x, $y) & 0xFFFFFF) === 0xFFFFFF;
 
-        foreach (['hero_top', 'split_left'] as $layout) {
+        foreach (['hero_top' => 620, 'split_left' => 540, 'bottom_panel' => 1080] as $layout => $columnEnd) {
             $creative = new BannerCreative(['headline' => 'Comfy hands-free reading', 'supporting_text' => 'Small-batch minimal design', 'cta' => 'Shop now', 'layout' => $layout]);
             $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, $creative));
-            for ($y = 0; $y < 140; $y++) {
-                for ($x = 0; $x < 1080; $x += 2) {
-                    $this->assertFalse($white($image, $x, $y), "{$layout}: nothing is drawn at the top, where the wordmark used to sit");
-                }
-            }
-            // Text stays inside the dark column: nothing white right of it.
+            $wordmark = [1080, 0, 0, 0];
             for ($y = 0; $y < 1350; $y += 2) {
-                for ($x = 620; $x < 1080; $x += 2) {
-                    $this->assertFalse($white($image, $x, $y), "{$layout}: no text past the panel at {$x},{$y}");
+                for ($x = 0; $x < 1080; $x += 2) {
+                    if (! $white($image, $x, $y)) {
+                        continue;
+                    }
+                    if ($y >= 1220 && $x >= 600) {
+                        $wordmark = [min($wordmark[0], $x), max($wordmark[1], $x), $wordmark[2] + 1, max($wordmark[3], $y)];
+
+                        continue;
+                    }
+                    $this->assertGreaterThanOrEqual(140, $y, "{$layout}: nothing is drawn at the top, where the wordmark used to sit");
+                    // Text stays inside the dark column: nothing white right of it.
+                    $this->assertLessThan($columnEnd, $x, "{$layout}: no text past the panel at {$x},{$y}");
                 }
             }
+            $this->assertGreaterThan(0, $wordmark[2], "{$layout}: the wordmark is in the bottom-right corner");
+            $this->assertGreaterThanOrEqual(990, $wordmark[1], "{$layout}: the wordmark is right-aligned to the corner");
         }
 
         // The hero panel fades out to the right instead of ending in a hard vertical edge.
