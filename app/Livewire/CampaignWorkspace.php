@@ -543,7 +543,7 @@ class CampaignWorkspace extends Component
         if (
             $pack?->latestGenerationJob?->status === 'processing'
             && config('campaigns.processing_mode') === 'request'
-            && $pack->latestGenerationJob->updated_at->lt(now()->subMinutes(10))
+            && $pack->latestGenerationJob->updated_at->lt(now()->subMinutes(config('campaigns.stale_after_minutes')))
         ) {
             $pack->latestGenerationJob->update(['status' => 'retrying', 'phase' => 'retry_wait']);
             $pack->load('latestGenerationJob');
@@ -553,7 +553,7 @@ class CampaignWorkspace extends Component
             BannerCreative::query()
                 ->where('campaign_pack_id', $pack->id)
                 ->where('status', 'processing')
-                ->where('updated_at', '<', now()->subMinutes(10))
+                ->where('updated_at', '<', now()->subMinutes(config('campaigns.stale_after_minutes')))
                 ->update(['status' => 'retrying']);
             $pack->load('bannerGenerationBatches.creatives.campaignPackVersion');
         }

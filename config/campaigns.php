@@ -4,6 +4,10 @@ return [
     'generator' => env('CAMPAIGN_GENERATOR', 'mock'),
     'queue' => env('CAMPAIGN_QUEUE', 'campaigns'),
     'processing_mode' => env('CAMPAIGN_PROCESSING_MODE', 'queue'),
+    // Request mode runs inside one Vercel function (maxDuration 300s in vercel.json); provider calls stop here.
+    'request_budget_seconds' => (int) env('CAMPAIGN_REQUEST_BUDGET_SECONDS', 240),
+    // A request-mode job still "processing" after this long was killed and is retried.
+    'stale_after_minutes' => (int) env('CAMPAIGN_STALE_AFTER_MINUTES', 6),
     'cron_secret' => env('CRON_SECRET'),
     'monthly_credits' => (int) env('CAMPAIGN_MONTHLY_CREDITS', 50),
     'brand_limit' => (int) env('CAMPAIGN_BRAND_LIMIT', 10),

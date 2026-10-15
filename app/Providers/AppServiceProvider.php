@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Http\Middleware\EnforceWorkspaceRole;
 use App\Livewire\Hooks\EnforceRoleOnActions;
 use App\Services\GoogleCloudAccessTokenProvider;
+use App\Support\GenerationDeadline;
 use Google\Cloud\Storage\StorageClient;
 use Illuminate\Filesystem\FilesystemAdapter as LaravelFilesystemAdapter;
 use Illuminate\Support\Facades\Storage;
@@ -23,6 +24,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(GoogleCloudAccessTokenProvider::class);
+        $this->app->singleton(GenerationDeadline::class);
         // Registered before Livewire boots its hook registry, which only wires hooks it already knows.
         ComponentHookRegistry::register(EnforceRoleOnActions::class);
     }

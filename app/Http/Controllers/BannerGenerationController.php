@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BannerCreative;
 use App\Services\BannerJobRunner;
+use App\Support\GenerationDeadline;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Throwable;
@@ -25,7 +26,7 @@ class BannerGenerationController extends Controller
         );
         BannerCreative::query()
             ->where('status', 'processing')
-            ->where('updated_at', '<', now()->subMinutes(10))
+            ->where('updated_at', '<', now()->subMinutes(config('campaigns.stale_after_minutes')))
             ->update(['status' => 'retrying']);
         $creative = BannerCreative::query()->whereIn('status', ['queued', 'retrying'])->oldest()->first();
 
@@ -37,6 +38,8 @@ class BannerGenerationController extends Controller
         if (! in_array($creative->status, ['queued', 'retrying'])) {
             return response()->json(['status' => $creative->status], 202);
         }
+
+        app(GenerationDeadline::class)->start(config('campaigns.request_budget_seconds'));
 
         try {
             $creative = $runner->run($creative);
@@ -50,6 +53,8 @@ class BannerGenerationController extends Controller
                 'status' => $creative->status,
                 'retryable' => $creative->status === 'retrying',
             ], $creative->status === 'retrying' ? 503 : 422);
+        } finally {
+            app(GenerationDeadline::class)->clear();
         }
     }
 }

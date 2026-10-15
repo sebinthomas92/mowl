@@ -2,11 +2,13 @@
 
 namespace Tests\Unit;
 
+use App\Exceptions\VertexAIResponseException;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
 use App\Services\GoogleVertexAICampaignPackGenerator;
 use App\Services\GoogleVertexAIClient;
 use App\Services\MockCampaignPackGenerator;
+use App\Support\GenerationDeadline;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -92,6 +94,58 @@ class GoogleVertexAICampaignPackGeneratorTest extends TestCase
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'aiplatform.googleapis.com')
             && $request['contents'][0]['parts'][1]['inlineData']['mimeType'] === 'audio/wav'
         );
+    }
+
+    public function test_it_stops_retrying_before_the_request_time_limit(): void
+    {
+        $this->configureGoogle();
+        config()->set('campaigns.google.retry_attempts', 3);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $calls = 0;
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function () use (&$calls) {
+                $calls++;
+                // The first attempt uses up most of the budget before failing.
+                app(GenerationDeadline::class)->start(GenerationDeadline::MIN_ATTEMPT_SECONDS - 5);
+
+                return Http::response(['error' => ['message' => 'Overloaded']], 503);
+            },
+        ]);
+        app(GenerationDeadline::class)->start(240);
+
+        try {
+            app(GoogleVertexAICampaignPackGenerator::class)->generate(
+                new Product(['name' => 'Canvas Tote', 'price' => '$89']),
+                new SourceSnapshot(['url' => 'https://example.com/tote']),
+                ['description' => 'Everyday tote', 'content' => 'A roomy canvas tote.', 'product_truth' => ['name' => 'Canvas Tote']],
+            );
+            $this->fail('Expected the generator to stop at the time limit.');
+        } catch (VertexAIResponseException $exception) {
+            $this->assertSame('vertex_time_budget', $exception->errorCode);
+            $this->assertTrue($exception->retryable);
+            $this->assertStringContainsString('Overloaded', $exception->getMessage());
+        } finally {
+            app(GenerationDeadline::class)->clear();
+        }
+
+        $this->assertSame(1, $calls);
+    }
+
+    public function test_provider_timeouts_shrink_to_the_time_left(): void
+    {
+        $deadline = new GenerationDeadline;
+        $this->assertSame(120, $deadline->timeout(120));
+
+        $deadline->start(60);
+        $this->assertContains($deadline->timeout(120), [54, 55]);
+        $this->assertSame(30, $deadline->timeout(30));
+        $this->assertTrue($deadline->allowsAnotherAttempt());
+
+        $deadline->start(GenerationDeadline::MIN_ATTEMPT_SECONDS - 1);
+        $this->assertFalse($deadline->allowsAnotherAttempt());
     }
 
     private function configureGoogle(): void
