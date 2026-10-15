@@ -38,9 +38,9 @@ class BannerComposer
 
         $layout = $this->layout($creative->layout, $width, $height);
         $this->drawReadabilityLayer($canvas, $creative->layout, $width, $height);
-        // The wordmark sits right-aligned on the CTA row of every layout, over the dark panel, never the photo.
-        $brandRight = $layout['brand_right'] ?? $layout['x'] + $layout['max_width'];
-        $this->drawBrand($canvas, $brand, $layout['x'], $layout['cta_y'] + 58, min(360, $brandRight - ($layout['x'] + self::CTA_WIDTH + 32)), $brandRight);
+        // The wordmark sits in the same bottom-right corner on every layout, over a soft dark scrim.
+        $this->drawBrandScrim($canvas, $width, $height);
+        $this->drawBrand($canvas, $brand, $width - 360 - 80, $height - 62, 360, $width - 80);
 
         $white = imagecolorallocate($canvas, 255, 255, 255);
         $muted = imagecolorallocate($canvas, 231, 235, 241);
@@ -84,8 +84,8 @@ class BannerComposer
     private function layout(string $layout, int $width, int $height): array
     {
         return match ($layout) {
-            'split_left' => ['x' => 80, 'headline_y' => 330, 'cta_y' => 1135, 'max_width' => 475, 'headline_height' => 450, 'support_height' => 200],
-            'bottom_panel' => ['x' => 80, 'brand_right' => $width - 80, 'headline_y' => 960, 'cta_y' => 1230, 'max_width' => $width - 160, 'headline_height' => 220, 'support_height' => 110],
+            'split_left' => ['x' => 80, 'headline_y' => 330, 'cta_y' => 1135, 'max_width' => 440, 'headline_height' => 450, 'support_height' => 200],
+            'bottom_panel' => ['x' => 80, 'headline_y' => 960, 'cta_y' => 1230, 'max_width' => $width - 160, 'headline_height' => 220, 'support_height' => 110],
             default => ['x' => 80, 'headline_y' => 240, 'cta_y' => 555, 'max_width' => 520, 'headline_height' => 300, 'support_height' => 130],
         };
     }
@@ -99,8 +99,8 @@ class BannerComposer
     private function drawReadabilityLayer(\GdImage $canvas, string $layout, int $width, int $height): void
     {
         if ($layout === 'split_left') {
-            for ($x = 0; $x < 900; $x++) {
-                $alpha = 24 + (int) round($this->fade($x, 560, 900) * 103);
+            for ($x = 0; $x < 960; $x++) {
+                $alpha = 24 + (int) round($this->fade($x, 600, 960) * 103);
                 imageline($canvas, $x, 0, $x, $height - 1, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
             }
         } elseif ($layout === 'bottom_panel') {
@@ -118,6 +118,21 @@ class BannerComposer
                     if ($alpha < 127) {
                         imagesetpixel($canvas, $x, $y, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
                     }
+                }
+            }
+        }
+    }
+
+    /** An elliptical dark scrim in the bottom-right corner, strongest under the wordmark and gone well before the middle. */
+    private function drawBrandScrim(\GdImage $canvas, int $width, int $height): void
+    {
+        // The ellipse is centred 70px above the bottom with a 200px vertical radius, so start where it is fully clear.
+        for ($y = $height - 280; $y < $height; $y++) {
+            for ($x = $width - 600; $x < $width; $x++) {
+                $distance = sqrt((($width - 60 - $x) / 540) ** 2 + (($height - 70 - $y) / 200) ** 2);
+                $alpha = 127 - (int) round(70 * (1 - $this->fade((int) round($distance * 100), 35, 100)));
+                if ($alpha < 127) {
+                    imagesetpixel($canvas, $x, $y, imagecolorallocatealpha($canvas, 5, 11, 20, $alpha));
                 }
             }
         }

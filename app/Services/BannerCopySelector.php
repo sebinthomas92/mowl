@@ -25,15 +25,20 @@ class BannerCopySelector
         $this->usable = fn (string $text): bool => $validator->unsupportedPrices($text, $prices) === [];
         $direction = self::DIRECTIONS[($sequence - 1) % count(self::DIRECTIONS)];
         $routes = collect(data_get($content, 'creative_routes', []));
-        $headlines = $this->strings([
+        // Ad headlines and short hooks only. Listing titles ("Kindle Stand | Cozy Reading") and the
+        // product's own name read as SEO titles on an image, not as a headline.
+        $product = mb_strtolower((string) data_get($content, 'product_truth.name', ''));
+        $headlineLike = fn (string $text): bool => ! str_contains($text, '|')
+            && mb_strlen($text) <= 48
+            && ! ($product !== '' && str_contains($this->letters($product), $this->letters(mb_strtolower($text))));
+        $headlines = array_values(array_filter($this->strings([
             ...data_get($content, 'meta.headlines', []),
             ...$routes->flatMap(fn (array $route) => data_get($route, 'platform_assets.meta_ads.headlines', []))->all(),
-            ...$routes->pluck('platform_assets.meta_ads.title')->all(),
-        ]);
-        $hooks = $this->strings([
+        ]), $headlineLike));
+        $hooks = array_values(array_filter($this->strings([
             ...data_get($content, 'hooks', []),
             ...$routes->flatMap(fn (array $route) => $route['hooks'] ?? [])->all(),
-        ]);
+        ]), $headlineLike));
         $descriptions = $this->strings([
             ...data_get($content, 'meta.descriptions', []),
             ...$routes->flatMap(fn (array $route) => data_get($route, 'platform_assets.meta_ads.description_lines', []))->all(),
@@ -49,13 +54,18 @@ class BannerCopySelector
             ...collect(data_get($content, 'positioning.audience_priorities', []))->pluck('name')->all(),
         ]);
         $fallback = $this->strings([data_get($content, 'direction.title'), data_get($content, 'ranked_angles.0.title'), data_get($content, 'overview.campaign_goal')]);
-        $headlinePool = array_values(array_unique([...$headlines, ...$hooks, ...array_slice($fallback, 0, 1)]));
+        $headlinePool = array_values(array_unique([...$headlines, ...$hooks, ...array_slice(array_values(array_filter($fallback, $headlineLike)), 0, 1)]))
+            ?: array_slice($fallback, 0, 1);
         $headline = $headlinePool[($sequence - 1) % max(1, count($headlinePool))]
             ?? (string) data_get($content, 'product_truth.name', 'Product');
         $supportPool = array_values(array_unique([...$descriptions, ...$benefits]));
         if ($direction['key'] === 'lifestyle_context') {
             $supportPool = array_values(array_unique([...$audiences, ...$supportPool]));
         }
+        // A banner is a static image that outlives price and shipping changes, so lines with a
+        // currency amount are used only when nothing else is approved.
+        $withoutAmounts = array_values(array_filter($supportPool, fn (string $text): bool => $validator->unsupportedPrices($text, []) === []));
+        $supportPool = $withoutAmounts ?: $supportPool;
 
         return [
             ...$direction,
@@ -92,12 +102,18 @@ class BannerCopySelector
         $audience = $audiences[0] ?? '';
         $productDna = implode('; ', array_slice(array_values(array_unique([...$facts, ...$benefits])), 0, 6)) ?: $product;
         $negativeSpace = match ($direction['layout']) {
-            'split_left' => 'Keep the left 46% visually quiet for an overlay.',
+            'split_left' => 'Keep the left half visually quiet for an overlay, with the product in the right half.',
             'bottom_panel' => 'Keep the bottom 38% visually quiet for an overlay.',
             default => 'Keep the upper-left 46% visually quiet for an overlay.',
-        };
+        }.' The quiet area must be a natural, softly lit continuation of the same scene: no flat color block, no split-screen and no hard vertical or horizontal boundary. Keep the bottom-right corner simple and free of the product for a small brand mark.';
 
         return trim("You are an expert ad creative prompt engineer. Create one premium vertical Meta feed visual composition for ONE specific product: {$product}. The approved PRODUCT DNA is the source of truth for what to depict: {$productDna}. Brand context: {$brand}; use it only for palette and aesthetic consistency. CRITICAL: Every visual must depict the specific product {$product}; ignore and do not show other products or SKUs from the brand catalog. Direction: {$direction['label']}. Approved benefit context: {$benefit}. Approved audience context: {$audience}. Use the first supplied product image as the exact product reference. Follow its visual cues so the result matches the real product. Preserve its recognizable form, materials, proportions, color, and packaging silhouette; do not invent components or features. {$negativeSpace} Generate the visual composition only. Do not include any text, letters, numbers, logos, labels, captions, UI, signatures, borders, or watermarks. Show no third-party intellectual property: no real book covers, titles or publisher marks, no film, game or app imagery, and no other brands' logos or trademarks. The product itself must still match its reference exactly; any other screen, book, package or poster in the scene must be blank, plain or abstract. Do not add unverified product features or claims. Photorealistic commercial lighting, clean art direction, 4:5 composition.");
+    }
+
+    /** Lowercase letters and digits only, so dashes, ampersands and spacing don't hide a match. */
+    private function letters(string $text): string
+    {
+        return preg_replace('/[^\p{L}\p{N}]+/u', '', $text) ?? $text;
     }
 
     private function strings(mixed $values): array
