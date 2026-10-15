@@ -37,6 +37,7 @@ class BillingCheckout
         }
 
         try {
+            $this->ensureNoLiveSubscription($workspace);
             $this->expireOpenPlanSessions($workspace);
 
             return $this->checkoutUrl($workspace, $owner, [
@@ -48,6 +49,31 @@ class BillingCheckout
             ]);
         } finally {
             $lock->release();
+        }
+    }
+
+    /**
+     * Asks Stripe, not just the local row, so a plan paid in another tab whose webhook hasn't landed
+     * yet can't be bought twice.
+     */
+    private function ensureNoLiveSubscription(Workspace $workspace): void
+    {
+        $customer = $workspace->subscription()->value('stripe_customer_id');
+        if (! $customer) {
+            return;
+        }
+        $subscriptions = $this->stripe->get('subscriptions', ['customer' => $customer, 'status' => 'all', 'limit' => 20]);
+        foreach ($subscriptions['data'] ?? [] as $subscription) {
+            // An unpaid first attempt is cancelled so it can't be paid alongside the new one.
+            if (($subscription['status'] ?? null) === 'incomplete') {
+                $this->stripe->delete('subscriptions/'.$subscription['id']);
+
+                continue;
+            }
+            if (in_array($subscription['status'] ?? null, WorkspaceSubscription::GOOD_STANDING, true)) {
+                app(StripeWebhookHandler::class)->refreshSubscription((string) $subscription['id']);
+                throw ValidationException::withMessages(['billing' => 'This workspace already has a plan in Stripe. Refresh the page to see it, or manage it in the billing portal.']);
+            }
         }
     }
 

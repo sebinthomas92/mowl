@@ -63,10 +63,9 @@ class StripeWebhookHandler
         }
 
         $payment = (string) ($session['payment_intent'] ?? $session['id']);
-        if (WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$payment)->exists()) {
-            return; // Refunded before the purchase event arrived: nothing to grant.
-        }
-        $this->ledger($workspace, $pack['credits'], 'credit_pack_purchase', $pack['credits'].' credits purchased', 'stripe:payment:'.$payment, [
+        // A refund that arrived first leaves a marker; then there is nothing to grant.
+        $credits = fn () => WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$payment)->exists() ? null : $pack['credits'];
+        $this->ledger($workspace, $credits, 'credit_pack_purchase', $pack['credits'].' credits purchased', 'stripe:payment:'.$payment, [
             'checkout_session' => $session['id'] ?? null,
             'payment_intent' => $session['payment_intent'] ?? null,
             'amount' => $session['amount_total'] ?? null,
@@ -106,27 +105,20 @@ class StripeWebhookHandler
         if (! ($charge['refunded'] ?? false) || ! filled($charge['payment_intent'] ?? null)) {
             return;
         }
-        $grant = WorkspaceCredit::query()->where('idempotency_key', 'stripe:payment:'.$charge['payment_intent'])->first();
-        if (! $grant) {
-            // The refund beat the purchase event. Record it so the late purchase grants nothing.
-            $workspace = WorkspaceSubscription::query()->where('stripe_customer_id', (string) ($charge['customer'] ?? ''))->first()?->workspace;
-            if ($workspace) {
-                $this->ledger($workspace, 0, 'credit_pack_refund', 'Credit pack refunded before credits were granted', 'stripe:refund:'.$charge['payment_intent'], [
-                    'charge' => $charge['id'] ?? null,
-                    'payment_intent' => $charge['payment_intent'],
-                ]);
-            }
-
-            return;
-        }
-        if (! $grant->workspace) {
+        $grantKey = 'stripe:payment:'.$charge['payment_intent'];
+        $workspace = WorkspaceSubscription::query()->where('stripe_customer_id', (string) ($charge['customer'] ?? ''))->first()?->workspace
+            ?? WorkspaceCredit::query()->where('idempotency_key', $grantKey)->first()?->workspace;
+        if (! $workspace) {
             return;
         }
 
-        $this->ledger($grant->workspace, -$grant->amount, 'credit_pack_refund', 'Credit pack refunded', 'stripe:refund:'.$charge['payment_intent'], [
-            'charge' => $charge['id'] ?? null,
-            'payment_intent' => $charge['payment_intent'],
-        ]);
+        // Decided under the workspace lock, like the grant, so a refund racing its purchase can't miss it.
+        // With no grant yet this writes a zero marker, and the late purchase then grants nothing.
+        $this->ledger($workspace, fn () => -(int) WorkspaceCredit::query()->where('idempotency_key', $grantKey)->value('amount'),
+            'credit_pack_refund', 'Credit pack refunded', 'stripe:refund:'.$charge['payment_intent'], [
+                'charge' => $charge['id'] ?? null,
+                'payment_intent' => $charge['payment_intent'],
+            ]);
     }
 
     /** Re-reads the subscription from Stripe and stores its current state on the workspace. */
@@ -164,7 +156,8 @@ class StripeWebhookHandler
                 'status' => $subscription['status'] ?? null,
                 'current_period_ends_at' => $periodEnd ? CarbonImmutable::createFromTimestamp($periodEnd) : null,
                 'cancel_at_period_end' => (bool) ($subscription['cancel_at_period_end'] ?? false) || filled($subscription['cancel_at'] ?? null),
-                'canceled_at' => filled($subscription['canceled_at'] ?? null) ? CarbonImmutable::createFromTimestamp($subscription['canceled_at']) : null,
+                // When service actually stopped: ended_at, not the earlier moment a cancellation was requested.
+                'canceled_at' => ($endedAt = $subscription['ended_at'] ?? null) ? CarbonImmutable::createFromTimestamp($endedAt) : null,
                 'stripe_updated_at' => now(),
             ]);
         });
@@ -198,12 +191,17 @@ class StripeWebhookHandler
         return null;
     }
 
-    private function ledger(Workspace $workspace, int $amount, string $event, string $description, string $key, array $metadata): void
+    /** @param int|callable(): ?int $amount decided under the workspace lock when callable; null writes nothing */
+    private function ledger(Workspace $workspace, int|callable $amount, string $event, string $description, string $key, array $metadata): void
     {
         try {
             DB::transaction(function () use ($workspace, $amount, $event, $description, $key, $metadata): void {
                 Workspace::query()->lockForUpdate()->findOrFail($workspace->id);
                 if (WorkspaceCredit::query()->where('idempotency_key', $key)->exists()) {
+                    return;
+                }
+                $amount = is_callable($amount) ? $amount() : $amount;
+                if ($amount === null) {
                     return;
                 }
                 $workspace->credits()->create([

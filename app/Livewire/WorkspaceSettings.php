@@ -66,7 +66,7 @@ class WorkspaceSettings extends Component
             'members' => $workspace->users()->orderByPivot('created_at')->get(),
             'memberCount' => $workspace->users()->count(),
             'brandCount' => $workspace->brands()->count(),
-            'creditBalance' => $workspace->creditBalance(),
+            'creditBalance' => $workspace->spendableCredits(),
             'billingStatus' => match (true) {
                 (bool) $workspace->billingSubscription()?->isSubscribed() => 'Plan active',
                 $workspace->billingLocked() => 'Plan ended',

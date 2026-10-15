@@ -39,6 +39,12 @@ class StripeClient
     }
 
     /** @return array<string, mixed> */
+    public function delete(string $path): array
+    {
+        return $this->send('DELETE', $path, []);
+    }
+
+    /** @return array<string, mixed> */
     private function send(string $method, string $path, array $params, ?string $idempotencyKey = null): array
     {
         if (! $this->configured()) {
@@ -49,9 +55,11 @@ class StripeClient
         if ($idempotencyKey) {
             $request = $request->withHeaders(['Idempotency-Key' => $idempotencyKey]);
         }
-        $response = $method === 'GET'
-            ? $request->get(self::BASE_URL.$path, $params)
-            : $request->asForm()->post(self::BASE_URL.$path, $params);
+        $response = match ($method) {
+            'GET' => $request->get(self::BASE_URL.$path, $params),
+            'DELETE' => $request->delete(self::BASE_URL.$path),
+            default => $request->asForm()->post(self::BASE_URL.$path, $params),
+        };
 
         if ($response->failed()) {
             throw new StripeException((string) ($response->json('error.message') ?: 'Stripe request failed.'), $response->status(), (string) $response->json('error.code'));
