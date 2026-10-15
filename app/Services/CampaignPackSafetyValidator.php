@@ -259,8 +259,9 @@ class CampaignPackSafetyValidator
         foreach ($anchored ?? [] as [$price, $offset, $length]) {
             $end = $offset + $length;
             $role = $this->priceRole(mb_strcut($page, max(0, $offset - 40), min(40, $offset)), mb_strcut($page, $end, 16));
-            // Unmarked, a struck-out price sits right before the product's own one, as in "₹750₹699".
-            $next = collect($onPage)->first(fn (array $found) => $found[1] >= $end && $found[1] <= $end + 2);
+            // Unmarked, a struck-out price sits right before the product's own one, as in "₹750₹699",
+            // with at most a space between them: punctuation or a line break ends that pairing.
+            $next = collect($onPage)->first(fn (array $found) => $found[1] >= $end && preg_match('/^ ?$/', substr($page, $end, $found[1] - $end)) === 1);
             if ($role === null && $next && $this->matchesAny($next[0], $own) && ! $this->matchesAny($price, $own)) {
                 $role = 'old';
             }
@@ -283,6 +284,11 @@ class CampaignPackSafetyValidator
         $before = (string) end($parts);
         foreach (self::PRICE_ROLES as $role => [$lead, $trail]) {
             if (preg_match('/\b(?:'.$lead.')[\s:(]*$/iu', $before) === 1 || preg_match('/^[\s:(]*(?:'.$trail.')(?![\p{L}])/iu', $after) === 1) {
+                // "Over ₹750" is a threshold only when the clause is about shipping or the order, not the price.
+                if ($role === 'threshold' && preg_match('/\b(?:shipping|delivery|orders?|subtotals?|cart|basket|spend|purchases?)\b/iu', $before) !== 1) {
+                    continue;
+                }
+
                 return $role;
             }
         }
