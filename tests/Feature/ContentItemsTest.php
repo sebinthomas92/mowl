@@ -179,6 +179,22 @@ class ContentItemsTest extends TestCase
         $library->saveDraft($version->fresh(), ['value_proposition' => '₹750 (MRP), now ₹699.', 'brand_position' => 'Quiet design for readers.']);
         $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
 
+        // A shipping fee is not an order threshold, and a marked saving is not an old price.
+        $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand. Save ₹100 ₹699. Shipping: ₹49. Free shipping over ₹499.']);
+        foreach (['Shipping over ₹49.', 'Was ₹100, now ₹699.'] as $wrong) {
+            $library->saveDraft($version->fresh(), ['value_proposition' => $wrong]);
+            $this->assertFalse($priceCheck()['ok'], $wrong);
+        }
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Save ₹100: now ₹699, free shipping over ₹499.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+        // A stale page price that matches a threshold keeps the threshold role, and still fails as a price.
+        $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand ₹499. Free shipping over ₹499.', 'extracted_truth' => ['price' => '499.00', 'currency' => 'INR']]);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Now ₹699 with free shipping over ₹499.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Now ₹499.']);
+        $this->assertFalse($priceCheck()['ok']);
+        $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand ₹750₹699 Inclusive of all taxes. Free shipping on orders over ₹499.', 'extracted_truth' => ['price' => '699.00', 'currency' => 'INR']]);
+
         // Wording from a live pack.
         $library->saveDraft($version->fresh(), ['value_proposition' => 'Launch price of INR 699.00 with complimentary shipping (order value exceeds INR 499 threshold). The price of INR 699.00 exceeds the complimentary shipping threshold of INR 499.00. Free delivery over INR 499.']);
         $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);

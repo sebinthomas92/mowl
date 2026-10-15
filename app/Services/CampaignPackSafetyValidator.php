@@ -19,7 +19,7 @@ class CampaignPackSafetyValidator
     /** Words before and after an amount that mark it as something other than the current price. */
     private const PRICE_ROLES = [
         'old' => ['was|m\\.?r\\.?p\\.?|down from|instead of|regular(?:ly)?|list price|original(?:ly)?|struck', 'm\\.?r\\.?p'],
-        'threshold' => ['over|above|orders?|shipping|delivery|exceed(?:s|ing)?|threshold(?: of)?|minimum(?: of)?', 'threshold|minimum|and above|or more'],
+        'threshold' => ['over|above|exceed(?:s|ing)?|threshold(?: of)?|minimum(?: of)?', 'threshold|minimum|and above|or more'],
         'saving' => ['save|saving', 'off'],
     ];
 
@@ -258,11 +258,12 @@ class CampaignPackSafetyValidator
         $roles = [];
         foreach ($anchored ?? [] as [$price, $offset, $length]) {
             $end = $offset + $length;
-            // A struck-out price sits right before the product's own one, as in "₹750₹699".
+            $role = $this->priceRole(mb_strcut($page, max(0, $offset - 40), min(40, $offset)), mb_strcut($page, $end, 16));
+            // Unmarked, a struck-out price sits right before the product's own one, as in "₹750₹699".
             $next = collect($onPage)->first(fn (array $found) => $found[1] >= $end && $found[1] <= $end + 2);
-            $role = $next && $this->matchesAny($next[0], $own) && ! $this->matchesAny($price, $own)
-                ? 'old'
-                : $this->priceRole(mb_strcut($page, max(0, $offset - 40), min(40, $offset)), mb_strcut($page, $end, 16));
+            if ($role === null && $next && $this->matchesAny($next[0], $own) && ! $this->matchesAny($price, $own)) {
+                $role = 'old';
+            }
             if ($role) {
                 $roles[$price] = array_values(array_unique([...$roles[$price] ?? [], $role]));
             }
@@ -272,7 +273,7 @@ class CampaignPackSafetyValidator
     }
 
     /**
-     * What the words beside an amount make it: "old" (was, MRP), "threshold" (free shipping over) or
+     * What the words beside an amount make it: "old" (was, MRP), "threshold" (free shipping over, minimum) or
      * "saving" (save, off). Null when nothing marks it, as for a current price. Only the same clause
      * counts: a line or sentence break, or "now", starts a new claim.
      */

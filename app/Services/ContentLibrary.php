@@ -368,17 +368,14 @@ class ContentLibrary
             $confirmed = $this->prices($price) ?: [$this->number($price)];
             // Other amounts the page shows beside the product's price (a struck-out MRP, a free-shipping
             // threshold) are not claims about the price when the copy says the same thing about them the
-            // page does. The page's own price is not one of them when it disagrees with the confirmed
-            // one: that disagreement is what this check is for.
+            // page does. An amount the page states as a price carries no such role, so a stale page price
+            // that disagrees with the confirmed one still fails here.
             $source = $item->campaignPack?->sourceSnapshot;
             $validator = app(CampaignPackSafetyValidator::class);
-            $pagePrice = filled($source?->extracted_truth['price'] ?? null) ? $this->number((string) $source->extracted_truth['price']) : null;
             $roles = [];
             foreach ($source ? $validator->pricesBesideProductPrice($source) : [] as $supported => $pageRoles) {
                 $amount = $this->number(explode(' ', $supported, 2)[1] ?? '');
-                if ($amount !== $pagePrice || in_array($amount, $confirmed, true)) {
-                    $roles[$amount] = [...$roles[$amount] ?? [], ...$pageRoles];
-                }
+                $roles[$amount] = [...$roles[$amount] ?? [], ...$pageRoles];
             }
             // Field by field, so wording ending one field never describes an amount starting the next.
             $wrong = collect($this->strings($version->body))
