@@ -61,7 +61,7 @@ MD);
         $catalog = app(WorkflowCatalog::class);
 
         $kinetic = $catalog->find('kinetic-title');
-        $this->assertSame('Motion & video', $kinetic['category_label']);
+        $this->assertSame('Motion videos', $kinetic['category_label']);
         $this->assertSame('download', $kinetic['availability']);
         $this->assertSame('Animated type for product launches.', $kinetic['description']);
         $this->assertSame(['Title reveal', 'Outro'], array_column($kinetic['prompts'], 'title'));
@@ -270,16 +270,16 @@ MD);
     {
         Http::fake();
         foreach (['ana' => 'Orbit intro', 'ben' => 'Logo reveal'] as $author => $title) {
-            LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => $author, 'pack' => 'Motion graphics', 'category' => 'motion', 'title' => $title, 'body' => "Animate {$title}.", 'credit' => "Prompt by @{$author}", 'source_url' => "https://x.com/{$author}/status/1", 'poster_url' => "https://media.example.com/{$author}.webp"]);
+            LibraryPrompt::create(['collection' => 'opus-videos', 'source_key' => $author, 'pack' => 'UI motion animations', 'category' => 'animation', 'title' => $title, 'body' => "Animate {$title}.", 'credit' => "Prompt by @{$author}", 'source_url' => "https://x.com/{$author}/status/1", 'poster_url' => "https://media.example.com/{$author}.webp"]);
         }
         $user = $this->member();
 
-        $pack = app(WorkflowCatalog::class)->find('opus-videos-motion-graphics');
-        $this->assertSame('Motion & video', $pack['category_label']);
+        $pack = app(WorkflowCatalog::class)->find('opus-videos-ui-motion-animations');
+        $this->assertSame('Motion animations', $pack['category_label']);
         $this->assertStringContainsString('awesome-opus5-5-videos', $pack['credit']);
         $this->assertSame('https://github.com/yihui-dev/awesome-opus5-5-videos', $pack['source_url']);
 
-        Livewire::actingAs($user)->withQueryParams(['workflow' => 'opus-videos-motion-graphics'])->test(WorkflowIndex::class)
+        Livewire::actingAs($user)->withQueryParams(['workflow' => 'opus-videos-ui-motion-animations'])->test(WorkflowIndex::class)
             ->assertSee('Prompt by @ana')
             ->assertSee('Prompt by @ben')
             ->assertSee('https://x.com/ben/status/1', false)
@@ -289,7 +289,7 @@ MD);
         $this->actingAs($user)->get(route('workflows.preview', [$ana->id, 'poster']))->assertRedirect('https://media.example.com/ana.webp');
         Http::assertNothingSent();
 
-        $download = $this->actingAs($user)->get(route('workflows.download', 'opus-videos-motion-graphics'))->getContent();
+        $download = $this->actingAs($user)->get(route('workflows.download', 'opus-videos-ui-motion-animations'))->getContent();
         $this->assertStringContainsString('_Prompt by @ana https://x.com/ana/status/1_', $download);
     }
 

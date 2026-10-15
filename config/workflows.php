@@ -37,7 +37,9 @@ return [
     ],
 
     'categories' => [
-        'motion' => 'Motion & video',
+        // Motion videos are rendered video pieces; motion animations run live in a website or UI.
+        'motion' => 'Motion videos',
+        'animation' => 'Motion animations',
         'web' => 'Website design',
         'image' => 'Images',
         'copy' => 'Copy & pages',

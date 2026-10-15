@@ -37,7 +37,7 @@
                             <button type="button" class="ccard" wire:key="wf-{{ $workflow['slug'] }}" aria-pressed="{{ $current && $current['slug'] === $workflow['slug'] ? 'true' : 'false' }}" wire:click="select('{{ $workflow['slug'] }}')">
                                 <span class="thumb wf-thumb" style="background:{{ $gradients[$workflow['gradient'] % 6] }}" aria-hidden="true">
                                     @if($workflow['poster'])<img class="wf-poster" src="{{ $workflow['poster'] }}" alt="" loading="lazy" decoding="async">@endif
-                                    @if($workflow['category'] === 'motion')<i class="ti ti-player-play"></i>@elseif($workflow['category'] === 'web')<i class="ti ti-browser"></i>@endif
+                                    @if($workflow['category'] === 'motion')<i class="ti ti-player-play"></i>@elseif($workflow['category'] === 'animation')<i class="ti ti-sparkles"></i>@elseif($workflow['category'] === 'web')<i class="ti ti-browser"></i>@endif
                                     @if($workflow['length'])<span class="wf-len">{{ $workflow['length'] }}</span>@endif
                                 </span>
                                 <span class="ccard-title">{{ $workflow['name'] }}</span>
