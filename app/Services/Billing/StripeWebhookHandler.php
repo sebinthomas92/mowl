@@ -245,7 +245,7 @@ class StripeWebhookHandler
                 'stripe_customer_id' => $row->stripe_customer_id ?: ($subscription['customer'] ?? null),
                 'stripe_subscription_id' => $subscription['id'],
                 'stripe_price_id' => Arr::get($subscription, 'items.data.0.price.id'),
-                'status' => $subscription['status'] ?? null,
+                'status' => $subscription['status'] ?? 'inactive',
                 'current_period_ends_at' => $periodEnd ? CarbonImmutable::createFromTimestamp($periodEnd) : null,
                 'cancel_at_period_end' => (bool) ($subscription['cancel_at_period_end'] ?? false) || filled($subscription['cancel_at'] ?? null),
                 // When service actually stopped: ended_at, not the earlier moment a cancellation was requested.
