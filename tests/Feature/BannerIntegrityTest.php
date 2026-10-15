@@ -280,5 +280,10 @@ class BannerIntegrityTest extends TestCase
         foreach ($fit['lines'] as $line) {
             $this->assertEmpty(array_diff(explode(' ', $line), ['Comfy', 'hands-free', 'reading']));
         }
+
+        // A token too wide even at the smallest size keeps the smallest size that fits, not the larger minimum.
+        $fit = (new \ReflectionMethod(BannerComposer::class, 'fitText'))->invoke(app(BannerComposer::class), 'See https://example.com/a-very-long-product-path-for-the-kindle-stand', 200, 70, 36, 4, 450);
+        $this->assertLessThan(36, $fit['size']);
+        $this->assertLessThanOrEqual(450, $fit['height']);
     }
 }

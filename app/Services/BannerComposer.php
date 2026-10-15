@@ -181,11 +181,27 @@ class BannerComposer
 
     private function fitText(string $text, int $maxWidth, int $startSize, int $minSize, int $maxLines, int $maxHeight): array
     {
+        // Prefer a size at which every word fits whole; a token too wide even at 14px (a URL, a SKU)
+        // falls back to the largest size whose wrapped lines fit, as before.
+        foreach ([true, false] as $keepWordsWhole) {
+            if ($fit = $this->fitTextAt($text, $maxWidth, $startSize, $minSize, $maxLines, $maxHeight, $keepWordsWhole)) {
+                return $fit;
+            }
+        }
+
+        $lines = $this->wrap($text, $minSize, $maxWidth);
+        $lineHeight = (int) round($minSize * 1.18);
+
+        return ['lines' => $lines, 'size' => $minSize, 'lineHeight' => $lineHeight, 'height' => count($lines) * $lineHeight];
+    }
+
+    private function fitTextAt(string $text, int $maxWidth, int $startSize, int $minSize, int $maxLines, int $maxHeight, bool $keepWordsWhole): ?array
+    {
         for ($size = $startSize; $size >= $minSize; $size -= 2) {
             $lines = $this->wrap($text, $size, $maxWidth);
             $lineHeight = (int) round($size * 1.22);
             $height = count($lines) * $lineHeight;
-            if (count($lines) <= $maxLines && $height <= $maxHeight && ! $this->splitsWords($text, $size, $maxWidth)) {
+            if (count($lines) <= $maxLines && $height <= $maxHeight && ! ($keepWordsWhole && $this->splitsWords($text, $size, $maxWidth))) {
                 return compact('lines', 'size', 'lineHeight', 'height');
             }
         }
@@ -194,15 +210,12 @@ class BannerComposer
             $lines = $this->wrap($text, $size, $maxWidth);
             $lineHeight = (int) round($size * 1.18);
             $height = count($lines) * $lineHeight;
-            if ($height <= $maxHeight && ! $this->splitsWords($text, $size, $maxWidth)) {
+            if ($height <= $maxHeight && ! ($keepWordsWhole && $this->splitsWords($text, $size, $maxWidth))) {
                 return compact('lines', 'size', 'lineHeight', 'height');
             }
         }
 
-        $lines = $this->wrap($text, $minSize, $maxWidth);
-        $lineHeight = (int) round($minSize * 1.18);
-
-        return ['lines' => $lines, 'size' => $minSize, 'lineHeight' => $lineHeight, 'height' => count($lines) * $lineHeight];
+        return null;
     }
 
     /** Whether a single word is wider than the column at this size, so wrapping would break it mid-word. */
