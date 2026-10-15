@@ -241,4 +241,44 @@ class BannerIntegrityTest extends TestCase
             }
         }
     }
+
+    public function test_every_layout_puts_the_wordmark_on_the_cta_row_keeps_words_whole_and_fades_the_panel_edge(): void
+    {
+        $background = imagecreatetruecolor(1080, 1350);
+        imagefill($background, 0, 0, imagecolorallocate($background, 200, 160, 120));
+        ob_start();
+        imagepng($background);
+        $bytes = ob_get_clean();
+        $brand = new Brand(['name' => 'The Plush Republic', 'primary_color' => '#F4B942']);
+        $white = fn ($image, $x, $y) => (imagecolorat($image, $x, $y) & 0xFFFFFF) === 0xFFFFFF;
+
+        foreach (['hero_top', 'split_left'] as $layout) {
+            $creative = new BannerCreative(['headline' => 'Comfy hands-free reading', 'supporting_text' => 'Small-batch minimal design', 'cta' => 'Shop now', 'layout' => $layout]);
+            $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, $creative));
+            for ($y = 0; $y < 140; $y++) {
+                for ($x = 0; $x < 1080; $x += 2) {
+                    $this->assertFalse($white($image, $x, $y), "{$layout}: nothing is drawn at the top, where the wordmark used to sit");
+                }
+            }
+            // Text stays inside the dark column: nothing white right of it.
+            for ($y = 0; $y < 1350; $y += 2) {
+                for ($x = 620; $x < 1080; $x += 2) {
+                    $this->assertFalse($white($image, $x, $y), "{$layout}: no text past the panel at {$x},{$y}");
+                }
+            }
+        }
+
+        // The hero panel fades out to the right instead of ending in a hard vertical edge.
+        $image = imagecreatefromstring(app(BannerComposer::class)->compose($bytes, $brand, new BannerCreative(['headline' => 'A stand', 'cta' => 'Shop now', 'layout' => 'hero_top'])));
+        $red = array_map(fn ($x) => (imagecolorat($image, $x, 120) >> 16) & 255, range(560, 1000));
+        $this->assertLessThanOrEqual(3, max(array_map(fn ($i) => abs($red[$i] - $red[$i - 1]), range(1, count($red) - 1))));
+
+        // A word wider than the column shrinks the headline rather than breaking mid-word.
+        $fit = (new \ReflectionMethod(BannerComposer::class, 'fitText'))->invoke(app(BannerComposer::class), 'Comfy hands-free reading', 300, 70, 36, 4, 450);
+        $this->assertSame(['Comfy hands-free reading'], [implode(' ', $fit['lines'])]);
+        $this->assertNotContains('hands-fre', $fit['lines']);
+        foreach ($fit['lines'] as $line) {
+            $this->assertEmpty(array_diff(explode(' ', $line), ['Comfy', 'hands-free', 'reading']));
+        }
+    }
 }
