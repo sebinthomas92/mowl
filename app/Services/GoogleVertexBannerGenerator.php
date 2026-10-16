@@ -94,7 +94,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                 if (! config('campaigns.banners.inspect_images')) {
                     return $this->result($result, $usage, $extraCost, $cutout);
                 }
-                $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand), retryHang: true);
+                $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $composite), retryHang: true);
             } catch (VertexAIResponseException $exception) {
                 throw $this->withSpend($exception, $usage, $extraCost);
             }
@@ -102,6 +102,12 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             $marks = $inspection['marks'];
             if ($marks !== []) {
                 $failure = ['banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300)];
+
+                continue;
+            }
+            if ($inspection['product_shown']) {
+                // The real product is composited on top, so a drawn one would show the product twice.
+                $failure = ['banner_scene_has_product', 'Every generated scene drew the product itself, which the real product photo would be placed on top of.'];
 
                 continue;
             }

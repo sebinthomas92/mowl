@@ -8,6 +8,7 @@ use App\Models\MediaAsset;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Sleep;
 use Throwable;
 
 /**
@@ -30,6 +31,12 @@ class BannerReferenceImage
     private const MIN_COVERAGE = 0.02;
 
     private const MAX_COVERAGE = 0.92;
+
+    /** A shadow, floor or gradient left around the product shows as an opaque border; most of it must be key. */
+    private const MIN_KEYED_BORDER = 0.9;
+
+    /** A small compressed file can decode to hundreds of MB; photos and cutouts are far below this. */
+    private const MAX_PIXELS = 25_000_000;
 
     public function __construct(private GoogleVertexAIClient $client, private ProviderCostCalculator $costs, private BannerImageInspector $inspector) {}
 
@@ -76,7 +83,10 @@ class BannerReferenceImage
     /** The copy depends on the product name in the prompt, so a renamed product gets a new one. */
     public static function key(string $product): string
     {
-        return substr(sha1(self::PROMPT_VERSION."\n".$product), 0, 16);
+        // Which checks the cutout passed is part of the key, so turning a check on remakes cutouts made without it.
+        $checks = (int) (bool) config('campaigns.banners.inspect_images').(int) (bool) config('campaigns.banners.check_product');
+
+        return substr(sha1(self::PROMPT_VERSION."\n".$product."\n".$checks), 0, 16);
     }
 
     /** @return array{inlineData: array{mimeType: string, data: string}, cost: float}|null */
@@ -145,12 +155,12 @@ class BannerReferenceImage
         $model = (string) config('campaigns.google.model');
         $cost = 0.0;
         try {
-            $marks = $this->inspector->inspect($png, 'image/png', $product, $brand);
+            $marks = $this->retried(fn () => $this->inspector->inspect($png, 'image/png', $product, $brand));
             $cost += $this->costs->calculate($model, $marks['input_tokens'], 0, $marks['output_tokens']);
             if ($marks['marks'] !== []) {
                 throw new BannerAttemptFailed('banner_reference_rejected', 'The product cutout showed third-party text or marks: '.mb_substr(implode(', ', $marks['marks']), 0, 300), round($spent + $cost, 6), $png);
             }
-            $match = config('campaigns.banners.check_product') ? $this->inspector->matchesProduct($png, 'image/png', $product, $photo) : null;
+            $match = config('campaigns.banners.check_product') ? $this->retried(fn () => $this->inspector->matchesProduct($png, 'image/png', $product, $photo)) : null;
             $cost += $match ? $this->costs->calculate($model, $match['input_tokens'], 0, $match['output_tokens']) : 0.0;
         } catch (VertexAIResponseException $exception) {
             throw new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), round($spent + $cost, 6));
@@ -162,6 +172,32 @@ class BannerReferenceImage
         return $cost;
     }
 
+    /** A check that was rate limited or hung is tried once more, so the paid-for cutout is not thrown away. */
+    private function retried(callable $call): array
+    {
+        try {
+            return $call();
+        } catch (VertexAIResponseException $exception) {
+            if (! in_array($exception->errorCode, ['vertex_http_429', 'vertex_connection_error'], true)) {
+                throw $exception;
+            }
+            Sleep::for(10)->seconds();
+
+            return $call();
+        }
+    }
+
+    private static function decode(string $bytes): ?\GdImage
+    {
+        $size = @getimagesizefromstring($bytes);
+        if (! $size || $size[0] * $size[1] > self::MAX_PIXELS) {
+            return null;
+        }
+        $image = @imagecreatefromstring($bytes);
+
+        return $image ?: null;
+    }
+
     /**
      * Green keys best, unless the product photo is itself green (a plant pot, a green case): then the
      * key is magenta, so no part of the product is keyed out.
@@ -170,7 +206,7 @@ class BannerReferenceImage
      */
     private function keyColour(string $photo): array
     {
-        $image = @imagecreatefromstring($photo);
+        $image = self::decode($photo);
         if (! $image) {
             return ['green', '#00FF00'];
         }
@@ -204,7 +240,7 @@ class BannerReferenceImage
      */
     public function cutout(string $bytes, string $key = 'green'): ?string
     {
-        $image = @imagecreatefromstring($bytes);
+        $image = self::decode($bytes);
         if (! $image) {
             return null;
         }
@@ -215,7 +251,7 @@ class BannerReferenceImage
         $out = imagecreatetruecolor($width, $height);
         imagealphablending($out, false);
         imagesavealpha($out, true);
-        [$left, $top, $right, $bottom, $opaque] = [$width, $height, -1, -1, 0];
+        [$left, $top, $right, $bottom, $opaque, $border, $keyedBorder] = [$width, $height, -1, -1, 0, 0, 0];
         for ($y = 0; $y < $height; $y++) {
             for ($x = 0; $x < $width; $x++) {
                 $c = imagecolorat($image, $x, $y);
@@ -230,6 +266,10 @@ class BannerReferenceImage
                 }
                 $alpha = (int) round($strength * 127);
                 imagesetpixel($out, $x, $y, imagecolorallocatealpha($out, $r, $g, $b, $alpha));
+                if ($x === 0 || $y === 0 || $x === $width - 1 || $y === $height - 1) {
+                    $border++;
+                    $keyedBorder += $alpha >= 64 ? 1 : 0;
+                }
                 if ($alpha < 64) {
                     $opaque++;
                     [$left, $top, $right, $bottom] = [min($left, $x), min($top, $y), max($right, $x), max($bottom, $y)];
@@ -238,7 +278,7 @@ class BannerReferenceImage
         }
         imagedestroy($image);
         $coverage = $opaque / max(1, $width * $height);
-        if ($coverage < self::MIN_COVERAGE || $coverage > self::MAX_COVERAGE) {
+        if ($coverage < self::MIN_COVERAGE || $coverage > self::MAX_COVERAGE || $keyedBorder < $border * self::MIN_KEYED_BORDER) {
             imagedestroy($out);
 
             return null;

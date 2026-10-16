@@ -18,17 +18,26 @@ class BannerImageInspector
      * the photo's own props (the book, Kindle and magazine on the Kindle Stand page) as if they were in
      * the background, so every round of pack 20 was rejected.
      *
-     * @return array{marks: list<string>, input_tokens: int, output_tokens: int}
+     * With $sceneOnly, the image is a scene the real product is composited onto afterwards, so it is
+     * also asked whether the product (or something like it) was drawn anyway.
+     *
+     * @return array{marks: list<string>, product_shown: bool, input_tokens: int, output_tokens: int}
      */
-    public function inspect(string $imageBytes, string $mimeType, string $product, string $brand): array
+    public function inspect(string $imageBytes, string $mimeType, string $product, string $brand, bool $sceneOnly = false): array
     {
         $prompt = "This is an advertising background for the product \"{$product}\" by the brand \"{$brand}\". "
             .'List every piece of readable text or recognisable mark in this image: book or e-book covers and titles, '
             .'author names, magazine or newspaper names, book spines, labels and packaging of other items, logos and other brands\' names, '
             .'and anything shown on a device screen (a phone, tablet or e-reader). '
             .'Do not list the brand or product name above where it is printed on the product itself. '
-            .'Do not list blank, blurred or illegible shapes. Only report what is visible in this image. Return JSON only.';
+            .'Do not list blank, blurred or illegible shapes. Only report what is visible in this image. '
+            .($sceneOnly ? "Also set product_shown to true if the image shows {$product} or any object like it. " : '')
+            .'Return JSON only.';
         [$mimeType, $imageBytes] = $this->smaller($mimeType, $imageBytes);
+        $properties = ['marks' => ['type' => 'ARRAY', 'items' => ['type' => 'STRING']]];
+        if ($sceneOnly) {
+            $properties['product_shown'] = ['type' => 'BOOLEAN'];
+        }
         $parts = [
             ['text' => $prompt],
             ['inlineData' => ['mimeType' => $mimeType, 'data' => base64_encode($imageBytes)]],
@@ -40,20 +49,21 @@ class BannerImageInspector
                 'responseMimeType' => 'application/json',
                 'responseSchema' => [
                     'type' => 'OBJECT',
-                    'properties' => ['marks' => ['type' => 'ARRAY', 'items' => ['type' => 'STRING']]],
-                    'required' => ['marks'],
+                    'properties' => $properties,
+                    'required' => array_keys($properties),
                 ],
             ],
         ], config('campaigns.google.model'), (int) config('campaigns.banners.inspection_timeout_seconds', 30));
 
         $json = $response->json();
         $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
-        if (! is_array($decoded) || ! is_array($decoded['marks'] ?? null)) {
+        if (! is_array($decoded) || ! is_array($decoded['marks'] ?? null) || ($sceneOnly && ! is_bool($decoded['product_shown'] ?? null))) {
             throw new VertexAIResponseException('vertex_invalid_inspection', 'Vertex AI returned no banner image inspection.', true);
         }
 
         return [
             'marks' => array_values(array_filter(array_map(fn ($mark) => is_string($mark) ? trim($mark) : '', $decoded['marks']))),
+            'product_shown' => $sceneOnly && $decoded['product_shown'],
             'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
             'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0),
         ];

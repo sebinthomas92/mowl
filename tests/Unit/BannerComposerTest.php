@@ -68,6 +68,14 @@ class BannerComposerTest extends TestCase
         $this->assertNull($references->cutout($this->image(100, 100, [0, 255, 0])));
         $this->assertNull($references->cutout($this->image(100, 100, [200, 60, 40])));
         $this->assertNull($references->cutout('not-an-image'));
+        // A grey floor left under the product: the key no longer reaches the image's edges.
+        $floor = imagecreatetruecolor(100, 100);
+        imagefill($floor, 0, 0, imagecolorallocate($floor, 0, 255, 0));
+        imagefilledrectangle($floor, 0, 60, 99, 99, imagecolorallocate($floor, 180, 180, 180));
+        imagefilledrectangle($floor, 30, 30, 69, 59, imagecolorallocate($floor, 240, 240, 240));
+        ob_start();
+        imagepng($floor);
+        $this->assertNull($references->cutout((string) ob_get_clean()));
     }
 
     public function test_a_palette_image_is_keyed_by_colour_and_the_products_own_green_is_kept(): void

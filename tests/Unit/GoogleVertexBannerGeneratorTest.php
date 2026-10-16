@@ -583,6 +583,44 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             && $request['contents'][0]['parts'][1]['inlineData']['data'] === base64_encode('product-bytes'));
     }
 
+    public function test_a_scene_that_draws_the_product_anyway_is_redrawn_so_it_is_never_shown_twice(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $images = [self::image(self::keyed()), self::image('scene-with-a-stand'), self::image('empty-scene')];
+        $answers = [self::inspection([]), self::inspection([], true), self::inspection([])];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$images, &$answers) {
+                return Http::response(str_contains($request->url(), 'gemini-3.5-flash:') ? array_shift($answers) : array_shift($images));
+            },
+        ]);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+
+        $this->assertSame('empty-scene', $result->imageBytes);
+        // Scene checks ask whether the product was drawn; the cutout's own check does not.
+        $schemas = collect(Http::recorded())->map(fn (array $pair) => $pair[0])
+            ->filter(fn (Request $request) => str_contains($request->url(), 'gemini-3.5-flash:'))
+            ->map(fn (Request $request) => array_key_exists('product_shown', $request['generationConfig']['responseSchema']['properties']))->values()->all();
+        $this->assertSame([false, true, true], $schemas);
+    }
+
+    public function test_cutouts_made_without_a_check_are_remade_once_that_check_is_turned_on(): void
+    {
+        config()->set('campaigns.banners.inspect_images', true);
+        config()->set('campaigns.banners.check_product', false);
+        $unchecked = BannerReferenceImage::key('Kindle Stand');
+        config()->set('campaigns.banners.check_product', true);
+
+        $this->assertNotSame($unchecked, BannerReferenceImage::key('Kindle Stand'));
+    }
+
     private static function match(bool $matches, string $differences, bool $split = false): array
     {
         return [
@@ -624,10 +662,10 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         ];
     }
 
-    private static function inspection(array $marks): array
+    private static function inspection(array $marks, bool $productShown = false): array
     {
         return [
-            'candidates' => [['content' => ['parts' => [['text' => json_encode(['marks' => $marks])]]]]],
+            'candidates' => [['content' => ['parts' => [['text' => json_encode(['marks' => $marks, 'product_shown' => $productShown])]]]]],
             'usageMetadata' => ['promptTokenCount' => 300, 'candidatesTokenCount' => 12],
         ];
     }
