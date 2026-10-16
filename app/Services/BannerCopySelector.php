@@ -138,7 +138,7 @@ class BannerCopySelector
 
         return trim(self::SCENE_OPENING."{$product}. Brand context: {$brand}; use it only for palette and mood. Direction: {$direction['label']}. Approved benefit context: {$benefit}. Approved audience context: {$audience}. "
             .'The product itself will be placed into this photo afterwards'." from its real studio photo, so do NOT show {$product} or anything resembling it anywhere. "
-            ."Leave a clear, empty resting spot {$spot}, sized for an object about 40% of the image width, with soft, even, slightly frontal studio light and a camera at a slight high angle, so a placed product looks natural there. "
+            ."Leave a clear, empty resting spot {$spot}, sized for an object about 40% of the image width, with a camera at a slight high angle, so a placed product looks natural there. Light the whole scene brightly with soft, diffused daylight from the front-left, like a product studio photo: airy and light, never dark, moody or low-key, so a studio-lit product photo matches it. "
             ."{$quiet} The quiet area must be a natural, softly lit continuation of the same scene: no flat colour block, no split-screen and no hard vertical or horizontal boundary. Keep the bottom-right corner simple for a small brand mark. "
             .'Keep the set minimal: a surface, a backdrop and at most one or two small, plain, out-of-focus props away from the resting spot. '
             .'Do not include any text, letters, numbers, logos, labels, captions, UI, signatures, borders or watermarks. No books, magazines, screens, packaging or posters. No readable text anywhere. Clean commercial art direction, 4:5 composition.');

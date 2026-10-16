@@ -122,18 +122,95 @@ class BannerComposer
         $height = max(1, (int) round(imagesy($cutout) * $scale));
         $x = $slot['x'] - intdiv($width, 2);
         $y = $slot['base'] - $height;
+        // Resized first, so the light match below touches only the pixels that are drawn.
+        $product = imagecreatetruecolor($width, $height);
+        imagealphablending($product, false);
+        imagesavealpha($product, true);
+        imagefill($product, 0, 0, imagecolorallocatealpha($product, 0, 0, 0, 127));
+        imagecopyresampled($product, $cutout, 0, 0, 0, 0, $width, $height, imagesx($cutout), imagesy($cutout));
+        imagedestroy($cutout);
+        $this->matchLight($product, $this->averageColour($canvas, $x, $y, $width, $height));
 
-        // Stacked translucent ellipses give a shadow that is darkest under the product and fades out.
+        // Stacked translucent ellipses give a soft shadow that is darkest under the product and fades
+        // out, and a tight dark band right at the base keeps it from looking like it hovers.
         $shadowWidth = (int) round($width * 0.95);
         $shadowHeight = max(10, (int) round($width * 0.08));
         for ($step = 0; $step < 14; $step++) {
             $shrink = 1 - $step / 16;
             imagefilledellipse($canvas, $slot['x'], $slot['base'] - (int) round($shadowHeight * 0.15), (int) round($shadowWidth * $shrink), (int) round($shadowHeight * $shrink), imagecolorallocatealpha($canvas, 0, 0, 0, 121));
         }
+        for ($step = 0; $step < 6; $step++) {
+            $shrink = 1 - $step / 8;
+            imagefilledellipse($canvas, $slot['x'], $slot['base'] - 2, (int) round($width * 0.9 * $shrink), max(4, (int) round($shadowHeight * 0.35 * $shrink)), imagecolorallocatealpha($canvas, 0, 0, 0, 112));
+        }
 
         imagealphablending($canvas, true);
-        imagecopyresampled($canvas, $cutout, $x, $y, 0, 0, $width, $height, imagesx($cutout), imagesy($cutout));
-        imagedestroy($cutout);
+        imagecopy($canvas, $product, $x, $y, 0, 0, $width, $height);
+        imagedestroy($product);
+    }
+
+    /** @return array{float, float, float} */
+    private function averageColour(\GdImage $canvas, int $x, int $y, int $width, int $height): array
+    {
+        [$r, $g, $b, $n] = [0, 0, 0, 0];
+        for ($py = max(0, $y); $py < min(imagesy($canvas), $y + $height); $py += 6) {
+            for ($px = max(0, $x); $px < min(imagesx($canvas), $x + $width); $px += 6) {
+                $c = imagecolorat($canvas, $px, $py);
+                [$r, $g, $b, $n] = [$r + (($c >> 16) & 255), $g + (($c >> 8) & 255), $b + ($c & 255), $n + 1];
+            }
+        }
+
+        return $n ? [$r / $n, $g / $n, $b / $n] : [128.0, 128.0, 128.0];
+    }
+
+    /**
+     * A studio-lit product is brighter and more neutral than most scenes, which made it look pasted on.
+     * It is dimmed toward the scene behind it and takes a little of its colour, within limits that
+     * keep the product's own colours recognisable.
+     *
+     * @param  array{float, float, float}  $scene
+     */
+    private function matchLight(\GdImage $cutout, array $scene): void
+    {
+        imagealphablending($cutout, false);
+        imagesavealpha($cutout, true);
+        [$r, $g, $b, $n] = [0, 0, 0, 0];
+        for ($y = 0; $y < imagesy($cutout); $y += 3) {
+            for ($x = 0; $x < imagesx($cutout); $x += 3) {
+                $c = imagecolorat($cutout, $x, $y);
+                if ((($c >> 24) & 127) < 40) {
+                    [$r, $g, $b, $n] = [$r + (($c >> 16) & 255), $g + (($c >> 8) & 255), $b + ($c & 255), $n + 1];
+                }
+            }
+        }
+        if ($n === 0) {
+            return;
+        }
+        $productLight = ($r + $g + $b) / (3 * $n);
+        $sceneLight = array_sum($scene) / 3;
+        $gain = max(0.82, min(1.0, ($sceneLight / max(1, $productLight)) ** 0.3));
+        $sceneTint = array_map(fn (float $channel) => $channel / max(1, $sceneLight), $scene);
+        $tint = array_map(fn (float $channel) => 1 + 0.08 * ($channel - 1), $sceneTint);
+        if ($gain > 0.995 && abs($tint[0] - 1) < 0.005 && abs($tint[2] - 1) < 0.005) {
+            return;
+        }
+        for ($y = 0; $y < imagesy($cutout); $y++) {
+            for ($x = 0; $x < imagesx($cutout); $x++) {
+                $c = imagecolorat($cutout, $x, $y);
+                $alpha = ($c >> 24) & 127;
+                if ($alpha === 127) {
+                    continue;
+                }
+                imagesetpixel($cutout, $x, $y, imagecolorallocatealpha(
+                    $cutout,
+                    (int) min(255, round((($c >> 16) & 255) * $gain * $tint[0])),
+                    (int) min(255, round((($c >> 8) & 255) * $gain * $tint[1])),
+                    (int) min(255, round(($c & 255) * $gain * $tint[2])),
+                    $alpha,
+                ));
+            }
+        }
+        imagealphablending($cutout, true);
     }
 
     /**

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\MediaAsset;
+use App\Models\SourceSnapshot;
 use App\Support\GenerationDeadline;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
@@ -23,7 +24,10 @@ use Throwable;
 class BannerReferenceImage
 {
     /** Bump when the cleanup prompt changes, so stored copies made by the old prompt are redone. */
-    private const PROMPT_VERSION = 2;
+    private const PROMPT_VERSION = 3;
+
+    /** Store photos downloaded while looking for a studio shot to cut out. */
+    private const MAX_GALLERY_PHOTOS = 6;
 
     /** The lock outlives the cleanup call plus Google sign-in (OIDC, STS and IAM, up to 75s) before it. */
     private const LOCK_EXTRA_SECONDS = 120;
@@ -37,9 +41,13 @@ class BannerReferenceImage
     private const MIN_KEYED_BORDER = 0.9;
 
     /** A small compressed file can decode to hundreds of MB; photos and cutouts are far below this. */
-    private const MAX_PIXELS = 25_000_000;
-
-    public function __construct(private GoogleVertexAIClient $client, private ProviderCostCalculator $costs, private BannerImageInspector $inspector) {}
+    public function __construct(
+        private GoogleVertexAIClient $client,
+        private ProviderCostCalculator $costs,
+        private BannerImageInspector $inspector,
+        private ProductPhotoCutout $cutter,
+        private ProductPageFetcher $fetcher,
+    ) {}
 
     /**
      * Banners for one pack run side by side, so the copy is made under a per-photo lock: the others
@@ -47,28 +55,37 @@ class BannerReferenceImage
      *
      * @return array{inlineData: array{mimeType: string, data: string}, cost: float}
      */
-    public function for(MediaAsset $asset, string $product, int $timeoutSeconds, int $waitSeconds, string $brand = ''): array
+    public function for(MediaAsset $asset, string $product, int $timeoutSeconds, int $waitSeconds, string $brand = '', ?SourceSnapshot $source = null): array
     {
+        // The pack's own source wins: a product refreshed since the photo was imported keeps that older
+        // asset, and its gallery and approval are the pack's, not the import's.
+        $source ??= $asset->sourceSnapshot;
         if (! $asset->exists) {
-            return $this->make($asset, $product, $timeoutSeconds, $brand);
+            return $this->make($asset, $product, $timeoutSeconds, $brand, $source);
         }
-        $key = self::key($product, $brand);
+        // A cutout can come from the page's gallery, so a refreshed (and re-approved) page makes a new one.
+        $key = self::key($product, $brand, $source ? $source->content_hash.'|'.$source->approved_at?->toIso8601String() : '');
         if ($cached = $this->cached($asset, $key)) {
             return $cached;
         }
 
         try {
-            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + 2 * (int) config('campaigns.banners.inspection_timeout_seconds') + self::LOCK_EXTRA_SECONDS)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds, $key, $brand) {
+            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + 2 * (int) config('campaigns.banners.inspection_timeout_seconds') + self::LOCK_EXTRA_SECONDS)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds, $key, $brand, $source) {
                 if ($cached = $this->cached($asset->refresh(), $key)) {
                     return $cached;
                 }
-                $clean = $this->make($asset, $product, $timeoutSeconds, $brand);
+                $clean = $this->make($asset, $product, $timeoutSeconds, $brand, $source);
                 $path = dirname($asset->path).'/banner-reference-'.$asset->id.'.png';
                 // The copy is already paid for: a failed write (false, or a throw on the gcs disk) only
                 // means it is used once and not recorded.
                 try {
                     if (Storage::disk($asset->disk)->put($path, base64_decode($clean['inlineData']['data'])) !== false) {
-                        $asset->forceFill(['derivatives' => [...($asset->derivatives ?? []), 'banner_reference' => $path, 'banner_reference_key' => $key]])->save();
+                        $asset->forceFill(['derivatives' => [
+                            ...($asset->derivatives ?? []),
+                            'banner_reference' => $path,
+                            'banner_reference_key' => $key,
+                            'banner_reference_source' => $clean['source'] ?? null,
+                        ]])->save();
                     }
                 } catch (Throwable $exception) {
                     report($exception);
@@ -85,12 +102,12 @@ class BannerReferenceImage
      * The copy depends on the product name in the prompt, and its marks check exempts the brand's own
      * mark, so a renamed product or brand gets a new one.
      */
-    public static function key(string $product, string $brand = ''): string
+    public static function key(string $product, string $brand = '', string $source = ''): string
     {
         // Which checks the cutout passed is part of the key, so turning a check on remakes cutouts made without it.
         $checks = (int) (bool) config('campaigns.banners.inspect_images').(int) (bool) config('campaigns.banners.check_product');
 
-        return substr(sha1(self::PROMPT_VERSION."\n".$product."\n".$brand."\n".$checks), 0, 16);
+        return substr(sha1(self::PROMPT_VERSION."\n".$product."\n".$brand."\n".$checks.($source !== '' ? "\n".$source : '')), 0, 16);
     }
 
     /** @return array{inlineData: array{mimeType: string, data: string}, cost: float}|null */
@@ -104,10 +121,131 @@ class BannerReferenceImage
         return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode(Storage::disk($asset->disk)->get($cached))], 'cost' => 0.0];
     }
 
-    /** @return array{inlineData: array{mimeType: string, data: string}, cost: float} */
-    private function make(MediaAsset $asset, string $product, int $timeoutSeconds, string $brand): array
+    /**
+     * A studio shot of the product on a plain backdrop is cut out pixel for pixel, with no AI redraw.
+     * Only when the store has none is the image model asked to lift the product out of a styled photo.
+     *
+     * @return array{inlineData: array{mimeType: string, data: string}, cost: float, source?: string}
+     */
+    private function make(MediaAsset $asset, string $product, int $timeoutSeconds, string $brand, ?SourceSnapshot $source): array
     {
         $photo = Storage::disk($asset->disk)->get($asset->path);
+        $spent = 0.0;
+        foreach ($this->studioCutouts($asset, $photo, $source) as $studio) {
+            try {
+                $spent += $this->check($studio['png'], $product, $brand, $studio['reference'], $spent, studio: true);
+            } catch (BannerAttemptFailed $exception) {
+                // A studio shot with readable text (a device screen in the stand), other objects or another
+                // variant of the product is skipped for the next one.
+                if (! in_array($exception->errorCode, ['banner_reference_rejected', 'banner_product_mismatch'], true)) {
+                    throw $exception;
+                }
+                $spent = $exception->spentCost;
+
+                continue;
+            }
+
+            return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($studio['png'])], 'cost' => $spent, 'source' => $studio['source']];
+        }
+
+        try {
+            $redrawn = $this->redraw($asset, $photo, $product, $timeoutSeconds, $brand, $spent);
+        } catch (VertexAIResponseException $exception) {
+            // The studio photos' paid checks stay on the banner's cost when the redraw call fails.
+            throw $spent > 0 ? new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), round($spent, 6)) : $exception;
+        }
+
+        return [...$redrawn, 'cost' => $redrawn['cost'] + $spent];
+    }
+
+    /**
+     * The imported photo first, then the product's own gallery photos from its page (a share image is
+     * often a styled scene, sometimes of another variant). A gallery can also show other variants, so a
+     * photo other than the store's main product photo (the gallery's first) is compared with it,
+     * the imported photo included. A trusted photo's cutout is compared with the photo it was cut
+     * from, so a part the cutter took for backdrop or shadow is caught before the cutout is used.
+     *
+     * @return \Generator<int, array{png: string, source: string, reference: array{mimeType: string, data: string}|null}>
+     */
+    private function studioCutouts(MediaAsset $asset, string $photo, ?SourceSnapshot $snapshot): \Generator
+    {
+        $source = (string) data_get($asset->metadata, 'source_url');
+        $imported = $this->cutter->cut($photo);
+        $page = $snapshot?->url;
+        // An uploaded photo is the product by the owner's word. An imported one is trusted unchecked only
+        // when it is the gallery's main photo: older imports took the page's share image first.
+        $gallery = [];
+        if ($page) {
+            try {
+                $fetched = $this->fetcher->fetch($page);
+            } catch (Throwable $exception) {
+                // Without the page there is no telling whether the import is the main photo: the redraw,
+                // which is checked against the imported photo as a whole, is used instead.
+                report($exception);
+
+                return;
+            }
+            // The owner approved the product the page showed then. A page that now names another
+            // product (a reused URL) is not that product's gallery. The SKU decides when both have one,
+            // so a retitled page of the same product still counts.
+            $approved = (array) ($snapshot->extracted_truth ?? []);
+            $then = fn (string $field) => mb_strtolower(trim((string) ($approved[$field] ?? '')));
+            $now = fn (string $field) => mb_strtolower(trim((string) ($fetched['product_truth'][$field] ?? '')));
+            $field = $then('sku') !== '' && $now('sku') !== '' ? 'sku' : 'name';
+            if ($then($field) !== '' && $now($field) !== '' && $then($field) !== $now($field)) {
+                return;
+            }
+            $gallery = $fetched['gallery_images'] ?? [];
+        }
+        $own = ['mimeType' => (string) $asset->mime_type, 'data' => base64_encode($photo)];
+        // With no gallery to compare with, the imported photo is the reference the redraw would use too.
+        if ($imported && ($gallery === [] || $gallery[0] === $source)) {
+            yield ['png' => $imported, 'source' => $source ?: $asset->path, 'reference' => $own];
+            $imported = null;
+        }
+        if ($gallery === []) {
+            return;
+        }
+        $main = $gallery[0] === $source ? $own : null;
+        foreach (array_slice(array_values(array_diff($gallery, [$source])), 0, self::MAX_GALLERY_PHOTOS) as $url) {
+            // Only the gallery's first photo is trusted as the product: when it cannot be downloaded, a
+            // later one (possibly another variant) has nothing to be compared with.
+            if ($main === null && $url !== $gallery[0]) {
+                break;
+            }
+            // A download is only started while it and both of the cutout's checks (marks, then the product
+            // match) still fit the deadline. The scene is not reserved here: an accepted cutout is stored,
+            // and a banner short of time for its scene retries straight from it.
+            if (! $this->hasTime((int) config('campaigns.source.timeout_seconds') + (int) config('campaigns.banners.inspection_timeout_seconds'))) {
+                break;
+            }
+            try {
+                $image = $this->fetcher->fetchImage($url);
+            } catch (Throwable) {
+                continue;
+            }
+            // A photo too large to decode within memory cannot be shrunk for the inspector either, so it
+            // is neither cut out nor used as the main photo (the cutter skips it too).
+            $usable = $image['width'] * $image['height'] <= ProductImageImporter::MAX_PIXELS;
+            $own = ['mimeType' => $image['mime_type'], 'data' => base64_encode($image['bytes'])];
+            $reference = $main;
+            $main ??= $usable ? $own : null;
+            if ($main === null) {
+                break;
+            }
+            if ($imported) {
+                yield ['png' => $imported, 'source' => $source ?: $asset->path, 'reference' => $main];
+                $imported = null;
+            }
+            if ($usable && $png = $this->cutter->cut($image['bytes'])) {
+                yield ['png' => $png, 'source' => $image['url'], 'reference' => $reference ?? $own];
+            }
+        }
+    }
+
+    /** @return array{inlineData: array{mimeType: string, data: string}, cost: float} */
+    private function redraw(MediaAsset $asset, string $photo, string $product, int $timeoutSeconds, string $brand, float $earlier): array
+    {
         [$keyName, $keyHex] = $this->keyColour($photo);
         [$response] = $this->client->generateContent([
             'contents' => [['role' => 'user', 'parts' => [
@@ -137,10 +275,10 @@ class BannerReferenceImage
         if ($png === null) {
             // A filtered or malformed answer is still billed for its tokens, and is never cached.
             $message = 'Vertex AI returned no usable product cutout.';
-            throw $cost > 0 ? new BannerAttemptFailed('vertex_missing_image', $message, round($cost, 6), is_string($bytes) && $bytes !== '' ? $bytes : null) : new VertexAIResponseException('vertex_missing_image', $message, true);
+            throw $cost + $earlier > 0 ? new BannerAttemptFailed('vertex_missing_image', $message, round($earlier + $cost, 6), is_string($bytes) && $bytes !== '' ? $bytes : null) : new VertexAIResponseException('vertex_missing_image', $message, true);
         }
 
-        $cost += $this->check($png, $product, $brand, ['mimeType' => $asset->mime_type, 'data' => base64_encode($photo)], $cost);
+        $cost += $this->check($png, $product, $brand, ['mimeType' => $asset->mime_type, 'data' => base64_encode($photo)], $earlier + $cost);
 
         return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($png)], 'cost' => $cost];
     }
@@ -149,9 +287,12 @@ class BannerReferenceImage
      * The cutout is every banner's product, so it is checked once, before it is kept: no third-party text
      * (a Kindle screen left in) and the same object, colours and proportions as the store photo.
      *
-     * @param  array{mimeType: string, data: string}  $photo
+     * A studio cutout is the photo's own pixels: it is also asked for other objects, and compared only
+     * when it comes from a later gallery photo ($photo is then the store's main product photo).
+     *
+     * @param  array{mimeType: string, data: string}|null  $photo
      */
-    private function check(string $png, string $product, string $brand, array $photo, float $spent): float
+    private function check(string $png, string $product, string $brand, ?array $photo, float $spent, bool $studio = false): float
     {
         if (! config('campaigns.banners.inspect_images')) {
             return 0.0;
@@ -160,15 +301,20 @@ class BannerReferenceImage
         $cost = 0.0;
         try {
             $this->ensureTime();
-            $marks = $this->retried(fn () => $this->inspector->inspect($png, 'image/png', $product, $brand));
+            $marks = $this->retried(fn () => $this->inspector->inspect($png, 'image/png', $product, $brand, cutout: $studio));
             $cost += $this->costs->calculate($model, $marks['input_tokens'], 0, $marks['output_tokens']);
+            if ($studio && $marks['other_objects'] !== []) {
+                // A studio shot with a vase or candle beside the product, joined to it in the cutout.
+                throw new BannerAttemptFailed('banner_reference_rejected', 'The product photo showed other objects: '.mb_substr(implode(', ', $marks['other_objects']), 0, 300), round($spent + $cost, 6), $png);
+            }
             if ($marks['marks'] !== []) {
                 throw new BannerAttemptFailed('banner_reference_rejected', 'The product cutout showed third-party text or marks: '.mb_substr(implode(', ', $marks['marks']), 0, 300), round($spent + $cost, 6), $png);
             }
-            if (config('campaigns.banners.check_product')) {
+            $compare = $photo !== null && config('campaigns.banners.check_product');
+            if ($compare) {
                 $this->ensureTime();
             }
-            $match = config('campaigns.banners.check_product') ? $this->retried(fn () => $this->inspector->matchesProduct($png, 'image/png', $product, $photo)) : null;
+            $match = $compare ? $this->retried(fn () => $this->inspector->matchesProduct($png, 'image/png', $product, $photo)) : null;
             $cost += $match ? $this->costs->calculate($model, $match['input_tokens'], 0, $match['output_tokens']) : 0.0;
         } catch (VertexAIResponseException $exception) {
             throw new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), round($spent + $cost, 6));
@@ -216,7 +362,7 @@ class BannerReferenceImage
     private static function decode(string $bytes): ?\GdImage
     {
         $size = @getimagesizefromstring($bytes);
-        if (! $size || $size[0] * $size[1] > self::MAX_PIXELS) {
+        if (! $size || $size[0] * $size[1] > ProductImageImporter::MAX_PIXELS) {
             return null;
         }
         $image = @imagecreatefromstring($bytes);
