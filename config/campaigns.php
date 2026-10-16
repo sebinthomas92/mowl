@@ -55,7 +55,7 @@ return [
         'inspect_images' => env('BANNER_IMAGE_INSPECTION', true),
         'inspection_attempts' => (int) env('BANNER_INSPECTION_ATTEMPTS', 2),
         // An inspection normally answers in seconds; a stalled one must not eat the attempt's budget.
-        'inspection_timeout_seconds' => 45,
+        'inspection_timeout_seconds' => 30,
         // One banner attempt (generations plus inspections) stays under the 180s queue worker timeout;
         // a new round starts only with enough time left for a generation and an inspection.
         'time_budget_seconds' => 160,

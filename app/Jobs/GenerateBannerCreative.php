@@ -116,7 +116,7 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
                 'status' => 'retrying',
                 'estimated_cost' => round((float) $creative->estimated_cost + ($exception instanceof BannerAttemptFailed ? $exception->spentCost : 0.0), 6),
                 'error_code' => $exception instanceof VertexAIResponseException || $exception instanceof BannerAttemptFailed ? $exception->errorCode : class_basename($exception),
-                'error_message' => mb_substr($exception->getMessage(), 0, 2000),
+                'error_message' => mb_substr($exception->getMessage().$this->keepRejected($creative, $exception), 0, 2000),
             ]);
             $batchStatus->refresh($creative->batch->fresh());
 
@@ -124,6 +124,22 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
         }
 
         $this->syncContent($creative);
+    }
+
+    /** Stores the last rejected background (never shown to clients) so a rejection can be checked by eye. */
+    private function keepRejected(BannerCreative $creative, Throwable $exception): string
+    {
+        if (! $exception instanceof BannerAttemptFailed || $exception->rejectedImage === null) {
+            return '';
+        }
+        $path = "campaign-banners/{$creative->batch->workspace_id}/{$creative->campaign_pack_id}/{$creative->id}/rejected-{$creative->attempts}.png";
+        try {
+            return Storage::disk($creative->disk)->put($path, $exception->rejectedImage) !== false ? " (rejected background: {$path})" : '';
+        } catch (Throwable $storageError) {
+            report($storageError);
+
+            return '';
+        }
     }
 
     /** The finished banner becomes a content item; a sync failure must not fail the banner. */
@@ -151,7 +167,8 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
             $creative->update([
                 'status' => 'failed',
                 'error_code' => $exception instanceof VertexAIResponseException || $exception instanceof BannerAttemptFailed ? $exception->errorCode : ($exception ? class_basename($exception) : $creative->error_code),
-                'error_message' => $exception ? mb_substr($exception->getMessage(), 0, 2000) : $creative->error_message,
+                // The attempt already wrote this message, possibly with the rejected background's path appended.
+                'error_message' => $exception && ! str_starts_with((string) $creative->error_message, mb_substr($exception->getMessage(), 0, 2000)) ? mb_substr($exception->getMessage(), 0, 2000) : $creative->error_message,
                 'completed_at' => now(),
             ]);
             app(BannerBatchStatus::class)->refresh($creative->batch->fresh());

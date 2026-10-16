@@ -6,11 +6,12 @@ use RuntimeException;
 
 /**
  * A banner attempt failed after it had already paid for generation, for example because every
- * background showed third-party text. Carries that spend so it is still recorded on the banner.
+ * background showed third-party text. Carries that spend so it is still recorded on the banner, and
+ * the last rejected background so the rejection can be checked by eye.
  */
 final class BannerAttemptFailed extends RuntimeException
 {
-    public function __construct(public readonly string $errorCode, string $message, public readonly float $spentCost)
+    public function __construct(public readonly string $errorCode, string $message, public readonly float $spentCost, public readonly ?string $rejectedImage = null)
     {
         parent::__construct($message);
     }
