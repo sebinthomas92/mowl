@@ -299,8 +299,8 @@ class ProductPhotoCutoutTest extends TestCase
             imageline($image, 305, $y, 321, $y, imagecolorallocate($image, (int) (240 * $f), (int) (232 * $f), (int) (218 * $f)));
         }
 
-        // A lit slit as light as the backdrop, opening at the top of the pages.
-        imagefilledrectangle($image, 379, 290, 386, 330, imagecolorallocate($image, 240, 232, 218));
+        // A lit slit near the backdrop's colour, opening at the top of the pages.
+        imagefilledrectangle($image, 379, 290, 386, 330, imagecolorallocate($image, 232, 222, 206));
         // A wider fold within the backdrop tolerance (but not as close as an opening), from the top edge.
         imagefilledrectangle($image, 410, 290, 433, 370, imagecolorallocate($image, 232, 222, 206));
 
@@ -316,6 +316,27 @@ class ProductPhotoCutoutTest extends TestCase
         foreach ([45, 65, 85] as $y) {
             $this->assertSame(0, (imagecolorat($cutout, 313 - 150, $y) >> 24) & 127, "gutter row {$y}");
         }
+    }
+
+    public function test_a_narrow_slot_open_to_the_backdrop_stays_clear(): void
+    {
+        // A U-shaped stand: the backdrop between its arms is real backdrop, not a lit surface.
+        $image = self::backdrop();
+        $red = imagecolorallocate($image, 214, 72, 38);
+        imagefilledrectangle($image, 120, 100, 180, 340, $red);
+        imagefilledrectangle($image, 200, 100, 260, 340, $red);
+        imagefilledrectangle($image, 120, 300, 260, 340, $red);
+        // And a slit a few pixels wide, cut into one arm from the top.
+        imagefilledrectangle($image, 228, 100, 229, 200, imagecolorat($image, 228, 99));
+
+        $cutter = new ProductPhotoCutout;
+        $png = $cutter->cut(self::encode($image));
+
+        $this->assertNotNull($png, (string) $cutter->reason);
+        $cutout = imagecreatefromstring($png);
+        $this->assertSame(127, (imagecolorat($cutout, (190 - 120) * 2, (150 - 100) * 2) >> 24) & 127);
+        $this->assertSame(0, (imagecolorat($cutout, (150 - 120) * 2, (150 - 100) * 2) >> 24) & 127);
+        $this->assertSame(127, (imagecolorat($cutout, (228 - 120) * 2 + 1, (150 - 100) * 2) >> 24) & 127);
     }
 
     public function test_a_corner_grazing_the_frame_is_kept_but_a_cropped_side_is_not(): void

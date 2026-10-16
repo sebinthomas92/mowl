@@ -224,9 +224,10 @@ class ProductPhotoCutout
         // A product surface close to the backdrop colour (a page fold on the Kindle Stand, within the
         // tolerance of its beige) lets the fill run down into the product through a channel. Backdrop
         // is open space: only the part a disc of CHANNEL_RADIUS fits into, and what that disc sweeps,
-        // stays backdrop; narrower channels reached from it are product.
+        // stays backdrop; narrower channels reached from it are product, unless they are as close to the
+        // backdrop colour as the border is (a real slot between a fork's tines or a U-shaped stand's arms).
         if (! $alphaOnly) {
-            $mask = $this->opened($mask, $width, $height, max(4, (int) round(self::CHANNEL_RADIUS * min($width, $height))));
+            $mask = $this->opened($mask, $near, $typical + self::HOLE_MATCH, $width, $height, max(4, (int) round(self::CHANNEL_RADIUS * min($width, $height))));
         }
 
         // Backdrop seen through a closed opening (a mug or bag handle, a ring) is not reached from the
@@ -350,10 +351,13 @@ class ProductPhotoCutout
                 }
                 if ($last >= 0 && $x - $last - 1 > 0 && $x - $last - 1 <= self::NOTCH_WIDTH) {
                     $open = false;
+                    $sum = 0;
                     for ($gap = $last + 1; $gap < $x; $gap++) {
                         $open = $open || $openings[$y * $width + $gap] === "\1";
+                        $sum += ord($near[$y * $width + $gap]);
                     }
-                    if (! $open) {
+                    // A gap as close to the backdrop as the border is a real slot, not a lit gutter.
+                    if (! $open && $sum / ($x - $last - 1) > $typical + self::HOLE_MATCH) {
                         for ($gap = $last + 1; $gap < $x; $gap++) {
                             $mask[$y * $width + $gap] = "\0";
                         }
@@ -724,7 +728,7 @@ class ProductPhotoCutout
      * A morphological opening of the backdrop (mask "\1"): eroded by $radius, then grown back by it,
      * both with chessboard distances. Outside the frame counts as backdrop.
      */
-    private function opened(string $mask, int $width, int $height, int $radius): string
+    private function opened(string $mask, string $near, float $plain, int $width, int $height, int $radius): string
     {
         $count = $width * $height;
         $far = chr(255);
@@ -740,9 +744,34 @@ class ProductPhotoCutout
             $centres .= ord($inside[$index]) > $radius ? "\0" : $far;
         }
         $centres = $this->distances($centres, $width, $height);
+        $seen = '';
         for ($index = 0; $index < $count; $index++) {
-            if ($mask[$index] === "\1" && ord($centres[$index]) > $radius) {
-                $mask[$index] = "\0";
+            $seen .= $mask[$index] === "\1" && ord($centres[$index]) > $radius ? "\1" : "\0";
+        }
+        for ($start = 0; $start < $count; $start++) {
+            if ($seen[$start] !== "\1") {
+                continue;
+            }
+            $seen[$start] = "\2";
+            $stack = [$start];
+            $channel = [];
+            $sum = 0;
+            while ($stack !== []) {
+                $index = array_pop($stack);
+                $channel[] = $index;
+                $sum += ord($near[$index]);
+                $x = $index % $width;
+                foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
+                    if ($next >= 0 && $next < $count && $seen[$next] === "\1") {
+                        $seen[$next] = "\2";
+                        $stack[] = $next;
+                    }
+                }
+            }
+            if ($sum / count($channel) > $plain) {
+                foreach ($channel as $index) {
+                    $mask[$index] = "\0";
+                }
             }
         }
 
