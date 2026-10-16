@@ -189,7 +189,8 @@ class ProductPageFetcher
             ?: $this->metaProperty($xpath, 'og:description')
             ?: data_get($productData, 'description');
         $canonical = $xpath->query('//link[translate(@rel,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="canonical"]')->item(0)?->getAttribute('href');
-        $images = $this->extractImageUrls($xpath, $productData, $resolvedUrl);
+        $gallery = $this->galleryImageUrls($xpath, $productData, $resolvedUrl);
+        $images = $this->extractImageUrls($xpath, $gallery, $resolvedUrl);
 
         foreach ($xpath->query('//script|//style|//noscript|//svg|//template') as $node) {
             $node->parentNode?->removeChild($node);
@@ -206,6 +207,9 @@ class ProductPageFetcher
             'content' => $content,
             'content_hash' => hash('sha256', $html),
             'images' => $images,
+            // Only the product's own photos (structured data and the store's product gallery), never
+            // the page's share image or related products, which can show another variant or props.
+            'gallery_images' => $gallery,
             'product_truth' => array_filter([
                 'name' => data_get($productData, 'name') ?: $title,
                 'description' => data_get($productData, 'description') ?: $description,
@@ -218,16 +222,19 @@ class ProductPageFetcher
         ];
     }
 
-    private function extractImageUrls(DOMXPath $xpath, array $productData, string $resolvedUrl): array
+    /**
+     * The product's own photos come first: a share (og:image) image is often a styled lifestyle shot,
+     * sometimes of another variant, and was picked over the store's product gallery before.
+     */
+    private function extractImageUrls(DOMXPath $xpath, array $gallery, string $resolvedUrl): array
     {
-        $candidates = [];
+        $candidates = $gallery;
         foreach (['og:image', 'og:image:secure_url', 'twitter:image', 'twitter:image:src'] as $property) {
             $value = $this->metaProperty($xpath, $property) ?: $this->metaContent($xpath, $property);
             if ($value) {
                 $candidates[] = $value;
             }
         }
-        $this->appendProductImages($candidates, $productData['image'] ?? null);
 
         foreach ($xpath->query('//img') as $node) {
             $source = $node->getAttribute('src') ?: $node->getAttribute('data-src');
@@ -246,6 +253,28 @@ class ProductPageFetcher
             }
         }
 
+        return $this->cleanImageUrls($candidates, $resolvedUrl);
+    }
+
+    /** Product structured data images, then the full-size photos of a WooCommerce product gallery. */
+    private function galleryImageUrls(DOMXPath $xpath, array $productData, string $resolvedUrl): array
+    {
+        $candidates = [];
+        $this->appendProductImages($candidates, $productData['image'] ?? null);
+        foreach ($xpath->query('//*[contains(concat(" ", normalize-space(@class), " "), " woocommerce-product-gallery__image ")]') as $node) {
+            $link = $xpath->query('.//a[@href]', $node)->item(0)?->getAttribute('href');
+            $image = $xpath->query('.//img', $node)->item(0);
+            $source = $image?->getAttribute('data-large_image') ?: $link ?: $node->getAttribute('data-thumb');
+            if ($source) {
+                $candidates[] = $source;
+            }
+        }
+
+        return $this->cleanImageUrls($candidates, $resolvedUrl);
+    }
+
+    private function cleanImageUrls(array $candidates, string $resolvedUrl): array
+    {
         return collect($candidates)
             ->map(fn (string $candidate): ?string => $this->resolveImageUrl($candidate, $resolvedUrl))
             ->filter()

@@ -57,9 +57,34 @@ class BannerComposerTest extends TestCase
         ));
         $slot = BannerComposer::productSlot('bottom_panel');
         $rgb = fn (int $x, int $y) => [(imagecolorat($banner, $x, $y) >> 16) & 255, (imagecolorat($banner, $x, $y) >> 8) & 255, imagecolorat($banner, $x, $y) & 255];
-        // The product's own colour at the slot, not a redrawn one, and no green anywhere around it.
-        $this->assertSame([210, 70, 40], $rgb($slot['x'], $slot['base'] - 60));
+        // The product's own colour at the slot (lightly matched to the scene), not a redrawn one, and no
+        // green anywhere around it.
+        foreach ([210, 70, 40] as $channel => $value) {
+            $this->assertEqualsWithDelta($value, $rgb($slot['x'], $slot['base'] - 60)[$channel], $value * 0.08);
+        }
         $this->assertSame([40, 120, 200], $rgb(60, 200));
+    }
+
+    public function test_a_bright_studio_product_is_dimmed_toward_a_darker_scene_within_limits(): void
+    {
+        $product = imagecreatetruecolor(200, 120);
+        imagefill($product, 0, 0, imagecolorallocate($product, 245, 245, 245));
+        ob_start();
+        imagepng($product);
+        $cutout = (string) ob_get_clean();
+
+        $banner = imagecreatefromstring(app(BannerComposer::class)->compose(
+            $this->image(1080, 1350, [60, 60, 60]),
+            new Brand(['name' => 'Exact Brand', 'primary_color' => '#F4B942']),
+            new BannerCreative(['layout' => 'bottom_panel', 'headline' => 'A stand', 'cta' => 'Shop now']),
+            $cutout,
+        ));
+        $slot = BannerComposer::productSlot('bottom_panel');
+        $red = (imagecolorat($banner, $slot['x'], $slot['base'] - 100) >> 16) & 255;
+
+        // Dimmed so it does not glow against the scene, but never by more than about a fifth.
+        $this->assertLessThan(240, $red);
+        $this->assertGreaterThanOrEqual((int) floor(245 * 0.82 * 0.95), $red);
     }
 
     public function test_a_keyed_image_that_lost_the_product_or_its_key_is_not_a_cutout(): void

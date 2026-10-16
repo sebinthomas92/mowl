@@ -22,14 +22,42 @@ HTML;
         $this->assertSame('https://93.184.216.34/products/tote', $page['canonical_url']);
         $this->assertSame('TOTE-1', $page['product_truth']['sku']);
         $this->assertSame('89', $page['product_truth']['price']);
+        // The product's own photo comes before the page's share image.
         $this->assertSame([
-            'https://93.184.216.34/media/tote-hero.webp',
             'https://93.184.216.34/products/tote-detail.png',
+            'https://93.184.216.34/media/tote-hero.webp',
             'https://93.184.216.34/products/tote-large.jpg',
         ], $page['images']);
+        $this->assertSame(['https://93.184.216.34/products/tote-detail.png'], $page['gallery_images']);
         $this->assertStringContainsString('Roomy and easy to carry.', $page['content']);
         $this->assertStringNotContainsString('ignore me', $page['content']);
         $this->assertSame(hash('sha256', $html), $page['content_hash']);
+    }
+
+    public function test_woocommerce_gallery_photos_are_the_products_own_and_come_before_the_share_image(): void
+    {
+        $html = <<<'HTML'
+<html><head><title>Kindle Stand</title><meta property="og:image" content="/wp-content/uploads/styled-scene.webp"></head><body>
+<div class="woocommerce-product-gallery">
+<div data-thumb="/wp-content/uploads/stand-1-100x100.jpg" class="woocommerce-product-gallery__image"><a href="/wp-content/uploads/stand-1.jpg"><img src="/wp-content/uploads/stand-1-600x600.jpg" data-large_image="/wp-content/uploads/stand-1.jpg"></a></div>
+<div data-thumb="/wp-content/uploads/studio-100x100.jpg" class="woocommerce-product-gallery__image"><a href="/wp-content/uploads/studio.jpg"><img src="/wp-content/uploads/studio-600x600.jpg"></a></div>
+</div>
+<section class="related products"><img src="/wp-content/uploads/other-product.jpg"></section>
+</body></html>
+HTML;
+        Http::fake(['93.184.216.34/*' => Http::response($html, 200, ['Content-Type' => 'text/html; charset=UTF-8'])]);
+
+        $page = app(ProductPageFetcher::class)->fetch('https://93.184.216.34/product/kindle-stand');
+
+        $this->assertSame([
+            'https://93.184.216.34/wp-content/uploads/stand-1.jpg',
+            'https://93.184.216.34/wp-content/uploads/studio.jpg',
+        ], $page['gallery_images']);
+        $this->assertSame([
+            'https://93.184.216.34/wp-content/uploads/stand-1.jpg',
+            'https://93.184.216.34/wp-content/uploads/studio.jpg',
+            'https://93.184.216.34/wp-content/uploads/styled-scene.webp',
+        ], array_slice($page['images'], 0, 3));
     }
 
     public function test_it_downloads_and_validates_a_product_image(): void

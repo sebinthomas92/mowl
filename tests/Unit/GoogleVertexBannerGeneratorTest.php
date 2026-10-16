@@ -6,6 +6,7 @@ use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\BannerCreative;
 use App\Models\MediaAsset;
+use App\Models\SourceSnapshot;
 use App\Services\BannerCopySelector;
 use App\Services\BannerReferenceImage;
 use App\Services\GoogleVertexBannerGenerator;
@@ -260,6 +261,109 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $this->assertCount(1, $vertex[2]['contents'][0]['parts']);
         $this->assertStringContainsString('/models/gemini-3.5-flash:generateContent', $vertex[3]->url());
         $this->assertCount(2, $vertex[3]['contents'][0]['parts']);
+    }
+
+    public function test_a_studio_product_photo_is_cut_out_from_its_own_pixels_without_a_redraw(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.jpg', ProductPhotoCutoutTest::studio());
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        config()->set('campaigns.banners.check_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $this->fakeVertex(['banner-background']);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
+
+        $this->assertSame('banner-background', $result->imageBytes);
+        $this->assertStudioCutout($result->productCutout);
+        // Only the cutout's text check, the scene and the scene's text check: no redraw, no AI product match.
+        $vertex = collect(Http::recorded())->map(fn (array $pair) => $pair[0])
+            ->filter(fn (Request $request) => str_contains($request->url(), 'aiplatform.googleapis.com'))->values();
+        $this->assertSame(['gemini-3.5-flash', 'gemini-3.1-flash-image', 'gemini-3.5-flash'], $vertex->map(fn (Request $request) => str_contains($request->url(), 'flash-image') ? 'gemini-3.1-flash-image' : 'gemini-3.5-flash')->all());
+    }
+
+    public function test_a_studio_shot_from_the_products_gallery_is_used_when_the_imported_photo_is_a_styled_scene(): void
+    {
+        Storage::fake('local');
+        $styled = imagecreatetruecolor(300, 300);
+        for ($x = 0; $x < 300; $x += 20) {
+            imagefilledrectangle($styled, $x, 0, $x + 9, 299, imagecolorallocate($styled, 140, 100, 60));
+        }
+        ob_start();
+        imagepng($styled);
+        Storage::disk('local')->put('product.png', (string) ob_get_clean());
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $page = '<html><head><title>Stand</title></head><body><div class="woocommerce-product-gallery__image"><a href="/uploads/styled.png"><img src="/uploads/styled-300.png"></a></div>'
+            .'<div class="woocommerce-product-gallery__image"><a href="/uploads/studio.jpg"><img src="/uploads/studio-300.jpg"></a></div></body></html>';
+        Http::fake([
+            '93.184.216.34/product/stand' => Http::response($page, 200, ['Content-Type' => 'text/html']),
+            '93.184.216.34/uploads/studio.jpg' => Http::response(ProductPhotoCutoutTest::studio(), 200, ['Content-Type' => 'image/jpeg']),
+            '93.184.216.34/uploads/styled.png' => Http::response(Storage::disk('local')->get('product.png'), 200, ['Content-Type' => 'image/png']),
+        ]);
+        $this->fakeVertex(['banner-background']);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/og-share.png']]);
+        $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+
+        $this->assertStudioCutout($result->productCutout);
+        Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'flash-image') && count($request['contents'][0]['parts']) > 1);
+    }
+
+    public function test_a_studio_shot_with_readable_text_is_skipped_and_its_check_still_costed(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.jpg', ProductPhotoCutoutTest::studio());
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $answers = [self::inspection(['THE HOBBIT']), self::inspection([]), self::inspection([])];
+        $images = [self::image(self::keyed()), self::image('banner-background')];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$answers, &$images) {
+                return Http::response(str_contains($request->url(), 'gemini-3.5-flash:') ? array_shift($answers) : array_shift($images));
+            },
+        ]);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
+
+        // With no other studio shot, the product is lifted out of the photo by the image model instead.
+        $this->assertSame([20, 16], array_slice(getimagesizefromstring((string) $result->productCutout), 0, 2));
+        $calculator = app(ProviderCostCalculator::class);
+        $this->assertEqualsWithDelta(
+            $calculator->calculateBanner(400, 10, 1290) + 3 * $calculator->calculate('gemini-3.5-flash', 300, 0, 12),
+            $result->additionalCost,
+            0.000001,
+        );
+    }
+
+    private function fakeVertex(array $scenes): void
+    {
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$scenes) {
+                return str_contains($request->url(), 'gemini-3.5-flash:')
+                    ? Http::response(self::inspection([]))
+                    : Http::response(self::image(array_shift($scenes)));
+            },
+        ]);
+    }
+
+    private function assertStudioCutout(?string $png): void
+    {
+        $cutout = imagecreatefromstring((string) $png);
+        // The photo's own red-orange base, trimmed to the stand.
+        $base = imagecolorat($cutout, intdiv(imagesx($cutout), 2), imagesy($cutout) - 15);
+        $this->assertEqualsWithDelta(214, ($base >> 16) & 255, 8);
+        $this->assertSame(127, (imagecolorat($cutout, 0, 0) >> 24) & 127);
     }
 
     public function test_a_stored_clean_reference_is_reused_without_another_cleanup_call(): void
