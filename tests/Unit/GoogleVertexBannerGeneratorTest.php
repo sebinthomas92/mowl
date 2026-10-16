@@ -1045,6 +1045,24 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $this->assertEqualsWithDelta($calculator->calculate('gemini-3.5-flash', 300, 0, 2048) + $calculator->calculate('gemini-3.5-flash', 300, 0, 12), $result->additionalCost, 0.000001);
     }
 
+    public function test_a_product_match_cut_off_at_its_output_cap_is_a_billed_mismatch_not_an_error(): void
+    {
+        $this->configureGoogle();
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => Http::response(['candidates' => [['finishReason' => 'MAX_TOKENS', 'content' => ['parts' => [['text' => '{"matches": tr']]]]], 'usageMetadata' => ['promptTokenCount' => 500, 'candidatesTokenCount' => 2000, 'thoughtsTokenCount' => 48]]),
+        ]);
+
+        $match = app(BannerImageInspector::class)->matchesProduct('image', 'image/png', 'Kindle Stand', ['mimeType' => 'image/png', 'data' => base64_encode('photo')]);
+
+        $this->assertFalse($match['matches']);
+        $this->assertFalse($match['split']);
+        $this->assertSame([500, 2048], [$match['input_tokens'], $match['output_tokens']]);
+    }
+
     public function test_the_scene_checks_resting_spot_is_passed_on_for_the_cutout(): void
     {
         Storage::fake('local');

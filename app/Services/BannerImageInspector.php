@@ -140,6 +140,16 @@ class BannerImageInspector
         ]);
 
         $json = $response->json();
+        if ($this->cutShort($json)) {
+            // A comparison that ran past the cap gave no verdict; the image is redrawn, and the check billed.
+            return [
+                'matches' => false,
+                'differences' => 'The product check ran too long to give an answer.',
+                'split' => false,
+                'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
+                'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0) + (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
+            ];
+        }
         $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
         if (! is_array($decoded) || ! is_bool($decoded['matches'] ?? null) || ! is_bool($decoded['split'] ?? null)) {
             throw new VertexAIResponseException('vertex_invalid_inspection', 'Vertex AI returned no product match check.', true);
