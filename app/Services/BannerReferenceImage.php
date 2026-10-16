@@ -20,6 +20,9 @@ class BannerReferenceImage
     /** Bump when the cleanup prompt changes, so stored copies made by the old prompt are redone. */
     private const PROMPT_VERSION = 1;
 
+    /** The lock outlives the cleanup call plus Google sign-in (OIDC, STS and IAM, up to 75s) before it. */
+    private const LOCK_EXTRA_SECONDS = 120;
+
     public function __construct(private GoogleVertexAIClient $client, private ProviderCostCalculator $costs) {}
 
     /**
@@ -39,7 +42,7 @@ class BannerReferenceImage
         }
 
         try {
-            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + 30)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds, $key) {
+            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + self::LOCK_EXTRA_SECONDS)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds, $key) {
                 if ($cached = $this->cached($asset->refresh(), $key)) {
                     return $cached;
                 }
