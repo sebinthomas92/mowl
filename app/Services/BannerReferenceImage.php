@@ -130,10 +130,11 @@ class BannerReferenceImage
         $spent = 0.0;
         foreach ($this->studioCutouts($asset, $photo) as $studio) {
             try {
-                $spent += $this->check($studio['png'], $product, $brand, null, $spent);
+                $spent += $this->check($studio['png'], $product, $brand, $studio['reference'], $spent, studio: true);
             } catch (BannerAttemptFailed $exception) {
-                // A studio shot with readable text (a device screen in the stand) is skipped for the next one.
-                if ($exception->errorCode !== 'banner_reference_rejected') {
+                // A studio shot with readable text (a device screen in the stand), other objects or another
+                // variant of the product is skipped for the next one.
+                if (! in_array($exception->errorCode, ['banner_reference_rejected', 'banner_product_mismatch'], true)) {
                     throw $exception;
                 }
                 $spent = $exception->spentCost;
@@ -151,14 +152,16 @@ class BannerReferenceImage
 
     /**
      * The imported photo first, then the product's own gallery photos from its page (a share image is
-     * often a styled scene, sometimes of another variant).
+     * often a styled scene, sometimes of another variant). A gallery can also show other variants, so a
+     * later gallery photo is compared with the store's main product photo (the gallery's first).
      *
-     * @return \Generator<int, array{png: string, source: string}>
+     * @return \Generator<int, array{png: string, source: string, reference: array{mimeType: string, data: string}|null}>
      */
     private function studioCutouts(MediaAsset $asset, string $photo): \Generator
     {
+        $source = (string) data_get($asset->metadata, 'source_url');
         if ($png = $this->cutter->cut($photo)) {
-            yield ['png' => $png, 'source' => (string) data_get($asset->metadata, 'source_url', $asset->path)];
+            yield ['png' => $png, 'source' => $source ?: $asset->path, 'reference' => null];
         }
         $page = $asset->sourceSnapshot?->url;
         if (! $page) {
@@ -171,8 +174,8 @@ class BannerReferenceImage
 
             return;
         }
-        $seen = [(string) data_get($asset->metadata, 'source_url')];
-        foreach (array_slice(array_values(array_diff($gallery, $seen)), 0, self::MAX_GALLERY_PHOTOS) as $url) {
+        $main = ($gallery[0] ?? null) === $source ? ['mimeType' => (string) $asset->mime_type, 'data' => base64_encode($photo)] : null;
+        foreach (array_slice(array_values(array_diff($gallery, [$source])), 0, self::MAX_GALLERY_PHOTOS) as $url) {
             // A download is only started while it and the cutout's marks check still fit the deadline.
             if (! $this->hasTime((int) config('campaigns.source.timeout_seconds'))) {
                 break;
@@ -182,8 +185,10 @@ class BannerReferenceImage
             } catch (Throwable) {
                 continue;
             }
+            $reference = $main;
+            $main ??= ['mimeType' => $image['mime_type'], 'data' => base64_encode($image['bytes'])];
             if ($png = $this->cutter->cut($image['bytes'])) {
-                yield ['png' => $png, 'source' => $image['url']];
+                yield ['png' => $png, 'source' => $image['url'], 'reference' => $reference];
             }
         }
     }
@@ -232,11 +237,12 @@ class BannerReferenceImage
      * The cutout is every banner's product, so it is checked once, before it is kept: no third-party text
      * (a Kindle screen left in) and the same object, colours and proportions as the store photo.
      *
-     * A studio cutout is the photo's own pixels, so only its marks are checked ($photo null).
+     * A studio cutout is the photo's own pixels: it is also asked for other objects, and compared only
+     * when it comes from a later gallery photo ($photo is then the store's main product photo).
      *
      * @param  array{mimeType: string, data: string}|null  $photo
      */
-    private function check(string $png, string $product, string $brand, ?array $photo, float $spent): float
+    private function check(string $png, string $product, string $brand, ?array $photo, float $spent, bool $studio = false): float
     {
         if (! config('campaigns.banners.inspect_images')) {
             return 0.0;
@@ -245,9 +251,9 @@ class BannerReferenceImage
         $cost = 0.0;
         try {
             $this->ensureTime();
-            $marks = $this->retried(fn () => $this->inspector->inspect($png, 'image/png', $product, $brand, cutout: $photo === null));
+            $marks = $this->retried(fn () => $this->inspector->inspect($png, 'image/png', $product, $brand, cutout: $studio));
             $cost += $this->costs->calculate($model, $marks['input_tokens'], 0, $marks['output_tokens']);
-            if ($marks['other_objects'] !== []) {
+            if ($studio && $marks['other_objects'] !== []) {
                 // A studio shot with a vase or candle beside the product, joined to it in the cutout.
                 throw new BannerAttemptFailed('banner_reference_rejected', 'The product photo showed other objects: '.mb_substr(implode(', ', $marks['other_objects']), 0, 300), round($spent + $cost, 6), $png);
             }

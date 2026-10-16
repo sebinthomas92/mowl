@@ -40,6 +40,24 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertEqualsWithDelta(171, getimagesizefromstring($png)[1], 4);
     }
 
+    public function test_a_transparent_png_keeps_its_own_soft_edges(): void
+    {
+        $image = imagecreatetruecolor(300, 300);
+        imagealphablending($image, false);
+        imagesavealpha($image, true);
+        imagefill($image, 0, 0, imagecolorallocatealpha($image, 0, 0, 0, 127));
+        imagefilledrectangle($image, 100, 100, 200, 180, imagecolorallocatealpha($image, 214, 72, 38, 0));
+        imagefilledrectangle($image, 99, 100, 99, 180, imagecolorallocatealpha($image, 214, 72, 38, 90));
+
+        $png = (new ProductPhotoCutout)->cut(self::encode($image));
+
+        $this->assertNotNull($png);
+        $cutout = imagecreatefromstring($png);
+        $this->assertSame(0, (imagecolorat($cutout, 50, 40) >> 24) & 127);
+        // The half-clear edge column stays mostly clear instead of turning solid.
+        $this->assertGreaterThanOrEqual(90, (imagecolorat($cutout, 0, 40) >> 24) & 127);
+    }
+
     public function test_a_styled_scene_or_a_set_with_props_is_not_cut_out(): void
     {
         $cutter = new ProductPhotoCutout;

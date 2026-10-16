@@ -49,6 +49,8 @@ class ProductPhotoCutout
             return null;
         }
         imagepalettetotruecolor($source);
+        imagealphablending($source, false);
+        imagesavealpha($source, true);
         $factor = min(1, self::MAX_SIDE / max(imagesx($source), imagesy($source)));
         $image = $factor < 1
             ? imagescale($source, max(1, (int) round(imagesx($source) * $factor)), max(1, (int) round(imagesy($source) * $factor)), IMG_BICUBIC)
@@ -83,12 +85,14 @@ class ProductPhotoCutout
             for ($x = 0; $x < $width; $x++) {
                 if ($edge || $x < $ring || $x >= $width - $ring) {
                     $border[] = $y * $width + $x;
-                    $borderColours[] = imagecolorat($image, $x, $y) & 0xFFFFFF;
+                    $borderColours[] = imagecolorat($image, $x, $y);
                 }
             }
         }
-        $backdrop = $this->median($borderColours);
-        $distances = array_map(fn (int $colour) => $this->distance($colour, $backdrop), $borderColours);
+        // A transparent PNG's clear pixels are backdrop whatever colour they hold.
+        $opaque = array_values(array_filter($borderColours, fn (int $colour) => ! self::clear($colour)));
+        $backdrop = $this->median(array_map(fn (int $colour) => $colour & 0xFFFFFF, $opaque ?: $borderColours));
+        $distances = array_map(fn (int $colour) => self::clear($colour) ? 0.0 : $this->distance($colour & 0xFFFFFF, $backdrop), $borderColours);
         sort($distances);
         $plain = count(array_filter($distances, fn (float $distance) => $distance <= self::PLAIN_DISTANCE)) / count($distances);
         if ($plain < self::MIN_PLAIN_BORDER) {
@@ -104,7 +108,8 @@ class ProductPhotoCutout
         $near = '';
         for ($y = 0; $y < $height; $y++) {
             for ($x = 0; $x < $width; $x++) {
-                $near .= chr((int) min(255, round($this->distance(imagecolorat($image, $x, $y) & 0xFFFFFF, $backdrop))));
+                $colour = imagecolorat($image, $x, $y);
+                $near .= self::clear($colour) ? "\0" : chr((int) min(255, round($this->distance($colour & 0xFFFFFF, $backdrop))));
             }
         }
 
@@ -197,6 +202,8 @@ class ProductPhotoCutout
                     // Edge pixels are part backdrop: blend them out by how close they are to it.
                     $alpha = max(0.0, min(1.0, (ord($near[$index]) - $tolerance) / self::EDGE_RAMP));
                 }
+                // A transparent PNG's own soft edges keep their transparency.
+                $alpha *= (127 - (($c >> 24) & 127)) / 127;
                 imagesetpixel($out, $x - $left, $y - $top, imagecolorallocatealpha($out, ($c >> 16) & 255, ($c >> 8) & 255, $c & 255, (int) round(127 * (1 - $alpha))));
             }
         }
@@ -309,6 +316,11 @@ class ProductPhotoCutout
         $yellowBlue = (($ar + $ag) / 2 - $ab) - (($br + $bg) / 2 - $bb);
 
         return sqrt($light * $light + 2 * $redGreen * $redGreen + 2 * $yellowBlue * $yellowBlue);
+    }
+
+    private static function clear(int $colour): bool
+    {
+        return (($colour >> 24) & 127) >= 120;
     }
 
     /** @return array{float, float} */
