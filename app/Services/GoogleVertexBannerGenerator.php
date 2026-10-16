@@ -15,12 +15,13 @@ use Illuminate\Support\Sleep;
 
 class GoogleVertexBannerGenerator implements BannerGenerator
 {
-    public function __construct(private GoogleVertexAIClient $client, private BannerImageInspector $inspector, private ProviderCostCalculator $costs) {}
+    public function __construct(private GoogleVertexAIClient $client, private BannerImageInspector $inspector, private ProviderCostCalculator $costs, private BannerReferenceImage $references) {}
 
     /**
-     * Generates the background, then rejects and regenerates any image with readable third-party
-     * text or marks (a real book cover on the e-reader, a magazine spine). Every round's image tokens
-     * are kept, and inspections are priced at the inspector model's own rates.
+     * Generates the background from a prop-free copy of the product photo, then rejects and regenerates
+     * any image with readable third-party text or marks (a real book cover on the e-reader, a magazine
+     * spine). Every round's image tokens are kept; the cleanup and inspections are priced at their own
+     * models' rates.
      */
     public function generate(BannerCreative $creative, Collection $productImages): BannerGenerationResult
     {
@@ -28,7 +29,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         $product = (string) ($creative->campaignPack?->product?->name ?? '');
         $brand = (string) ($creative->campaignPack?->product?->brand?->name ?? '');
         $usage = [0, 0, 0];
-        $inspectionCost = 0.0;
+        $extraCost = 0.0;
         $marks = [];
         // Generation plus inspection, possibly twice, must finish inside the queue worker timeout
         // (180s) and the request function's limit, so the whole loop runs under one deadline.
@@ -38,7 +39,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             $deadline->start((int) config('campaigns.banners.time_budget_seconds'));
         }
         try {
-            return $this->generateWithin($deadline, $attempts, $creative, $productImages, $product, $brand, $usage, $inspectionCost, $marks);
+            return $this->generateWithin($deadline, $attempts, $creative, $productImages, $product, $brand, $usage, $extraCost, $marks);
         } finally {
             if ($ownsDeadline) {
                 $deadline->clear();
@@ -46,49 +47,66 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         }
     }
 
-    private function generateWithin(GenerationDeadline $deadline, int $attempts, BannerCreative $creative, Collection $productImages, string $product, string $brand, array $usage, float $inspectionCost, array $marks): BannerGenerationResult
+    private function generateWithin(GenerationDeadline $deadline, int $attempts, BannerCreative $creative, Collection $productImages, string $product, string $brand, array $usage, float $extraCost, array $marks): BannerGenerationResult
     {
-        $reference = $productImages->first();
+        $asset = $productImages->first();
+        try {
+            $reference = $asset ? $this->imagePart($asset)['inlineData'] : null;
+            if ($asset && config('campaigns.banners.clean_reference')) {
+                $clean = $this->rateLimited($deadline, (int) config('campaigns.banners.min_round_seconds'), fn () => $this->references->for($asset, $product));
+                $extraCost += $clean['cost'];
+                $reference = $clean['inlineData'];
+            }
+        } catch (VertexAIResponseException $exception) {
+            throw $this->withSpend($exception, $usage, $extraCost);
+        }
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             if ($attempt > 1 && ($deadline->remaining() ?? INF) < (int) config('campaigns.banners.min_round_seconds')) {
                 break;
             }
             try {
                 // A retried image still needs time for its inspection afterwards.
-                $result = $this->rateLimited($deadline, (int) config('campaigns.banners.min_round_seconds'), fn () => $this->generateOnce($creative, $productImages));
+                $result = $this->rateLimited($deadline, (int) config('campaigns.banners.min_round_seconds'), fn () => $this->generateOnce($creative, $reference));
                 $usage = [$usage[0] + $result->inputTokens, $usage[1] + $result->outputTextTokens, $usage[2] + $result->outputImageTokens];
                 if (! config('campaigns.banners.inspect_images')) {
-                    return $result;
+                    return $this->result($result, $usage, $extraCost);
                 }
-                $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $reference ? $this->imagePart($reference)['inlineData'] : null));
+                $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $reference));
             } catch (VertexAIResponseException $exception) {
-                // Images already generated in this attempt were paid for, even when a later call fails.
-                $spent = $this->spent($usage, $inspectionCost);
-                if ($spent > 0) {
-                    throw new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), $spent);
-                }
-
-                throw $exception;
+                throw $this->withSpend($exception, $usage, $extraCost);
             }
-            $inspectionCost += $this->costs->calculate((string) config('campaigns.google.model'), $inspection['input_tokens'], 0, $inspection['output_tokens']);
+            $extraCost += $this->costs->calculate((string) config('campaigns.google.model'), $inspection['input_tokens'], 0, $inspection['output_tokens']);
             $marks = $inspection['marks'];
             if ($marks === []) {
-                return new BannerGenerationResult(
-                    imageBytes: $result->imageBytes,
-                    mimeType: $result->mimeType,
-                    provider: $result->provider,
-                    model: $result->model,
-                    inputTokens: $usage[0],
-                    outputTextTokens: $usage[1],
-                    outputImageTokens: $usage[2],
-                    providerRequestId: $result->providerRequestId,
-                    providerLatencyMs: $result->providerLatencyMs,
-                    additionalCost: round($inspectionCost, 6),
-                );
+                return $this->result($result, $usage, $extraCost);
             }
         }
 
-        throw new BannerAttemptFailed('banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300), $this->spent($usage, $inspectionCost));
+        throw new BannerAttemptFailed('banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300), $this->spent($usage, $extraCost));
+    }
+
+    private function result(BannerGenerationResult $result, array $usage, float $extraCost): BannerGenerationResult
+    {
+        return new BannerGenerationResult(
+            imageBytes: $result->imageBytes,
+            mimeType: $result->mimeType,
+            provider: $result->provider,
+            model: $result->model,
+            inputTokens: $usage[0],
+            outputTextTokens: $usage[1],
+            outputImageTokens: $usage[2],
+            providerRequestId: $result->providerRequestId,
+            providerLatencyMs: $result->providerLatencyMs,
+            additionalCost: round($extraCost, 6),
+        );
+    }
+
+    /** Images and calls already made in this attempt were paid for, even when a later call fails. */
+    private function withSpend(VertexAIResponseException $exception, array $usage, float $extraCost): \Throwable
+    {
+        $spent = $this->spent($usage, $extraCost);
+
+        return $spent > 0 ? new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), $spent) : $exception;
     }
 
     /**
@@ -110,16 +128,17 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         }
     }
 
-    private function spent(array $usage, float $inspectionCost): float
+    private function spent(array $usage, float $extraCost): float
     {
-        return round($this->costs->calculateBanner($usage[0], $usage[1], $usage[2]) + $inspectionCost, 6);
+        return round($this->costs->calculateBanner($usage[0], $usage[1], $usage[2]) + $extraCost, 6);
     }
 
-    private function generateOnce(BannerCreative $creative, Collection $productImages): BannerGenerationResult
+    /** @param  array{mimeType: string, data: string}|null  $reference */
+    private function generateOnce(BannerCreative $creative, ?array $reference): BannerGenerationResult
     {
         $parts = [['text' => $creative->prompt]];
-        foreach ($productImages->take((int) config('campaigns.banners.max_input_images')) as $asset) {
-            $parts[] = $this->imagePart($asset);
+        if ($reference) {
+            $parts[] = ['inlineData' => $reference];
         }
 
         [$response, $latency] = $this->client->generateContent([

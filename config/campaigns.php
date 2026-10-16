@@ -54,6 +54,8 @@ return [
         // logos) and regenerated up to this many times per banner attempt.
         'inspect_images' => env('BANNER_IMAGE_INSPECTION', true),
         'inspection_attempts' => (int) env('BANNER_INSPECTION_ATTEMPTS', 2),
+        // An inspection normally answers in seconds; a stalled one must not eat the attempt's budget.
+        'inspection_timeout_seconds' => 45,
         // One banner attempt (generations plus inspections) stays under the 180s queue worker timeout;
         // a new round starts only with enough time left for a generation and an inspection.
         'time_budget_seconds' => 160,
@@ -62,6 +64,9 @@ return [
         'rate_limit_backoff_seconds' => [10, 25, 45],
         // Pause before a failed banner is re-run from the pack page (inside Vercel's 300s with the 240s budget).
         'retry_pause_seconds' => 30,
+        // The product photo is re-made once without props (books, magazines, devices) before it is used
+        // as the banner reference, since the image model copies everything a reference shows.
+        'clean_reference' => env('BANNER_CLEAN_REFERENCE', true),
         'disk' => env('BANNER_STORAGE_DISK', env('CAMPAIGN_MEDIA_DISK', 'local')),
         'prices_per_million' => [
             'input' => 0.50,

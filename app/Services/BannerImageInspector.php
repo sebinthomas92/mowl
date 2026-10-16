@@ -43,7 +43,7 @@ class BannerImageInspector
                     'required' => ['marks'],
                 ],
             ],
-        ], config('campaigns.google.model'));
+        ], config('campaigns.google.model'), (int) config('campaigns.banners.inspection_timeout_seconds', 45));
 
         $json = $response->json();
         $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
