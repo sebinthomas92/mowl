@@ -157,7 +157,8 @@ class BannerReferenceImage
      * The imported photo first, then the product's own gallery photos from its page (a share image is
      * often a styled scene, sometimes of another variant). A gallery can also show other variants, so a
      * photo other than the store's main product photo (the gallery's first) is compared with it,
-     * the imported photo included.
+     * the imported photo included. A trusted photo's cutout is compared with the photo it was cut
+     * from, so a part the cutter took for backdrop or shadow is caught before the cutout is used.
      *
      * @return \Generator<int, array{png: string, source: string, reference: array{mimeType: string, data: string}|null}>
      */
@@ -171,7 +172,7 @@ class BannerReferenceImage
         $gallery = [];
         if ($page) {
             try {
-                $gallery = $this->fetcher->fetch($page)['gallery_images'] ?? [];
+                $fetched = $this->fetcher->fetch($page);
             } catch (Throwable $exception) {
                 // Without the page there is no telling whether the import is the main photo: the redraw,
                 // which is checked against the imported photo as a whole, is used instead.
@@ -179,19 +180,31 @@ class BannerReferenceImage
 
                 return;
             }
+            // The owner approved the product the page showed then. A page that now names another
+            // product (a reused URL) is not that product's gallery. The SKU decides when both have one,
+            // so a retitled page of the same product still counts.
+            $approved = (array) ($asset->sourceSnapshot->extracted_truth ?? []);
+            $then = fn (string $field) => mb_strtolower(trim((string) ($approved[$field] ?? '')));
+            $now = fn (string $field) => mb_strtolower(trim((string) ($fetched['product_truth'][$field] ?? '')));
+            $field = $then('sku') !== '' && $now('sku') !== '' ? 'sku' : 'name';
+            if ($then($field) !== '' && $now($field) !== '' && $then($field) !== $now($field)) {
+                return;
+            }
+            $gallery = $fetched['gallery_images'] ?? [];
         }
+        $own = ['mimeType' => (string) $asset->mime_type, 'data' => base64_encode($photo)];
         // With no gallery to compare with, the imported photo is the reference the redraw would use too.
         if ($imported && ($gallery === [] || $gallery[0] === $source)) {
-            yield ['png' => $imported, 'source' => $source ?: $asset->path, 'reference' => null];
+            yield ['png' => $imported, 'source' => $source ?: $asset->path, 'reference' => $own];
             $imported = null;
         }
         if ($gallery === []) {
             return;
         }
-        $main = $gallery[0] === $source ? ['mimeType' => (string) $asset->mime_type, 'data' => base64_encode($photo)] : null;
+        $main = $gallery[0] === $source ? $own : null;
         foreach (array_slice(array_values(array_diff($gallery, [$source])), 0, self::MAX_GALLERY_PHOTOS) as $url) {
-            // Only the gallery's first photo is trusted unchecked: when it cannot be downloaded, a later
-            // one (possibly another variant) has nothing to be compared with.
+            // Only the gallery's first photo is trusted as the product: when it cannot be downloaded, a
+            // later one (possibly another variant) has nothing to be compared with.
             if ($main === null && $url !== $gallery[0]) {
                 break;
             }
@@ -206,14 +219,21 @@ class BannerReferenceImage
             } catch (Throwable) {
                 continue;
             }
+            // A photo too large to decode within memory cannot be shrunk for the inspector either, so it
+            // is neither cut out nor used as the main photo (the cutter skips it too).
+            $usable = $image['width'] * $image['height'] <= ProductImageImporter::MAX_PIXELS;
+            $own = ['mimeType' => $image['mime_type'], 'data' => base64_encode($image['bytes'])];
             $reference = $main;
-            $main ??= ['mimeType' => $image['mime_type'], 'data' => base64_encode($image['bytes'])];
+            $main ??= $usable ? $own : null;
+            if ($main === null) {
+                break;
+            }
             if ($imported) {
                 yield ['png' => $imported, 'source' => $source ?: $asset->path, 'reference' => $main];
                 $imported = null;
             }
-            if ($png = $this->cutter->cut($image['bytes'])) {
-                yield ['png' => $png, 'source' => $image['url'], 'reference' => $reference];
+            if ($usable && $png = $this->cutter->cut($image['bytes'])) {
+                yield ['png' => $png, 'source' => $image['url'], 'reference' => $reference ?? $own];
             }
         }
     }

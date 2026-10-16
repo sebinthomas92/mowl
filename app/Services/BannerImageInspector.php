@@ -94,11 +94,13 @@ class BannerImageInspector
             .'Ignore the background, lighting, camera angle and props in both images. '
             .'Separately, set split to true if the first image is divided into panels: a flat colour block, a split-screen, or a hard straight vertical or horizontal boundary between two areas that are not the same continuous scene. Return JSON only.';
         [$mimeType, $imageBytes] = $this->smaller($mimeType, $imageBytes);
+        // A store's full-size photo can exceed the model's inline image limit, so it is shrunk too.
+        [$photoMime, $photoBytes] = $this->smaller((string) $photo['mimeType'], (string) base64_decode((string) $photo['data']));
         [$response] = $this->client->generateContent([
             'contents' => [['role' => 'user', 'parts' => [
                 ['text' => $prompt],
                 ['inlineData' => ['mimeType' => $mimeType, 'data' => base64_encode($imageBytes)]],
-                ['inlineData' => $photo],
+                ['inlineData' => ['mimeType' => $photoMime, 'data' => base64_encode($photoBytes)]],
             ]]],
             'generationConfig' => [
                 'temperature' => 0,
@@ -133,6 +135,11 @@ class BannerImageInspector
      */
     private function smaller(string $mimeType, string $bytes): array
     {
+        $size = @getimagesizefromstring($bytes);
+        // Decoding a larger photo would not fit in memory; callers keep such photos out of checks.
+        if (! $size || $size[0] * $size[1] > ProductImageImporter::MAX_PIXELS) {
+            return [$mimeType, $bytes];
+        }
         $image = @imagecreatefromstring($bytes);
         if (! $image) {
             return [$mimeType, $bytes];

@@ -150,6 +150,21 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertSame(0, (imagecolorat(imagecreatefromstring($png), 100, 80) >> 24) & 127);
     }
 
+    public function test_a_transparent_png_with_a_slim_margin_is_not_too_large(): void
+    {
+        // A package filling over 85% of the canvas: the clear margin still separates it.
+        $image = imagecreatetruecolor(300, 300);
+        imagealphablending($image, false);
+        imagesavealpha($image, true);
+        imagefill($image, 0, 0, imagecolorallocatealpha($image, 0, 0, 0, 127));
+        imagefilledrectangle($image, 5, 5, 294, 294, imagecolorallocatealpha($image, 200, 60, 40, 0));
+
+        $png = (new ProductPhotoCutout)->cut(self::encode($image));
+
+        $this->assertNotNull($png);
+        $this->assertSame([580, 580], array_slice(getimagesizefromstring($png), 0, 2));
+    }
+
     public function test_a_camera_jpeg_is_turned_upright_before_cutting(): void
     {
         $image = self::backdrop();

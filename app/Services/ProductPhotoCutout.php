@@ -262,7 +262,7 @@ class ProductPhotoCutout
             }
         }
 
-        [$keep, $box] = $this->mainObject($mask, $width, $height);
+        [$keep, $box] = $this->mainObject($mask, $width, $height, $alphaOnly);
         if ($keep === null) {
             return null;
         }
@@ -312,7 +312,7 @@ class ProductPhotoCutout
      *
      * @return array{0: ?string, 1: array{int, int, int, int}}
      */
-    private function mainObject(string $mask, int $width, int $height): array
+    private function mainObject(string $mask, int $width, int $height, bool $alphaOnly = false): array
     {
         $count = $width * $height;
         $labels = array_fill(0, $count, 0);
@@ -379,7 +379,8 @@ class ProductPhotoCutout
 
             return [null, [0, 0, 0, 0]];
         }
-        if ($coverage < self::MIN_COVERAGE || $coverage > self::MAX_COVERAGE) {
+        // A transparent PNG's own clear margin already separates the product, however slim it is.
+        if ($coverage < self::MIN_COVERAGE || (! $alphaOnly && $coverage > self::MAX_COVERAGE)) {
             $this->reason = 'product too small or too large in the photo';
 
             return [null, [0, 0, 0, 0]];
