@@ -8,6 +8,7 @@ use App\Models\MediaAsset;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 /**
  * Product page photos are styled scenes: the Kindle stand is shown holding a real book cover and a
@@ -16,6 +17,9 @@ use Illuminate\Support\Facades\Storage;
  */
 class BannerReferenceImage
 {
+    /** Bump when the cleanup prompt changes, so stored copies made by the old prompt are redone. */
+    private const PROMPT_VERSION = 1;
+
     public function __construct(private GoogleVertexAIClient $client, private ProviderCostCalculator $costs) {}
 
     /**
@@ -29,20 +33,26 @@ class BannerReferenceImage
         if (! $asset->exists) {
             return $this->make($asset, $product, $timeoutSeconds);
         }
-        if ($cached = $this->cached($asset)) {
+        $key = self::key($product);
+        if ($cached = $this->cached($asset, $key)) {
             return $cached;
         }
 
         try {
-            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + 30)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds) {
-                if ($cached = $this->cached($asset->refresh())) {
+            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + 30)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds, $key) {
+                if ($cached = $this->cached($asset->refresh(), $key)) {
                     return $cached;
                 }
                 $clean = $this->make($asset, $product, $timeoutSeconds);
                 $path = dirname($asset->path).'/banner-reference-'.$asset->id.'.png';
-                // Disks without `throw` report a failed write as false; the copy is then used once, not recorded.
-                if (Storage::disk($asset->disk)->put($path, base64_decode($clean['inlineData']['data'])) !== false) {
-                    $asset->forceFill(['derivatives' => [...($asset->derivatives ?? []), 'banner_reference' => $path]])->save();
+                // The copy is already paid for: a failed write (false, or a throw on the gcs disk) only
+                // means it is used once and not recorded.
+                try {
+                    if (Storage::disk($asset->disk)->put($path, base64_decode($clean['inlineData']['data'])) !== false) {
+                        $asset->forceFill(['derivatives' => [...($asset->derivatives ?? []), 'banner_reference' => $path, 'banner_reference_key' => $key]])->save();
+                    }
+                } catch (Throwable $exception) {
+                    report($exception);
                 }
 
                 return $clean;
@@ -52,11 +62,17 @@ class BannerReferenceImage
         }
     }
 
+    /** The copy depends on the product name in the prompt, so a renamed product gets a new one. */
+    public static function key(string $product): string
+    {
+        return substr(sha1(self::PROMPT_VERSION."\n".$product), 0, 16);
+    }
+
     /** @return array{inlineData: array{mimeType: string, data: string}, cost: float}|null */
-    private function cached(MediaAsset $asset): ?array
+    private function cached(MediaAsset $asset, string $key): ?array
     {
         $cached = data_get($asset->derivatives, 'banner_reference');
-        if (! is_string($cached) || ! Storage::disk($asset->disk)->exists($cached)) {
+        if (! is_string($cached) || data_get($asset->derivatives, 'banner_reference_key') !== $key || ! Storage::disk($asset->disk)->exists($cached)) {
             return null;
         }
 

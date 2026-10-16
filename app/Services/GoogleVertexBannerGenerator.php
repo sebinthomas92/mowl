@@ -51,8 +51,12 @@ class GoogleVertexBannerGenerator implements BannerGenerator
     {
         $asset = $productImages->first();
         try {
-            $reference = $asset ? $this->imagePart($asset)['inlineData'] : null;
-            if ($asset && config('campaigns.banners.clean_reference')) {
+            $clean = $asset && config('campaigns.banners.clean_reference');
+            // The inspector always judges against the real photo, never the AI-made copy, so a mark the
+            // copy invented is not mistaken for one printed on the product.
+            $original = $asset && (! $clean || config('campaigns.banners.inspect_images')) ? $this->imagePart($asset)['inlineData'] : null;
+            $reference = $original;
+            if ($clean) {
                 $round = (int) config('campaigns.banners.min_round_seconds');
                 $timeout = (int) config('campaigns.banners.reference_timeout_seconds');
                 $clean = $this->rateLimited($deadline, $round, fn () => $this->references->for(
@@ -82,7 +86,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                 if (! config('campaigns.banners.inspect_images')) {
                     return $this->result($result, $usage, $extraCost);
                 }
-                $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $reference));
+                $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $original));
             } catch (VertexAIResponseException $exception) {
                 throw $this->withSpend($exception, $usage, $extraCost);
             }

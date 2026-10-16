@@ -6,6 +6,7 @@ use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\BannerCreative;
 use App\Models\MediaAsset;
+use App\Services\BannerReferenceImage;
 use App\Services\GoogleVertexBannerGenerator;
 use App\Services\ProviderCostCalculator;
 use App\Support\GenerationDeadline;
@@ -244,14 +245,15 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $vertex = collect(Http::recorded())->map(fn (array $pair) => $pair[0])
             ->filter(fn (Request $request) => str_contains($request->url(), 'aiplatform.googleapis.com'))->values();
         $this->assertCount(3, $vertex);
-        // First the cleanup of the original photo, then the banner and its inspection on the clean copy.
+        // First the cleanup of the original photo, then the banner from the clean copy.
         $this->assertStringContainsString('/models/gemini-3.1-flash-image:generateContent', $vertex[0]->url());
         $this->assertStringContainsString('Remove everything that is not the product itself', $vertex[0]['contents'][0]['parts'][0]['text']);
         $this->assertSame(base64_encode('product-bytes'), $vertex[0]['contents'][0]['parts'][1]['inlineData']['data']);
         $this->assertStringContainsString('/models/gemini-3.1-flash-image:generateContent', $vertex[1]->url());
         $this->assertSame($clean, $vertex[1]['contents'][0]['parts'][1]['inlineData']['data']);
         $this->assertStringContainsString('/models/gemini-3.5-flash:generateContent', $vertex[2]->url());
-        $this->assertSame($clean, $vertex[2]['contents'][0]['parts'][2]['inlineData']['data']);
+        // The inspection is judged against the real photo, not the AI-made copy.
+        $this->assertSame(base64_encode('product-bytes'), $vertex[2]['contents'][0]['parts'][2]['inlineData']['data']);
     }
 
     public function test_a_stored_clean_reference_is_reused_without_another_cleanup_call(): void
@@ -273,7 +275,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             },
         ]);
         $creative = new BannerCreative(['prompt' => 'No text or logos.']);
-        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png', 'derivatives' => ['banner_reference' => 'banner-reference-2.png']]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png', 'derivatives' => ['banner_reference' => 'banner-reference-2.png', 'banner_reference_key' => BannerReferenceImage::key('')]]);
         $asset->id = 2;
         $asset->exists = true;
 
@@ -282,6 +284,47 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $this->assertSame(1, collect(Http::recorded())->filter(fn (array $pair) => str_contains($pair[0]->url(), 'gemini-3.1-flash-image:'))->count());
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/models/gemini-3.1-flash-image:generateContent')
             && $request['contents'][0]['parts'][1]['inlineData']['data'] === base64_encode('stored-clean-product'));
+    }
+
+    public function test_a_stored_clean_reference_made_for_another_product_name_is_redone(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        Storage::disk('local')->put('banner-reference-2.png', 'stored-clean-product');
+        $this->configureGoogle();
+        config()->set('campaigns.banners.clean_reference', true);
+        config()->set('campaigns.banners.inspect_images', false);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $images = [self::image(self::png()), self::image('banner-background')];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function () use (&$images) {
+                return Http::response(array_shift($images));
+            },
+        ]);
+        // A stored asset without a database: refresh and save are no-ops.
+        $asset = new class(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png', 'derivatives' => ['banner_reference' => 'banner-reference-2.png', 'banner_reference_key' => BannerReferenceImage::key('Old name')]]) extends MediaAsset
+        {
+            public function refresh()
+            {
+                return $this;
+            }
+
+            public function save(array $options = [])
+            {
+                return true;
+            }
+        };
+        $asset->id = 2;
+        $asset->exists = true;
+
+        app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([$asset]));
+
+        $this->assertSame(2, collect(Http::recorded())->filter(fn (array $pair) => str_contains($pair[0]->url(), 'gemini-3.1-flash-image:'))->count());
+        $this->assertSame(BannerReferenceImage::key(''), $asset->derivatives['banner_reference_key']);
+        $this->assertNotSame('stored-clean-product', Storage::disk('local')->get('banner-reference-2.png'));
     }
 
     public function test_a_cleanup_answer_without_an_image_still_records_its_spend(): void
