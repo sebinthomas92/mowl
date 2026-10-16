@@ -68,9 +68,6 @@ class ProductPhotoCutout
         if (! $source) {
             return null;
         }
-        if ($size[2] === IMAGETYPE_JPEG) {
-            $source = $this->upright($source, $bytes);
-        }
         imagepalettetotruecolor($source);
         imagealphablending($source, false);
         imagesavealpha($source, true);
@@ -83,6 +80,10 @@ class ProductPhotoCutout
         }
         if (! $image) {
             return null;
+        }
+        // Turned after scaling, so no second full-size copy is held during the rotation.
+        if ($size[2] === IMAGETYPE_JPEG) {
+            $image = $this->upright($image, $bytes);
         }
 
         try {
