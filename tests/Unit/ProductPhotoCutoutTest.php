@@ -58,6 +58,39 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertGreaterThanOrEqual(90, (imagecolorat($cutout, 0, 40) >> 24) & 127);
     }
 
+    public function test_a_black_product_on_a_fully_clear_png_is_kept_by_its_alpha(): void
+    {
+        // Clear pixels often hold black RGB, the same colour as the product.
+        $image = imagecreatetruecolor(300, 300);
+        imagealphablending($image, false);
+        imagesavealpha($image, true);
+        imagefill($image, 0, 0, imagecolorallocatealpha($image, 0, 0, 0, 127));
+        imagefilledrectangle($image, 100, 100, 200, 180, imagecolorallocatealpha($image, 12, 12, 12, 0));
+
+        $png = (new ProductPhotoCutout)->cut(self::encode($image));
+
+        $this->assertNotNull($png);
+        $this->assertSame([101, 81], array_slice(getimagesizefromstring($png), 0, 2));
+        $this->assertSame(0, (imagecolorat(imagecreatefromstring($png), 50, 40) >> 24) & 127);
+    }
+
+    public function test_a_camera_jpeg_is_turned_upright_before_cutting(): void
+    {
+        $image = self::backdrop();
+        imagefilledrectangle($image, 120, 160, 280, 240, imagecolorallocate($image, 214, 72, 38));
+        $jpeg = self::encode($image, true);
+        // An Exif block saying the camera was turned: the photo is shown rotated 90 degrees clockwise.
+        $exif = "Exif\0\0MM\0\x2a\0\0\0\x08\0\x01\x01\x12\0\x03\0\0\0\x01\0\x06\0\0\0\0\0\0";
+        $rotated = substr($jpeg, 0, 2)."\xFF\xE1".pack('n', strlen($exif) + 2).$exif.substr($jpeg, 2);
+
+        $png = (new ProductPhotoCutout)->cut($rotated);
+
+        $this->assertNotNull($png);
+        [$width, $height] = getimagesizefromstring($png);
+        $this->assertEqualsWithDelta(81, $width, 8);
+        $this->assertEqualsWithDelta(161, $height, 8);
+    }
+
     public function test_a_styled_scene_or_a_set_with_props_is_not_cut_out(): void
     {
         $cutter = new ProductPhotoCutout;
@@ -74,6 +107,13 @@ class ProductPhotoCutoutTest extends TestCase
         imagefilledellipse($props, 320, 220, 80, 160, imagecolorallocate($props, 70, 110, 90));
         $this->assertNull($cutter->cut(self::encode($props)));
         $this->assertSame('other objects beside the product', $cutter->reason);
+
+        // A small detached part (a charm beside a bag) is not dropped from the product without a word.
+        $piece = self::backdrop();
+        imagefilledrectangle($piece, 60, 200, 260, 300, imagecolorallocate($piece, 214, 72, 38));
+        imagefilledellipse($piece, 320, 250, 16, 16, imagecolorallocate($piece, 70, 110, 90));
+        $this->assertNull($cutter->cut(self::encode($piece)));
+        $this->assertSame('a detached piece beside the product', $cutter->reason);
 
         $cropped = self::backdrop();
         imagefilledrectangle($cropped, 100, 200, 399, 300, imagecolorallocate($cropped, 214, 72, 38));

@@ -25,6 +25,11 @@ class ProductPhotoCutout
     /** A second object this big next to the product (a vase, a mug) means the photo is a styled set. */
     private const MAX_SECOND_OBJECT = 0.04;
 
+    /** A detached piece larger than this share of the main object (and STRAY_PIXELS) is not JPEG noise. */
+    private const MAX_STRAY = 0.005;
+
+    private const STRAY_PIXELS = 40;
+
     private const MIN_COVERAGE = 0.03;
 
     private const MAX_COVERAGE = 0.85;
@@ -47,6 +52,9 @@ class ProductPhotoCutout
         $source = @imagecreatefromstring($bytes);
         if (! $source) {
             return null;
+        }
+        if ($size[2] === IMAGETYPE_JPEG) {
+            $source = $this->upright($source, $bytes);
         }
         imagepalettetotruecolor($source);
         imagealphablending($source, false);
@@ -89,19 +97,26 @@ class ProductPhotoCutout
                 }
             }
         }
-        // A transparent PNG's clear pixels are backdrop whatever colour they hold.
+        // A transparent PNG's clear pixels are backdrop whatever colour they hold. When its border is
+        // (almost) all clear, the alpha alone separates the product: a backdrop colour taken from hidden
+        // RGB values (often black) would remove a product of that colour.
         $opaque = array_values(array_filter($borderColours, fn (int $colour) => ! self::clear($colour)));
-        $backdrop = $this->median(array_map(fn (int $colour) => $colour & 0xFFFFFF, $opaque ?: $borderColours));
-        $distances = array_map(fn (int $colour) => self::clear($colour) ? 0.0 : $this->distance($colour & 0xFFFFFF, $backdrop), $borderColours);
-        sort($distances);
-        $plain = count(array_filter($distances, fn (float $distance) => $distance <= self::PLAIN_DISTANCE)) / count($distances);
-        if ($plain < self::MIN_PLAIN_BORDER) {
-            $this->reason = 'not a plain backdrop';
+        $alphaOnly = count($opaque) <= (1 - self::MIN_PLAIN_BORDER) * count($borderColours);
+        $backdrop = 0;
+        $tolerance = 14;
+        if (! $alphaOnly) {
+            $backdrop = $this->median(array_map(fn (int $colour) => $colour & 0xFFFFFF, $opaque));
+            $distances = array_map(fn (int $colour) => self::clear($colour) ? 0.0 : $this->distance($colour & 0xFFFFFF, $backdrop), $borderColours);
+            sort($distances);
+            $plain = count(array_filter($distances, fn (float $distance) => $distance <= self::PLAIN_DISTANCE)) / count($distances);
+            if ($plain < self::MIN_PLAIN_BORDER) {
+                $this->reason = 'not a plain backdrop';
 
-            return null;
+                return null;
+            }
+            // The backdrop's own unevenness (a soft gradient, JPEG noise) sets how close counts as backdrop.
+            $tolerance = (int) min(40, max(14, ceil($distances[(int) floor(0.95 * (count($distances) - 1))] + 8)));
         }
-        // The backdrop's own unevenness (a soft gradient, JPEG noise) sets how close counts as backdrop.
-        $tolerance = (int) min(40, max(14, ceil($distances[(int) floor(0.95 * (count($distances) - 1))] + 8)));
 
         // Each pixel's distance from the backdrop, one byte per pixel (an array of a million floats
         // would take much of the 128 MB memory limit).
@@ -109,7 +124,11 @@ class ProductPhotoCutout
         for ($y = 0; $y < $height; $y++) {
             for ($x = 0; $x < $width; $x++) {
                 $colour = imagecolorat($image, $x, $y);
-                $near .= self::clear($colour) ? "\0" : chr((int) min(255, round($this->distance($colour & 0xFFFFFF, $backdrop))));
+                $near .= match (true) {
+                    self::clear($colour) => "\0",
+                    $alphaOnly => "\xFF",
+                    default => chr((int) min(255, round($this->distance($colour & 0xFFFFFF, $backdrop)))),
+                };
             }
         }
 
@@ -138,7 +157,7 @@ class ProductPhotoCutout
         // one. On a neutral backdrop a grey product has the same tint as a shadow, so nothing is taken
         // there, and a removal that would take a large part of the object is undone.
         $shade = $this->tint($backdrop);
-        if (abs($shade[0] - 1 / 3) + abs($shade[1] - 1 / 3) >= 0.012) {
+        if (! $alphaOnly && abs($shade[0] - 1 / 3) + abs($shade[1] - 1 / 3) >= 0.012) {
             $before = $mask;
             $stack = [];
             for ($index = 0; $index < $count; $index++) {
@@ -216,7 +235,8 @@ class ProductPhotoCutout
     }
 
     /**
-     * The largest connected object, unless a second sizeable one sits beside it.
+     * The largest connected object, unless another piece beside it is more than JPEG noise: a small
+     * detached part (a charm, a cable) would otherwise be dropped from the product without a word.
      *
      * @return array{0: ?string, 1: array{int, int, int, int}}
      */
@@ -273,6 +293,11 @@ class ProductPhotoCutout
 
             return [null, [0, 0, 0, 0]];
         }
+        if ($second > max(self::STRAY_PIXELS, self::MAX_STRAY * $sizes[$main])) {
+            $this->reason = 'a detached piece beside the product';
+
+            return [null, [0, 0, 0, 0]];
+        }
         if ($coverage < self::MIN_COVERAGE || $coverage > self::MAX_COVERAGE) {
             $this->reason = 'product too small or too large in the photo';
 
@@ -293,6 +318,26 @@ class ProductPhotoCutout
         }
 
         return [$keep, $boxes[$main]];
+    }
+
+    /** A JPEG turned the way its camera's orientation tag says it is shown. */
+    private function upright(\GdImage $image, string $bytes): \GdImage
+    {
+        if (! function_exists('exif_read_data')) {
+            return $image;
+        }
+        $exif = @exif_read_data('data://image/jpeg;base64,'.base64_encode($bytes));
+        $orientation = (int) ($exif['Orientation'] ?? 1);
+        $turn = [3 => 180, 4 => 180, 5 => -90, 6 => -90, 7 => 90, 8 => 90][$orientation] ?? 0;
+        if ($turn !== 0 && ($turned = imagerotate($image, $turn, 0)) !== false) {
+            imagedestroy($image);
+            $image = $turned;
+        }
+        if (in_array($orientation, [2, 4, 5, 7], true)) {
+            imageflip($image, IMG_FLIP_HORIZONTAL);
+        }
+
+        return $image;
     }
 
     private function touchesBackdrop(string $mask, int $index, int $x, int $y, int $width, int $height): bool

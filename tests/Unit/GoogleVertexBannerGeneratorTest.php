@@ -320,7 +320,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $this->configureGoogle();
         config()->set('campaigns.banners.composite_product', true);
         request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
-        $page = '<html><head><title>Stand</title></head><body><button data-full-src="/uploads/set-1.jpg"></button></body></html>';
+        $page = '<html><head><title>Stand</title></head><body><div class="pdp-gallery"><button data-full-src="/uploads/set-1.jpg"></button></div></body></html>';
         $answers = [self::inspection([], false, ['vase', 'candle']), self::inspection([]), self::inspection([])];
         Http::fake([
             '93.184.216.34/product/stand' => Http::response($page, 200, ['Content-Type' => 'text/html']),
@@ -359,7 +359,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         config()->set('campaigns.banners.composite_product', true);
         config()->set('campaigns.banners.check_product', true);
         request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
-        $page = '<html><head><title>Stand</title></head><body><button data-full-src="/uploads/main.jpg"></button><button data-full-src="/uploads/set-1.jpg"></button></body></html>';
+        $page = '<html><head><title>Stand</title></head><body><div class="pdp-gallery"><button data-full-src="/uploads/main.jpg"></button><button data-full-src="/uploads/set-1.jpg"></button></div></body></html>';
         // The main photo has a vase beside the stand; the second is the stand alone and matches the main one.
         $answers = [self::inspection([], false, ['vase']), self::inspection([]), self::match(true, ''), self::inspection([])];
         Http::fake([

@@ -176,8 +176,10 @@ class BannerReferenceImage
         }
         $main = ($gallery[0] ?? null) === $source ? ['mimeType' => (string) $asset->mime_type, 'data' => base64_encode($photo)] : null;
         foreach (array_slice(array_values(array_diff($gallery, [$source])), 0, self::MAX_GALLERY_PHOTOS) as $url) {
-            // A download is only started while it and the cutout's marks check still fit the deadline.
-            if (! $this->hasTime((int) config('campaigns.source.timeout_seconds'))) {
+            // A download is only started while it and both of the cutout's checks (marks, then the product
+            // match) still fit the deadline. The scene is not reserved here: an accepted cutout is stored,
+            // and a banner short of time for its scene retries straight from it.
+            if (! $this->hasTime((int) config('campaigns.source.timeout_seconds') + (int) config('campaigns.banners.inspection_timeout_seconds'))) {
                 break;
             }
             try {

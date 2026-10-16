@@ -43,7 +43,8 @@ HTML;
 <div data-thumb="/wp-content/uploads/studio-100x100.jpg" class="woocommerce-product-gallery__image"><a href="/wp-content/uploads/studio.jpg"><img src="/wp-content/uploads/studio-600x600.jpg"></a></div>
 </div>
 <div class="pdp-gallery__thumbs"><button class="pdp-gallery__thumb" data-idx="2" data-full-src="/wp-content/uploads/set-1.jpg"><img src="https://cdn.example/set-1-300x300.jpg"></button></div>
-<section class="related products"><img src="/wp-content/uploads/other-product.jpg"></section>
+<section class="related products"><div class="card-gallery"><button data-full-src="/wp-content/uploads/other-product.jpg"><img src="/wp-content/uploads/other-product.jpg"></button></div></section>
+<div class="quick-view"><button data-full-src="/wp-content/uploads/not-in-a-gallery.jpg"></button></div>
 </body></html>
 HTML;
         Http::fake(['93.184.216.34/*' => Http::response($html, 200, ['Content-Type' => 'text/html; charset=UTF-8'])]);
@@ -66,7 +67,7 @@ HTML;
     public function test_a_full_gallery_leaves_room_for_the_share_image(): void
     {
         $gallery = implode('', array_map(fn (int $i) => "<button data-full-src=\"/uploads/photo-{$i}.jpg\"></button>", range(1, 15)));
-        $html = '<html><head><title>Stand</title><meta property="og:image" content="/uploads/share.webp"></head><body>'.$gallery.'</body></html>';
+        $html = '<html><head><title>Stand</title><meta property="og:image" content="/uploads/share.webp"></head><body><div class="product-gallery">'.$gallery.'</div></body></html>';
         Http::fake(['93.184.216.34/*' => Http::response($html, 200, ['Content-Type' => 'text/html; charset=UTF-8'])]);
 
         $page = app(ProductPageFetcher::class)->fetch('https://93.184.216.34/product/stand');
