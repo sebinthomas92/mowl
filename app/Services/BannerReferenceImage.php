@@ -9,6 +9,7 @@ use App\Models\SourceSnapshot;
 use App\Support\GenerationDeadline;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Sleep;
 use Throwable;
@@ -24,7 +25,7 @@ use Throwable;
 class BannerReferenceImage
 {
     /** Bump when the cleanup prompt or the cutout changes, so stored copies made the old way are redone. */
-    private const PROMPT_VERSION = 4;
+    private const PROMPT_VERSION = 5;
 
     /** Store photos downloaded while looking for a studio shot to cut out. */
     private const MAX_GALLERY_PHOTOS = 6;
@@ -135,7 +136,8 @@ class BannerReferenceImage
         $photo = Storage::disk($asset->disk)->get($asset->path);
         $spent = 0.0;
         $this->mainPhoto = null;
-        foreach ($this->studioCutouts($asset, $photo, $source) as $studio) {
+        foreach ($this->studioCutouts($asset, $photo, $source, $product, $timeoutSeconds) as $studio) {
+            $spent += $studio['cost'];
             try {
                 $spent += $this->check($studio['png'], $product, $brand, $studio['reference'], $spent, studio: true);
             } catch (BannerAttemptFailed $exception) {
@@ -172,12 +174,13 @@ class BannerReferenceImage
      * the imported photo included. A trusted photo's cutout is compared with the photo it was cut
      * from, so a part the cutter took for backdrop or shadow is caught before the cutout is used.
      *
-     * @return \Generator<int, array{png: string, source: string, reference: array{mimeType: string, data: string}|null}>
+     * @return \Generator<int, array{png: string, source: string, reference: array{mimeType: string, data: string}|null, cost: float}>
      */
-    private function studioCutouts(MediaAsset $asset, string $photo, ?SourceSnapshot $snapshot): \Generator
+    private function studioCutouts(MediaAsset $asset, string $photo, ?SourceSnapshot $snapshot, string $product, int $timeoutSeconds): \Generator
     {
         $source = (string) data_get($asset->metadata, 'source_url');
         $imported = $this->cutter->cut($photo);
+        $importedPrepared = $this->cutter->prepared;
         $page = $snapshot?->url;
         // An uploaded photo is the product by the owner's word. An imported one is trusted unchecked only
         // when it is the gallery's main photo: older imports took the page's share image first.
@@ -207,7 +210,7 @@ class BannerReferenceImage
         $own = ['mimeType' => (string) $asset->mime_type, 'data' => base64_encode($photo)];
         // With no gallery to compare with, the imported photo is the reference the redraw would use too.
         if ($imported && ($gallery === [] || $gallery[0] === $source)) {
-            yield ['png' => $imported, 'source' => $source ?: $asset->path, 'reference' => $own];
+            yield ['source' => $source ?: $asset->path, 'reference' => $own, ...$this->matted($imported, $importedPrepared, $product, $timeoutSeconds)];
             $imported = null;
         }
         if ($gallery === []) {
@@ -244,11 +247,11 @@ class BannerReferenceImage
                 break;
             }
             if ($imported) {
-                yield ['png' => $imported, 'source' => $source ?: $asset->path, 'reference' => $main];
+                yield ['source' => $source ?: $asset->path, 'reference' => $main, ...$this->matted($imported, $importedPrepared, $product, $timeoutSeconds)];
                 $imported = null;
             }
             if ($usable && $png = $this->cutter->cut($image['bytes'])) {
-                yield ['png' => $png, 'source' => $image['url'], 'reference' => $reference ?? $own];
+                yield ['source' => $image['url'], 'reference' => $reference ?? $own, ...$this->matted($png, $this->cutter->prepared, $product, $timeoutSeconds)];
             }
         }
     }
@@ -257,12 +260,72 @@ class BannerReferenceImage
     private function redraw(string $mimeType, string $photo, string $product, int $timeoutSeconds, string $brand, float $earlier): array
     {
         [$keyName, $keyHex] = $this->keyColour($photo);
+        [$bytes, $cost] = $this->drawn(
+            "Product photo of {$product}. Show this exact product on its own, same angle, form, materials, proportions and the colour of every part, "
+                ."on a completely flat, evenly lit, pure {$keyName} ({$keyHex}) background that fills the whole image, with no shadow, reflection, floor or gradient. "
+                .'Remove everything that is not the product itself: books, magazines, devices, screens, plants, cups, hands and any other props, and fill in the product where they covered it. '
+                .'Show the whole product with a margin on every side. Keep marks printed on the product itself only. No other text, letters, logos or labels anywhere.',
+            $mimeType, $photo, $timeoutSeconds,
+        );
+        $png = is_string($bytes) && $bytes !== '' ? $this->cutout($bytes, $keyName) : null;
+        if ($png === null) {
+            // A filtered or malformed answer is still billed for its tokens, and is never cached.
+            $message = 'Vertex AI returned no usable product cutout.';
+            throw $cost + $earlier > 0 ? new BannerAttemptFailed('vertex_missing_image', $message, round($earlier + $cost, 6), is_string($bytes) && $bytes !== '' ? $bytes : null) : new VertexAIResponseException('vertex_missing_image', $message, true);
+        }
+
+        $cost += $this->check($png, $product, $brand, ['mimeType' => $mimeType, 'data' => base64_encode($photo)], $earlier + $cost);
+
+        return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($png)], 'cost' => $cost];
+    }
+
+    /**
+     * A studio cutout's outline is redrawn as a matte: the image model replaces the backdrop of the
+     * photo as cut with a key colour, and the cutter keeps the photo's own pixels inside the matte's
+     * outline. Colour alone cannot tell the Kindle Stand's lit page tops from the beige backdrop seen
+     * through the V between them. When the matte cannot be had or does not line up, the cutout as it
+     * is stands (and is checked like any other).
+     *
+     * @return array{png: string, cost: float}
+     */
+    private function matted(string $png, ?string $prepared, string $product, int $timeoutSeconds): array
+    {
+        if ($prepared === null || ! config('campaigns.banners.matte_studio_cutouts')
+            || ! $this->hasTime($timeoutSeconds + (int) config('campaigns.banners.inspection_timeout_seconds'))) {
+            return ['png' => $png, 'cost' => 0.0];
+        }
+        [$keyName, $keyHex] = $this->keyColour($prepared);
+        try {
+            [$bytes, $cost] = $this->drawn(
+                "Studio photo of {$product}. Replace only the background with a completely flat, evenly lit, pure {$keyName} ({$keyHex}), "
+                    .'including the product\'s shadow and every gap, opening or V-shaped notch in the product through which the background shows. '
+                    .'Leave the product exactly as it is: same position, size, angle and framing, pixel for pixel. Do not move, crop, resize, redraw or retouch it. '
+                    .'Keep the image the same shape.',
+                'image/jpeg', $prepared, $timeoutSeconds,
+            );
+        } catch (VertexAIResponseException $exception) {
+            report($exception);
+
+            return ['png' => $png, 'cost' => 0.0];
+        }
+        $matted = is_string($bytes) && $bytes !== '' ? $this->cutter->cut($prepared, $bytes, $keyName) : null;
+        if ($matted === null) {
+            Log::warning('banner_studio_matte_unused', ['reason' => $this->cutter->reason]);
+        }
+
+        return ['png' => $matted ?? $png, 'cost' => $cost];
+    }
+
+    /**
+     * One image model call with one photo; the drawn image's bytes (null when it drew none) and its cost.
+     *
+     * @return array{0: string|false|null, 1: float}
+     */
+    private function drawn(string $prompt, string $mimeType, string $photo, int $timeoutSeconds): array
+    {
         [$response] = $this->client->generateContent([
             'contents' => [['role' => 'user', 'parts' => [
-                ['text' => "Product photo of {$product}. Show this exact product on its own, same angle, form, materials, proportions and the colour of every part, "
-                    ."on a completely flat, evenly lit, pure {$keyName} ({$keyHex}) background that fills the whole image, with no shadow, reflection, floor or gradient. "
-                    .'Remove everything that is not the product itself: books, magazines, devices, screens, plants, cups, hands and any other props, and fill in the product where they covered it. '
-                    .'Show the whole product with a margin on every side. Keep marks printed on the product itself only. No other text, letters, logos or labels anywhere.'],
+                ['text' => $prompt],
                 ['inlineData' => ['mimeType' => $mimeType, 'data' => base64_encode($photo)]],
             ]]],
             'generationConfig' => ['responseModalities' => ['TEXT', 'IMAGE']],
@@ -280,17 +343,8 @@ class BannerReferenceImage
         $encoded = collect(data_get($json, 'candidates.0.content.parts', []))
             ->map(fn (array $part) => data_get($part, 'inlineData.data'))
             ->first(fn (mixed $data) => is_string($data));
-        $bytes = is_string($encoded) ? base64_decode($encoded, true) : false;
-        $png = is_string($bytes) && $bytes !== '' ? $this->cutout($bytes, $keyName) : null;
-        if ($png === null) {
-            // A filtered or malformed answer is still billed for its tokens, and is never cached.
-            $message = 'Vertex AI returned no usable product cutout.';
-            throw $cost + $earlier > 0 ? new BannerAttemptFailed('vertex_missing_image', $message, round($earlier + $cost, 6), is_string($bytes) && $bytes !== '' ? $bytes : null) : new VertexAIResponseException('vertex_missing_image', $message, true);
-        }
 
-        $cost += $this->check($png, $product, $brand, ['mimeType' => $mimeType, 'data' => base64_encode($photo)], $earlier + $cost);
-
-        return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($png)], 'cost' => $cost];
+        return [is_string($encoded) ? base64_decode($encoded, true) : null, $cost];
     }
 
     /**
@@ -414,7 +468,7 @@ class BannerReferenceImage
     }
 
     /** How strongly a pixel is the key colour, 0 (not at all) to 1 (pure key). */
-    private static function keyStrength(string $key, int $r, int $g, int $b): float
+    public static function keyStrength(string $key, int $r, int $g, int $b): float
     {
         $excess = $key === 'green' ? $g - max($r, $b) : min($r, $b) - $g;
 

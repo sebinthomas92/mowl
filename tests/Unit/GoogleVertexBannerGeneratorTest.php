@@ -18,8 +18,10 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Sleep;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class GoogleVertexBannerGeneratorTest extends TestCase
@@ -712,6 +714,71 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             $result->additionalCost,
             0.000001,
         );
+    }
+
+    #[DataProvider('mattes')]
+    public function test_a_studio_cutout_takes_its_outline_from_a_matte_of_the_photo(bool $aligned): void
+    {
+        Log::spy();
+        Storage::fake('local');
+        Storage::disk('local')->put('product.jpg', ProductPhotoCutoutTest::studio());
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        config()->set('campaigns.banners.check_product', true);
+        config()->set('campaigns.banners.matte_studio_cutouts', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use ($aligned) {
+                if (str_contains($request->url(), 'gemini-3.5-flash:')) {
+                    return Http::response(count($request['contents'][0]['parts']) > 2 ? self::match(true, '') : self::inspection([]));
+                }
+                $parts = $request['contents'][0]['parts'];
+                if (! str_contains((string) ($parts[0]['text'] ?? ''), 'Replace only the background')) {
+                    return Http::response(self::image('banner-background'));
+                }
+
+                return Http::response(self::image($aligned ? self::matteOf(base64_decode($parts[1]['inlineData']['data'])) : self::keyed()));
+            },
+        ]);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
+
+        // Either way the photo's own pixels, checked as usual; an unusable matte leaves the cutout as cut.
+        $this->assertSame('banner-background', $result->imageBytes);
+        $this->assertStudioCutout($result->productCutout);
+        $vertex = collect(Http::recorded())->map(fn (array $pair) => $pair[0])
+            ->filter(fn (Request $request) => str_contains($request->url(), 'aiplatform.googleapis.com'))->values();
+        $this->assertStringContainsString('flash-image', $vertex[0]->url());
+        $this->assertSame('image/jpeg', $vertex[0]['contents'][0]['parts'][1]['inlineData']['mimeType']);
+        $this->assertCount(5, $vertex);
+        $aligned
+            ? Log::shouldNotHaveReceived('warning')
+            : Log::shouldHaveReceived('warning')->with('banner_studio_matte_unused', ['reason' => 'matte does not match the photo'])->once();
+    }
+
+    public static function mattes(): array
+    {
+        return ['lined up' => [true], 'redrawn elsewhere' => [false]];
+    }
+
+    /** The image model's matte of the studio photo: its stand's pages and base on pure green, the shadow gone. */
+    private static function matteOf(string $photo): string
+    {
+        $image = imagecreatefromstring($photo);
+        $f = imagesx($image) / 627;
+        imagefilledrectangle($image, 0, 0, imagesx($image) - 1, (int) (300 * $f) - 1, imagecolorallocate($image, 0, 255, 0));
+        imagefilledrectangle($image, 0, (int) (425 * $f) + 1, imagesx($image) - 1, imagesy($image) - 1, imagecolorallocate($image, 0, 255, 0));
+        imagefilledrectangle($image, 0, 0, (int) (150 * $f) - 1, imagesy($image) - 1, imagecolorallocate($image, 0, 255, 0));
+        imagefilledrectangle($image, (int) (476 * $f) + 1, 0, imagesx($image) - 1, imagesy($image) - 1, imagecolorallocate($image, 0, 255, 0));
+        imagefilledrectangle($image, 0, 0, (int) (165 * $f) - 1, (int) (390 * $f) - 1, imagecolorallocate($image, 0, 255, 0));
+        imagefilledrectangle($image, (int) (461 * $f) + 1, 0, imagesx($image) - 1, (int) (390 * $f) - 1, imagecolorallocate($image, 0, 255, 0));
+        ob_start();
+        imagepng($image);
+
+        return (string) ob_get_clean();
     }
 
     private function fakeVertex(array $scenes): void

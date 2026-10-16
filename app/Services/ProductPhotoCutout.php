@@ -62,6 +62,12 @@ class ProductPhotoCutout
     private const NOTCH_WIDTH = 0.04;
 
     /** A product may touch the frame along at most this share of its own extent on that side. */
+    /** A matte and the photo's own cutout share at least this much of their combined outline. */
+    private const MIN_MATTE_AGREEMENT = 0.9;
+
+    /** A matte's shape may differ from the photo's by this share (the image model's sizes are fixed). */
+    private const MAX_MATTE_STRETCH = 0.03;
+
     private const MAX_EDGE_CONTACT = 0.05;
 
     /** Frame contact must lie within this share of the product's extent from either end of that side. */
@@ -97,9 +103,24 @@ class ProductPhotoCutout
      */
     private array $sides = [];
 
-    public function cut(string $bytes): ?string
+    /** Whether the last cut was of an opaque photo, which a matte can be drawn for. */
+    private bool $keyable = false;
+
+    /**
+     * After a successful cut without a matte: the photo as cut (scaled, upright) as a JPEG, for the image
+     * model to draw a matte of, when it has an opaque backdrop. A matte must line up with these pixels.
+     */
+    public ?string $prepared = null;
+
+    /**
+     * With $matte (the prepared photo with its backdrop replaced by the $key colour), the product's
+     * outline is taken from the matte, while every kept pixel stays the photo's own. The matte must
+     * agree with the photo's own cutout, so a matte that moved, reframed or redrew the product is not used.
+     */
+    public function cut(string $bytes, ?string $matte = null, string $key = 'green'): ?string
     {
         $this->reason = 'unreadable image';
+        $this->prepared = null;
         $size = @getimagesizefromstring($bytes);
         if (! $size || $size[0] * $size[1] > ProductImageImporter::MAX_PIXELS) {
             return null;
@@ -135,16 +156,58 @@ class ProductPhotoCutout
             $image = $this->upright($image, $bytes);
         }
 
+        $keyed = null;
         try {
-            return $this->cutImage($image);
+            if ($matte !== null) {
+                $keyed = $this->matte($matte, imagesx($image), imagesy($image));
+                if ($keyed === null) {
+                    return null;
+                }
+            }
+            $png = $this->cutImage($image, $keyed, $key);
+            if ($png !== null && $matte === null && $this->keyable) {
+                ob_start();
+                imagejpeg($image, null, 92);
+                $this->prepared = (string) ob_get_clean();
+            }
+
+            return $png;
         } finally {
             imagedestroy($image);
+            if ($keyed) {
+                imagedestroy($keyed);
+            }
         }
     }
 
-    private function cutImage(\GdImage $image): ?string
+    /** The matte scaled onto the photo's pixels, unless it was drawn in another shape. */
+    private function matte(string $bytes, int $width, int $height): ?\GdImage
+    {
+        $this->reason = 'unreadable matte';
+        $size = @getimagesizefromstring($bytes);
+        if (! $size || $size[0] * $size[1] > ProductImageImporter::MAX_PIXELS) {
+            return null;
+        }
+        if (abs($size[0] / $size[1] - $width / $height) > self::MAX_MATTE_STRETCH * $width / $height) {
+            $this->reason = 'matte framed differently';
+
+            return null;
+        }
+        $matte = @imagecreatefromstring($bytes);
+        if (! $matte) {
+            return null;
+        }
+        imagepalettetotruecolor($matte);
+        $scaled = imagescale($matte, $width, $height, IMG_BILINEAR_FIXED);
+        imagedestroy($matte);
+
+        return $scaled ?: null;
+    }
+
+    private function cutImage(\GdImage $image, ?\GdImage $matte = null, string $key = 'green'): ?string
     {
         $this->sides = [];
+        $this->keyable = false;
         $width = imagesx($image);
         $height = imagesy($image);
         if ($width < 32 || $height < 32) {
@@ -413,6 +476,55 @@ class ProductPhotoCutout
         if ($keep === null) {
             return null;
         }
+        // The matte decides the outline where colour cannot: a lit page as pale as the backdrop, or the
+        // backdrop seen through a V between pages. Each pixel's share of key colour is its transparency.
+        $strength = null;
+        if ($matte !== null && ! $alphaOnly) {
+            $strength = '';
+            $keyed = '';
+            for ($y = 0; $y < $height; $y++) {
+                for ($x = 0; $x < $width; $x++) {
+                    $c = imagecolorat($matte, $x, $y);
+                    $share = BannerReferenceImage::keyStrength($key, ($c >> 16) & 255, ($c >> 8) & 255, $c & 255);
+                    $strength .= chr((int) round(255 * $share));
+                    $keyed .= $share >= 0.5 ? "\1" : "\0";
+                }
+            }
+            [$matched, $matchedBox] = $this->mainObject($keyed, $width, $height);
+            if ($matched === null) {
+                $this->reason = 'matte: '.$this->reason;
+
+                return null;
+            }
+            [$both, $either] = [0, 0];
+            for ($index = 0; $index < $count; $index++) {
+                $own = $keep[$index] === "\1";
+                $drawn = $matched[$index] === "\1";
+                $both += $own && $drawn ? 1 : 0;
+                $either += $own || $drawn ? 1 : 0;
+            }
+            if ($both < self::MIN_MATTE_AGREEMENT * $either) {
+                $this->reason = 'matte does not match the photo';
+
+                return null;
+            }
+            // The matte's soft outline runs past the half-key line: pixels just outside it keep their share.
+            [$keep, $box, $mask] = [$matched, $matchedBox, $keyed];
+            for ($index = 0; $index < $count; $index++) {
+                if ($matched[$index] === "\0" && ord($strength[$index]) < 242) {
+                    $x = $index % $width;
+                    foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
+                        if ($next >= 0 && $next < $count && $matched[$next] === "\1") {
+                            $keep[$index] = "\1";
+                            [$x, $y] = [$index % $width, intdiv($index, $width)];
+                            $box = [min($box[0], $x), min($box[1], $y), max($box[2], $x), max($box[3], $y)];
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        $this->keyable = ! $alphaOnly;
         [$left, $top, $right, $bottom] = $box;
         // An antialiased outline is a few pixels wide, each a blend of product and backdrop, so the kept
         // pixels within EDGE_DEPTH steps of the backdrop are all feathered, not only the outermost one.
@@ -450,14 +562,20 @@ class ProductPhotoCutout
                 $c = imagecolorat($image, $x, $y);
                 $rgb = [($c >> 16) & 255, ($c >> 8) & 255, $c & 255];
                 $alpha = 1.0;
-                if ($edge[$index] === "\1") {
-                    // Edge pixels are part backdrop: blend them out by how close they are to it.
-                    $alpha = max(0.0, min(1.0, (ord($near[$index]) - $tolerance) / self::EDGE_RAMP));
-                    $local = $alphaOnly ? 0 : $this->backdropAt($x, $y, $width, $height);
-                    if (! $alphaOnly) {
-                        $alpha = min($alpha, $this->blendShare($image, $keep, $rgb, $local, $x, $y, $width, $height));
+                if ($strength !== null || $edge[$index] === "\1") {
+                    $local = null;
+                    if ($strength !== null) {
+                        $alpha = 1 - ord($strength[$index]) / 255;
+                    } else {
+                        // Edge pixels are part backdrop: blend them out by how close they are to it.
+                        $alpha = max(0.0, min(1.0, (ord($near[$index]) - $tolerance) / self::EDGE_RAMP));
+                        if (! $alphaOnly) {
+                            $local = $this->backdropAt($x, $y, $width, $height);
+                            $alpha = min($alpha, $this->blendShare($image, $keep, $rgb, $local, $x, $y, $width, $height));
+                        }
                     }
                     if (! $alphaOnly && $alpha > 0.0 && $alpha < 1.0) {
+                        $local ??= $this->backdropAt($x, $y, $width, $height);
                         // Take the backdrop's share out of the colour too, or it shows as a light fringe on a
                         // darker scene: pixel = alpha * product + (1 - alpha) * backdrop.
                         $from = [($local >> 16) & 255, ($local >> 8) & 255, $local & 255];

@@ -417,6 +417,60 @@ class ProductPhotoCutoutTest extends TestCase
         return self::encode($image, true);
     }
 
+    public function test_a_matte_sets_the_outline_while_the_pixels_stay_the_photos_own(): void
+    {
+        // Backdrop seen through the V between the stand's pages, lit to a beige no colour test can tell
+        // from the lit page tops, collars the pages unless the image model's matte says it is backdrop.
+        [$photo, $matte] = self::collared();
+        $cutter = new ProductPhotoCutout;
+        $own = imagecreatefromstring($cutter->cut($photo));
+        $this->assertSame(0, (imagecolorat($own, (200 - 100) * 2, (145 - 140) * 2) >> 24) & 127, 'collar kept without a matte');
+        $this->assertNotNull($cutter->prepared);
+
+        $png = $cutter->cut($cutter->prepared, self::encode($matte), 'green');
+
+        $this->assertNotNull($png, (string) $cutter->reason);
+        $cutout = imagecreatefromstring($png);
+        // Trimmed to the pages and base, without the collar above them.
+        $this->assertEqualsWithDelta((330 - 150 + 1) * 2, imagesy($cutout), 4);
+        $page = imagecolorat($cutout, (160 - 110) * 2, (200 - 150) * 2);
+        $this->assertSame(0, ($page >> 24) & 127);
+        $this->assertEqualsWithDelta(250, ($page >> 16) & 255, 3, 'the photo\'s own page white, not the matte\'s grey');
+    }
+
+    public function test_a_matte_that_moved_the_product_or_changed_the_shape_is_not_used(): void
+    {
+        [$photo, $matte] = self::collared();
+        $cutter = new ProductPhotoCutout;
+        $cutter->cut($photo);
+        $prepared = $cutter->prepared;
+
+        $moved = imagecreatetruecolor(400, 400);
+        imagefill($moved, 0, 0, imagecolorallocate($moved, 0, 255, 0));
+        imagecopy($moved, $matte, 60, 0, 0, 0, 340, 400);
+        $this->assertNull($cutter->cut($prepared, self::encode($moved), 'green'));
+        $this->assertSame('matte does not match the photo', $cutter->reason);
+
+        $wide = imagescale($matte, 400, 300);
+        $this->assertNull($cutter->cut($prepared, self::encode($wide), 'green'));
+        $this->assertSame('matte framed differently', $cutter->reason);
+    }
+
+    /** @return array{0: string, 1: \GdImage} A studio photo of pages with a lit collar above them, and its true matte. */
+    private static function collared(): array
+    {
+        $image = self::backdrop();
+        imagefilledrectangle($image, 100, 300, 300, 330, imagecolorallocate($image, 214, 72, 38));
+        imagefilledrectangle($image, 110, 150, 290, 299, imagecolorallocate($image, 250, 250, 250));
+        imagefilledrectangle($image, 150, 140, 250, 149, imagecolorallocate($image, 226, 214, 198));
+        $matte = imagecreatetruecolor(400, 400);
+        imagefill($matte, 0, 0, imagecolorallocate($matte, 0, 255, 0));
+        imagefilledrectangle($matte, 100, 300, 300, 330, imagecolorallocate($matte, 200, 80, 50));
+        imagefilledrectangle($matte, 110, 150, 290, 299, imagecolorallocate($matte, 128, 128, 128));
+
+        return [self::encode($image), $matte];
+    }
+
     private static function backdrop(int $size = 400): \GdImage
     {
         $image = imagecreatetruecolor($size, $size);
