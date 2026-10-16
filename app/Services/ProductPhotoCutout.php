@@ -36,11 +36,51 @@ class ProductPhotoCutout
     /** How much further from the backdrop colour than the border's typical pixel an opening may be. */
     private const HOLE_MATCH = 4.0;
 
+    /** An opening is at least this wide on average (at MAX_SIDE); a thinner backdrop-coloured sliver is a lit gutter or crest. */
+    private const HOLE_WIDTH = 6;
+
     /** Below this opacity an edge pixel's colour is too little product to recover reliably. */
     private const MIN_UNMIX_ALPHA = 0.25;
 
     /** How much darker a shadow pixel may be than the neighbour the shadow fill reached it from. */
-    private const MAX_SHADOW_STEP = 10.0;
+    private const MAX_SHADOW_STEP = 16.0;
+
+    /**
+     * How far a shadow's tint may drift from the backdrop's: a little for JPEG noise, plus more the
+     * darker it is, since a shadow on a warm paper is more saturated than the paper.
+     */
+    private const SHADOW_TINT = 0.008;
+
+    private const SHADOW_TINT_SLOPE = 0.12;
+
+    /**
+     * Gaps at most this share of the photo's width, with product on both sides of the row and below,
+     * and further from the backdrop colour than its border, are product: the Kindle Stand's page fold
+     * (25-35 px wide at 1000 px) is lit to within the beige backdrop's tolerance and opens onto it
+     * through the V above the spine.
+     */
+    private const NOTCH_WIDTH = 0.04;
+
+    /** A product may touch the frame along at most this share of its own extent on that side. */
+    /** A matte and the photo's own cutout share at least this much of their combined outline. */
+    private const MIN_MATTE_AGREEMENT = 0.9;
+
+    /**
+     * A matte's outline may sit this share of the photo's longest side off the photo's own (centre to
+     * centre). The Kindle Stand's backdrop collar, which the matte removes, moves its centre a few px.
+     */
+    private const MAX_MATTE_SHIFT = 0.008;
+
+    /** A matte's shape may differ from the photo's by this share (the image model's sizes are fixed). */
+    private const MAX_MATTE_STRETCH = 0.03;
+
+    private const MAX_EDGE_CONTACT = 0.05;
+
+    /**
+     * Frame contact must lie within this share of the product's extent from either end of that side. The
+     * Kindle Stand's slanted base meets the frame 23-26% up from its box's bottom, which its shadow sets.
+     */
+    private const CORNER_SHARE = 0.35;
 
     /** More separate pieces than this is speckle or a busy scene, not one product on a backdrop. */
     private const MAX_PIECES = 2000;
@@ -61,9 +101,36 @@ class ProductPhotoCutout
     /** Why the last photo was not cut out, for the error a banner records. */
     public ?string $reason = null;
 
-    public function cut(string $bytes): ?string
+    /**
+     * The backdrop along each side of the photo (top, bottom, left, right), smoothed, as [r, g, b] per
+     * pixel. A studio backdrop is rarely one colour: a soft light falloff from top to bottom spread
+     * pixel distances from a single median colour so widely that the tolerance took in the stand's
+     * lit white pages, and the fill split the stand into pieces. Each pixel is compared with the
+     * backdrop blended in from the four sides instead.
+     *
+     * @var array<string, list<array{float, float, float}>>
+     */
+    private array $sides = [];
+
+    /** Whether the last cut was of an opaque photo, which a matte can be drawn for. */
+    private bool $keyable = false;
+
+    /**
+     * After a successful cut without a matte: the photo as cut (scaled, upright) as a lossless PNG, for
+     * the image model to draw a matte of and for the matted cut to take its pixels from, when it has an
+     * opaque backdrop. A matte must line up with these pixels.
+     */
+    public ?string $prepared = null;
+
+    /**
+     * With $matte (the prepared photo with its backdrop replaced by the $key colour), the product's
+     * outline is taken from the matte, while every kept pixel stays the photo's own. The matte must
+     * agree with the photo's own cutout, so a matte that moved, reframed or redrew the product is not used.
+     */
+    public function cut(string $bytes, ?string $matte = null, string $key = 'green'): ?string
     {
         $this->reason = 'unreadable image';
+        $this->prepared = null;
         $size = @getimagesizefromstring($bytes);
         if (! $size || $size[0] * $size[1] > ProductImageImporter::MAX_PIXELS) {
             return null;
@@ -81,13 +148,17 @@ class ProductPhotoCutout
         imagealphablending($source, false);
         imagesavealpha($source, true);
         $factor = min(1, self::MAX_SIDE / max(imagesx($source), imagesy($source)));
-        $image = $factor < 1
-            ? imagescale($source, max(1, (int) round(imagesx($source) * $factor)), max(1, (int) round(imagesy($source) * $factor)), IMG_BICUBIC)
-            : $source;
-        if ($image !== $source) {
+        $image = $source;
+        if ($factor < 1) {
+            [$width, $height] = [max(1, (int) round(imagesx($source) * $factor)), max(1, (int) round(imagesy($source) * $factor))];
+            // Some GD builds return false for bicubic scaling (PHP 8.5 with GD 2.3.3); bilinear works everywhere.
+            $image = imagescale($source, $width, $height, IMG_BICUBIC) ?: imagescale($source, $width, $height, IMG_BILINEAR_FIXED);
+            // The full-size photo is not held while the cutout allocates its masks.
             imagedestroy($source);
         }
         if (! $image) {
+            $this->reason = 'photo could not be scaled';
+
             return null;
         }
         // Turned after scaling, so no second full-size copy is held during the rotation.
@@ -95,15 +166,58 @@ class ProductPhotoCutout
             $image = $this->upright($image, $bytes);
         }
 
+        $keyed = null;
         try {
-            return $this->cutImage($image);
+            if ($matte !== null) {
+                $keyed = $this->matte($matte, imagesx($image), imagesy($image));
+                if ($keyed === null) {
+                    return null;
+                }
+            }
+            $png = $this->cutImage($image, $keyed, $key);
+            if ($png !== null && $matte === null && $this->keyable) {
+                ob_start();
+                imagepng($image);
+                $this->prepared = (string) ob_get_clean();
+            }
+
+            return $png;
         } finally {
             imagedestroy($image);
+            if ($keyed) {
+                imagedestroy($keyed);
+            }
         }
     }
 
-    private function cutImage(\GdImage $image): ?string
+    /** The matte scaled onto the photo's pixels, unless it was drawn in another shape. */
+    private function matte(string $bytes, int $width, int $height): ?\GdImage
     {
+        $this->reason = 'unreadable matte';
+        $size = @getimagesizefromstring($bytes);
+        if (! $size || $size[0] * $size[1] > ProductImageImporter::MAX_PIXELS) {
+            return null;
+        }
+        if (abs($size[0] / $size[1] - $width / $height) > self::MAX_MATTE_STRETCH * $width / $height) {
+            $this->reason = 'matte framed differently';
+
+            return null;
+        }
+        $matte = @imagecreatefromstring($bytes);
+        if (! $matte) {
+            return null;
+        }
+        imagepalettetotruecolor($matte);
+        $scaled = imagescale($matte, $width, $height, IMG_BILINEAR_FIXED);
+        imagedestroy($matte);
+
+        return $scaled ?: null;
+    }
+
+    private function cutImage(\GdImage $image, ?\GdImage $matte = null, string $key = 'green'): ?string
+    {
+        $this->sides = [];
+        $this->keyable = false;
         $width = imagesx($image);
         $height = imagesy($image);
         if ($width < 32 || $height < 32) {
@@ -140,7 +254,13 @@ class ProductPhotoCutout
 
                 return null;
             }
-            // The backdrop's own unevenness (a soft gradient, JPEG noise) sets how close counts as backdrop.
+            $this->sides = $this->sides($image, $ring, $backdrop);
+            $distances = [];
+            foreach ($border as $i => $index) {
+                $distances[] = self::clear($borderColours[$i]) ? 0.0 : $this->distance($borderColours[$i] & 0xFFFFFF, $this->backdropAt($index % $width, intdiv($index, $width), $width, $height));
+            }
+            sort($distances);
+            // What is left of the backdrop's unevenness (JPEG noise, a mottled paper) sets how close counts as backdrop.
             $tolerance = (int) min(40, max(14, ceil($distances[(int) floor(0.95 * (count($distances) - 1))] + 8)));
             $typical = $distances[intdiv(count($distances) - 1, 2)];
         }
@@ -154,7 +274,7 @@ class ProductPhotoCutout
                 $near .= match (true) {
                     self::clear($colour) => "\0",
                     $alphaOnly => "\xFF",
-                    default => chr((int) min(255, round($this->distance($colour & 0xFFFFFF, $backdrop)))),
+                    default => chr((int) min(255, round($this->distance($colour & 0xFFFFFF, $this->backdropAt($x, $y, $width, $height))))),
                 };
             }
         }
@@ -184,7 +304,10 @@ class ProductPhotoCutout
         // colour as the border itself is backdrop too. A product surface of a near colour (a white
         // dial on cream) sits measurably further away and stays.
         $seen = $mask;
+        $openings = str_repeat("\0", $count);
         $hole = max(self::HOLE_PIXELS, (int) round(0.0002 * $count));
+        // Measured at MAX_SIDE; a smaller photo's openings are proportionally thinner.
+        $holeWidth = max(2.0, self::HOLE_WIDTH * max($width, $height) / self::MAX_SIDE);
         for ($start = 0; $start < $count; $start++) {
             if ($seen[$start] !== "\0" || ord($near[$start]) > $tolerance) {
                 continue;
@@ -193,11 +316,13 @@ class ProductPhotoCutout
             $stack = [$start];
             $patch = [];
             $sum = 0;
+            $box = [$width, $height, -1, -1];
             while ($stack !== []) {
                 $index = array_pop($stack);
                 $patch[] = $index;
                 $sum += ord($near[$index]);
                 $x = $index % $width;
+                $box = [min($box[0], $x), min($box[1], intdiv($index, $width)), max($box[2], $x), max($box[3], intdiv($index, $width))];
                 foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
                     if ($next >= 0 && $next < $count && $seen[$next] === "\0" && ord($near[$next]) <= $tolerance) {
                         $seen[$next] = "\1";
@@ -205,9 +330,11 @@ class ProductPhotoCutout
                     }
                 }
             }
-            if (count($patch) >= $hole && $sum / count($patch) <= $typical + self::HOLE_MATCH) {
+            $long = max($box[2] - $box[0], $box[3] - $box[1]) + 1;
+            if (count($patch) >= $hole && count($patch) / $long >= $holeWidth && $sum / count($patch) <= $typical + self::HOLE_MATCH) {
                 foreach ($patch as $index) {
                     $mask[$index] = "\1";
+                    $openings[$index] = "\1";
                 }
             }
         }
@@ -220,6 +347,7 @@ class ProductPhotoCutout
         // the fill does not cross.
         $shade = $this->tint($backdrop);
         if (! $alphaOnly && abs($shade[0] - 1 / 3) + abs($shade[1] - 1 / 3) >= 0.012) {
+            [$rows, $columns] = $this->productSpans($image, $mask);
             $before = $mask;
             $stack = [];
             for ($index = 0; $index < $count; $index++) {
@@ -236,8 +364,15 @@ class ProductPhotoCutout
                     if ($next < 0 || $next >= $count || $mask[$next] !== "\0") {
                         continue;
                     }
-                    $colour = imagecolorat($image, $next % $width, intdiv($next, $width));
-                    if (self::light($colour) >= $from - self::MAX_SHADOW_STEP && $this->isShadow($colour, $backdrop, $shade)) {
+                    [$nx, $ny] = [$next % $width, intdiv($next, $width)];
+                    // Shading inside the product (a page gutter, the band under a ledge) has the
+                    // backdrop's tint too; only what lies outside the product's own extent is shadow.
+                    if (($nx >= $rows[$ny][0] && $nx <= $rows[$ny][1]) || ($ny >= $columns[$nx][0] && $ny <= $columns[$nx][1])) {
+                        continue;
+                    }
+                    $colour = imagecolorat($image, $nx, $ny);
+                    $local = $this->backdropAt($nx, $ny, $width, $height);
+                    if (self::light($colour) >= $from - self::MAX_SHADOW_STEP && $this->isShadow($colour, $local, $this->tint($local))) {
                         $mask[$next] = "\1";
                         $stack[] = $next;
                         $removed++;
@@ -248,6 +383,85 @@ class ProductPhotoCutout
                 $mask = $before;
             }
         }
+
+        // Backdrop-coloured patches the product closes in on every side are product (a lit page),
+        // unless they were taken as an opening above.
+        $outside = str_repeat("\0", $count);
+        $stack = [];
+        foreach ($border as $index) {
+            if ($mask[$index] === "\1") {
+                $outside[$index] = "\1";
+                $stack[] = $index;
+            }
+        }
+        while ($stack !== []) {
+            $index = array_pop($stack);
+            $x = $index % $width;
+            foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
+                if ($next >= 0 && $next < $count && $mask[$next] === "\1" && $outside[$next] === "\0") {
+                    $outside[$next] = "\1";
+                    $stack[] = $next;
+                }
+            }
+        }
+        for ($index = 0; $index < $count; $index++) {
+            if ($mask[$index] === "\1" && $outside[$index] === "\0" && $openings[$index] === "\0") {
+                $mask[$index] = "\0";
+            }
+        }
+        unset($outside);
+
+        // A narrow backdrop-coloured gap with product on both sides of the row (a lit page gutter
+        // that opens at the top) is product too, as long as product closes it from below: rows are
+        // filled bottom-up, so a fold below a V-shaped opening fills while the V, wider than a gap
+        // once it opens up and seen through from above, stays clear, with any specks floating in it.
+        // Thin slits between pages, too wide for a row to span, are first filled the same way along
+        // columns (up to a fifth of that height), so they do not cut the fold off from what holds it.
+        $notch = (int) round(self::NOTCH_WIDTH * $width);
+        $fill = function (int $length, \Closure $at, int $lines, int $widest, \Closure $supported) use (&$mask, $openings, $near, $typical): void {
+            for ($line = $lines - 1; $line >= 0; $line--) {
+                $last = -1;
+                for ($step = 0; $step < $length; $step++) {
+                    if ($mask[$at($line, $step)] === "\1") {
+                        continue;
+                    }
+                    $gap = $step - $last - 1;
+                    if ($last >= 0 && $gap > 0 && $gap <= $widest) {
+                        $open = false;
+                        $sum = 0;
+                        $held = 0;
+                        for ($run = $last + 1; $run < $step; $run++) {
+                            $index = $at($line, $run);
+                            $open = $open || $openings[$index] === "\1";
+                            $sum += ord($near[$index]);
+                            $held += $supported($mask, $line, $run) ? 1 : 0;
+                        }
+                        // A gap as close to the backdrop as the border is a real slot, not a lit gutter.
+                        if (! $open && $held >= 0.9 * $gap && $sum / $gap > $typical + self::HOLE_MATCH) {
+                            for ($run = $last + 1; $run < $step; $run++) {
+                                $mask[$at($line, $run)] = "\0";
+                            }
+                        }
+                    }
+                    $last = $step;
+                }
+            }
+        };
+        $fill(
+            $height,
+            fn (int $x, int $y) => $y * $width + $x,
+            $width,
+            max(4, intdiv($notch, 5)),
+            fn () => true,
+        );
+        $fill(
+            $width,
+            fn (int $y, int $x) => $y * $width + $x,
+            $height,
+            $notch,
+            fn (string $mask, int $y, int $x) => $y < $height - 1 && $mask[($y + 1) * $width + $x] === "\0",
+        );
+        unset($openings);
 
         // Single-pixel spurs on the outline are JPEG ringing, not product.
         for ($pass = 0; $pass < 2; $pass++) {
@@ -272,6 +486,71 @@ class ProductPhotoCutout
         if ($keep === null) {
             return null;
         }
+        // The matte decides the outline where colour cannot: a lit page as pale as the backdrop, or the
+        // backdrop seen through a V between pages. Each pixel's share of key colour is its transparency.
+        $strength = null;
+        if ($matte !== null && ! $alphaOnly) {
+            $strength = '';
+            $keyed = '';
+            for ($y = 0; $y < $height; $y++) {
+                for ($x = 0; $x < $width; $x++) {
+                    $c = imagecolorat($matte, $x, $y);
+                    $share = BannerReferenceImage::keyStrength($key, ($c >> 16) & 255, ($c >> 8) & 255, $c & 255);
+                    // A product part already in the key colour (a green button on a stand) was not painted over.
+                    $own = imagecolorat($image, $x, $y);
+                    if (BannerReferenceImage::keyStrength($key, ($own >> 16) & 255, ($own >> 8) & 255, $own & 255) > 0.0) {
+                        $share = 0.0;
+                    }
+                    $strength .= chr((int) round(255 * $share));
+                    $keyed .= $share >= 0.5 ? "\1" : "\0";
+                }
+            }
+            [$matched, $matchedBox] = $this->mainObject($keyed, $width, $height);
+            if ($matched === null) {
+                $this->reason = 'matte: '.$this->reason;
+
+                return null;
+            }
+            [$both, $either] = [0, 0];
+            // Centres of mass (x, y, count) of both outlines: a matte drawn a few pixels off still overlaps
+            // most of the photo's cutout, but its centre moves the whole way.
+            [$ownCentre, $drawnCentre] = [[0, 0, 0], [0, 0, 0]];
+            for ($index = 0; $index < $count; $index++) {
+                $own = $keep[$index] === "\1";
+                $drawn = $matched[$index] === "\1";
+                $both += $own && $drawn ? 1 : 0;
+                $either += $own || $drawn ? 1 : 0;
+                [$x, $y] = [$index % $width, intdiv($index, $width)];
+                if ($own) {
+                    $ownCentre = [$ownCentre[0] + $x, $ownCentre[1] + $y, $ownCentre[2] + 1];
+                }
+                if ($drawn) {
+                    $drawnCentre = [$drawnCentre[0] + $x, $drawnCentre[1] + $y, $drawnCentre[2] + 1];
+                }
+            }
+            $shift = hypot($ownCentre[0] / max(1, $ownCentre[2]) - $drawnCentre[0] / max(1, $drawnCentre[2]), $ownCentre[1] / max(1, $ownCentre[2]) - $drawnCentre[1] / max(1, $drawnCentre[2]));
+            if ($both < self::MIN_MATTE_AGREEMENT * $either || $shift > max(2.0, self::MAX_MATTE_SHIFT * max($width, $height))) {
+                $this->reason = 'matte does not match the photo';
+
+                return null;
+            }
+            // The matte's soft outline runs past the half-key line: pixels just outside it keep their share.
+            [$keep, $box, $mask] = [$matched, $matchedBox, $keyed];
+            for ($index = 0; $index < $count; $index++) {
+                if ($matched[$index] === "\0" && ord($strength[$index]) < 242) {
+                    $x = $index % $width;
+                    foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
+                        if ($next >= 0 && $next < $count && $matched[$next] === "\1") {
+                            $keep[$index] = "\1";
+                            [$x, $y] = [$index % $width, intdiv($index, $width)];
+                            $box = [min($box[0], $x), min($box[1], $y), max($box[2], $x), max($box[3], $y)];
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        $this->keyable = ! $alphaOnly;
         [$left, $top, $right, $bottom] = $box;
         // An antialiased outline is a few pixels wide, each a blend of product and backdrop, so the kept
         // pixels within EDGE_DEPTH steps of the backdrop are all feathered, not only the outermost one.
@@ -309,16 +588,23 @@ class ProductPhotoCutout
                 $c = imagecolorat($image, $x, $y);
                 $rgb = [($c >> 16) & 255, ($c >> 8) & 255, $c & 255];
                 $alpha = 1.0;
-                if ($edge[$index] === "\1") {
-                    // Edge pixels are part backdrop: blend them out by how close they are to it.
-                    $alpha = max(0.0, min(1.0, (ord($near[$index]) - $tolerance) / self::EDGE_RAMP));
-                    if (! $alphaOnly) {
-                        $alpha = min($alpha, $this->blendShare($image, $keep, $rgb, $backdrop, $x, $y, $width, $height));
+                if ($strength !== null || $edge[$index] === "\1") {
+                    $local = null;
+                    if ($strength !== null) {
+                        $alpha = 1 - ord($strength[$index]) / 255;
+                    } else {
+                        // Edge pixels are part backdrop: blend them out by how close they are to it.
+                        $alpha = max(0.0, min(1.0, (ord($near[$index]) - $tolerance) / self::EDGE_RAMP));
+                        if (! $alphaOnly) {
+                            $local = $this->backdropAt($x, $y, $width, $height);
+                            $alpha = min($alpha, $this->blendShare($image, $keep, $rgb, $local, $x, $y, $width, $height));
+                        }
                     }
                     if (! $alphaOnly && $alpha > 0.0 && $alpha < 1.0) {
+                        $local ??= $this->backdropAt($x, $y, $width, $height);
                         // Take the backdrop's share out of the colour too, or it shows as a light fringe on a
                         // darker scene: pixel = alpha * product + (1 - alpha) * backdrop.
-                        $from = [($backdrop >> 16) & 255, ($backdrop >> 8) & 255, $backdrop & 255];
+                        $from = [($local >> 16) & 255, ($local >> 8) & 255, $local & 255];
                         $share = max($alpha, self::MIN_UNMIX_ALPHA);
                         foreach ($rgb as $channel => $value) {
                             $rgb[$channel] = (int) max(0, min(255, round(($value - (1 - $share) * $from[$channel]) / $share)));
@@ -418,11 +704,36 @@ class ProductPhotoCutout
             return [null, [0, 0, 0, 0]];
         }
         [$left, $top, $right, $bottom] = $mainBox;
-        // A product touching the frame was cropped by the photographer, so it cannot be shown whole.
-        if ($left === 0 || $top === 0 || $right === $width - 1 || $bottom === $height - 1) {
-            $this->reason = 'product cropped by the photo edge';
+        // A product touching the frame was cropped by the photographer, so it cannot be shown whole;
+        // only a corner grazing the edge over a small share of the product's own extent, near either end
+        // of that side, is allowed.
+        foreach (['left' => $left === 0, 'top' => $top === 0, 'right' => $right === $width - 1, 'bottom' => $bottom === $height - 1] as $side => $touches) {
+            if (! $touches) {
+                continue;
+            }
+            $vertical = $side === 'left' || $side === 'right';
+            $line = match ($side) {
+                'left', 'top' => 0,
+                'right' => $width - 1,
+                'bottom' => $height - 1,
+            };
+            $contact = 0;
+            $extent = $vertical ? $bottom - $top + 1 : $right - $left + 1;
+            [$from, $to] = $vertical ? [$top, $bottom] : [$left, $right];
+            $corner = self::MAX_EDGE_CONTACT * $extent;
+            $midway = false;
+            for ($at = 0, $length = $vertical ? $height : $width; $at < $length; $at++) {
+                if ($labels[$vertical ? $at * $width + $line : $line * $width + $at] === $main) {
+                    $contact++;
+                    // A thin part (a cable, an antenna) cut off mid-side touches little of the frame.
+                    $midway = $midway || min($at - $from, $to - $at) > self::CORNER_SHARE * $extent;
+                }
+            }
+            if ($midway || $contact > $corner) {
+                $this->reason = 'product cropped by the photo edge';
 
-            return [null, [0, 0, 0, 0]];
+                return [null, [0, 0, 0, 0]];
+            }
         }
         $keep = str_repeat("\0", $count);
         for ($index = 0; $index < $count; $index++) {
@@ -432,6 +743,159 @@ class ProductPhotoCutout
         }
 
         return [$keep, $mainBox];
+    }
+
+    /**
+     * Each side's backdrop colour along its length: the ring's pixels near the backdrop colour averaged
+     * across the ring, gaps (a prop or shadow at the edge) bridged from their neighbours, and smoothed
+     * so JPEG noise does not carry inward.
+     *
+     * @return array<string, list<array{float, float, float}>>
+     */
+    private function sides(\GdImage $image, int $ring, int $backdrop): array
+    {
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $sides = [];
+        foreach (['top' => [$width, false, 0], 'bottom' => [$width, false, $height - $ring], 'left' => [$height, true, 0], 'right' => [$height, true, $width - $ring]] as $side => [$length, $vertical, $offset]) {
+            $profile = [];
+            for ($at = 0; $at < $length; $at++) {
+                $sum = [0, 0, 0];
+                $n = 0;
+                for ($depth = $offset; $depth < $offset + $ring; $depth++) {
+                    $colour = $vertical ? imagecolorat($image, $depth, $at) : imagecolorat($image, $at, $depth);
+                    if (self::clear($colour) || $this->distance($colour & 0xFFFFFF, $backdrop) > self::PLAIN_DISTANCE) {
+                        continue;
+                    }
+                    $sum = [$sum[0] + (($colour >> 16) & 255), $sum[1] + (($colour >> 8) & 255), $sum[2] + ($colour & 255)];
+                    $n++;
+                }
+                $profile[] = $n > 0 ? [$sum[0] / $n, $sum[1] / $n, $sum[2] / $n] : null;
+            }
+            $known = array_keys(array_filter($profile, fn ($value) => $value !== null));
+            $fallback = [($backdrop >> 16) & 255, ($backdrop >> 8) & 255, $backdrop & 255];
+            $before = null;
+            foreach ($profile as $at => $value) {
+                if ($value !== null) {
+                    $before = $at;
+
+                    continue;
+                }
+                $after = null;
+                foreach ($known as $candidate) {
+                    if ($candidate > $at) {
+                        $after = $candidate;
+                        break;
+                    }
+                }
+                $profile[$at] = match (true) {
+                    $before === null && $after === null => $fallback,
+                    $before === null => $profile[$after],
+                    $after === null => $profile[$before],
+                    default => array_map(fn ($a, $b) => $a + ($b - $a) * ($at - $before) / ($after - $before), $profile[$before], $profile[$after]),
+                };
+            }
+            $half = max(2, intdiv($length, 60));
+            $smooth = [];
+            for ($at = 0; $at < $length; $at++) {
+                $sum = [0.0, 0.0, 0.0];
+                $from = max(0, $at - $half);
+                $to = min($length - 1, $at + $half);
+                for ($near = $from; $near <= $to; $near++) {
+                    $sum = [$sum[0] + $profile[$near][0], $sum[1] + $profile[$near][1], $sum[2] + $profile[$near][2]];
+                }
+                $smooth[] = [$sum[0] / ($to - $from + 1), $sum[1] / ($to - $from + 1), $sum[2] / ($to - $from + 1)];
+            }
+            $sides[$side] = $smooth;
+        }
+
+        return $sides;
+    }
+
+    /** The backdrop colour at a pixel, blended in from the four sides (a Coons patch over the photo). */
+    private function backdropAt(int $x, int $y, int $width, int $height): int
+    {
+        $u = $width > 1 ? $x / ($width - 1) : 0.0;
+        $v = $height > 1 ? $y / ($height - 1) : 0.0;
+        ['top' => $top, 'bottom' => $bottom, 'left' => $left, 'right' => $right] = $this->sides;
+        $colour = 0;
+        for ($channel = 0; $channel < 3; $channel++) {
+            $corners = (1 - $u) * (1 - $v) * ($top[0][$channel] + $left[0][$channel]) / 2
+                + $u * (1 - $v) * ($top[$width - 1][$channel] + $right[0][$channel]) / 2
+                + (1 - $u) * $v * ($bottom[0][$channel] + $left[$height - 1][$channel]) / 2
+                + $u * $v * ($bottom[$width - 1][$channel] + $right[$height - 1][$channel]) / 2;
+            $value = (1 - $v) * $top[$x][$channel] + $v * $bottom[$x][$channel] + (1 - $u) * $left[$y][$channel] + $u * $right[$y][$channel] - $corners;
+            $colour = ($colour << 8) | (int) max(0, min(255, round($value)));
+        }
+
+        return $colour;
+    }
+
+    /**
+     * The product's extent along each row and column ([first, last], or [1, 0] for none), from the
+     * pixels that are neither backdrop nor shadow-coloured, ignoring specks.
+     *
+     * @return array{0: list<array{int, int}>, 1: list<array{int, int}>}
+     */
+    private function productSpans(\GdImage $image, string $mask): array
+    {
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $count = $width * $height;
+        $core = '';
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $index = $y * $width + $x;
+                if ($mask[$index] !== "\0") {
+                    $core .= "\0";
+
+                    continue;
+                }
+                $local = $this->backdropAt($x, $y, $width, $height);
+                // Looser than the fill's own test: the darkest, most saturated core of a cast shadow
+                // must not count as product and stretch the extent over the shadow.
+                $core .= $this->isShadow(imagecolorat($image, $x, $y), $local, $this->tint($local), 0.03, 0.12, 0.35) ? "\0" : "\1";
+            }
+        }
+        $pieces = [];
+        $largest = 0;
+        for ($start = 0; $start < $count; $start++) {
+            if ($core[$start] !== "\1") {
+                continue;
+            }
+            $core[$start] = "\2";
+            $stack = [$start];
+            $piece = [];
+            while ($stack !== []) {
+                $index = array_pop($stack);
+                $piece[] = $index;
+                $x = $index % $width;
+                foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
+                    if ($next >= 0 && $next < $count && $core[$next] === "\1") {
+                        $core[$next] = "\2";
+                        $stack[] = $next;
+                    }
+                }
+            }
+            if (count($piece) >= self::STRAY_PIXELS) {
+                $pieces[] = $piece;
+                $largest = max($largest, count($piece));
+            }
+        }
+        $rows = array_fill(0, $height, [1, 0]);
+        $columns = array_fill(0, $width, [1, 0]);
+        foreach ($pieces as $piece) {
+            if (count($piece) < self::MAX_STRAY * $largest) {
+                continue;
+            }
+            foreach ($piece as $index) {
+                [$x, $y] = [$index % $width, intdiv($index, $width)];
+                $rows[$y] = $rows[$y][0] > $rows[$y][1] ? [$x, $x] : [min($rows[$y][0], $x), max($rows[$y][1], $x)];
+                $columns[$x] = $columns[$x][0] > $columns[$x][1] ? [$y, $y] : [min($columns[$x][0], $y), max($columns[$x][1], $y)];
+            }
+        }
+
+        return [$rows, $columns];
     }
 
     /** A JPEG turned the way its camera's orientation tag says it is shown. */
@@ -539,16 +1003,17 @@ class ProductPhotoCutout
     }
 
     /** Darker than the backdrop with the backdrop's own tint: its shadow, not a light product edge. */
-    private function isShadow(int $colour, int $backdrop, array $shade): bool
+    private function isShadow(int $colour, int $backdrop, array $shade, float $tint = self::SHADOW_TINT, float $slope = self::SHADOW_TINT_SLOPE, float $darkest = 0.5): bool
     {
         $light = ((($colour >> 16) & 255) + (($colour >> 8) & 255) + ($colour & 255)) / 3;
         $backdropLight = ((($backdrop >> 16) & 255) + (($backdrop >> 8) & 255) + ($backdrop & 255)) / 3;
-        if ($light >= $backdropLight - 3 || $light < 0.5 * $backdropLight) {
+        if ($light >= $backdropLight - 3 || $light < $darkest * $backdropLight) {
             return false;
         }
         [$r, $g] = $this->tint($colour & 0xFFFFFF);
+        $drift = $tint + $slope * (1 - $light / $backdropLight);
 
-        return abs($r - $shade[0]) < 0.008 && abs($g - $shade[1]) < 0.008;
+        return abs($r - $shade[0]) < $drift && abs($g - $shade[1]) < $drift;
     }
 
     /** @param  list<int>  $colours */

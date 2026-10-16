@@ -9,6 +9,7 @@ use App\Models\CampaignPack;
 use App\Models\MediaAsset;
 use App\Models\SourceSnapshot;
 use App\Services\BannerCopySelector;
+use App\Services\BannerImageInspector;
 use App\Services\BannerReferenceImage;
 use App\Services\GoogleVertexBannerGenerator;
 use App\Services\ProviderCostCalculator;
@@ -17,8 +18,10 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Sleep;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class GoogleVertexBannerGeneratorTest extends TestCase
@@ -364,6 +367,81 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'stand-old'));
     }
 
+    public function test_the_redraw_starts_from_the_stores_main_photo_not_a_share_image_of_another_variant(): void
+    {
+        Storage::fake('local');
+        $scene = function (int $r, int $g, int $b): string {
+            $image = imagecreatetruecolor(600, 600);
+            for ($x = 0; $x < 600; $x += 20) {
+                imagefilledrectangle($image, $x, 0, $x + 9, 599, imagecolorallocate($image, $r, $g, $b));
+            }
+            ob_start();
+            imagejpeg($image);
+
+            return (string) ob_get_clean();
+        };
+        [$share, $main] = [$scene(120, 80, 40), $scene(214, 72, 38)];
+        Storage::disk('local')->put('product.jpg', $share);
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $page = '<html><head><title>Stand</title></head><body><div class="pdp-gallery"><button data-full-src="/uploads/stand-1.jpg"></button></div></body></html>';
+        $this->fakeVertex([self::keyed(), 'banner-background']);
+        Http::fake([
+            '93.184.216.34/product/stand' => Http::response($page, 200, ['Content-Type' => 'text/html']),
+            '93.184.216.34/uploads/stand-1.jpg' => Http::response($main, 200, ['Content-Type' => 'image/jpeg']),
+        ]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/share.webp']]);
+        $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
+
+        app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+
+        Http::assertSent(fn (Request $request) => str_contains($request->url(), 'flash-image') && count($request['contents'][0]['parts']) > 1
+            && base64_decode($request['contents'][0]['parts'][1]['inlineData']['data']) === $main);
+    }
+
+    public function test_image_checks_ask_for_low_thinking_drop_it_when_the_model_rejects_it_and_bill_thoughts(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $levels = [];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$levels) {
+                if (! str_contains($request->url(), 'gemini-3.5-flash:')) {
+                    return Http::response(self::image('banner-background'));
+                }
+                $levels[] = $request['generationConfig']['thinkingConfig']['thinkingLevel'] ?? null;
+
+                if (count($levels) === 1) {
+                    return Http::response(['error' => ['code' => 400, 'message' => 'Thinking level is not supported for this model.']], 400);
+                }
+                $response = self::inspection([]);
+                $response['usageMetadata']['thoughtsTokenCount'] = 40;
+
+                return Http::response($response);
+            },
+        ]);
+        $property = new \ReflectionProperty(BannerImageInspector::class, 'thinkingRejected');
+
+        try {
+            $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+            $checked = app(BannerImageInspector::class)->inspect('banner-background', 'image/png', 'Kindle Stand', '');
+        } finally {
+            $property->setValue(null, false);
+        }
+
+        $this->assertSame('banner-background', $result->imageBytes);
+        // Asked with low thinking, refused, asked again without it, and never with it afterwards.
+        $this->assertSame(['LOW', null, null], $levels);
+        // Thinking tokens are billed as output.
+        $this->assertSame(52, $checked['output_tokens']);
+    }
+
     public function test_a_retitled_page_with_the_same_sku_still_gives_its_gallery(): void
     {
         Storage::fake('local');
@@ -636,6 +714,71 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             $result->additionalCost,
             0.000001,
         );
+    }
+
+    #[DataProvider('mattes')]
+    public function test_a_studio_cutout_takes_its_outline_from_a_matte_of_the_photo(bool $aligned): void
+    {
+        Log::spy();
+        Storage::fake('local');
+        Storage::disk('local')->put('product.jpg', ProductPhotoCutoutTest::studio());
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        config()->set('campaigns.banners.check_product', true);
+        config()->set('campaigns.banners.matte_studio_cutouts', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use ($aligned) {
+                if (str_contains($request->url(), 'gemini-3.5-flash:')) {
+                    return Http::response(count($request['contents'][0]['parts']) > 2 ? self::match(true, '') : self::inspection([]));
+                }
+                $parts = $request['contents'][0]['parts'];
+                if (! str_contains((string) ($parts[0]['text'] ?? ''), 'Replace only the background')) {
+                    return Http::response(self::image('banner-background'));
+                }
+
+                return Http::response(self::image($aligned ? self::matteOf(base64_decode($parts[1]['inlineData']['data'])) : self::keyed()));
+            },
+        ]);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
+
+        // Either way the photo's own pixels, checked as usual; an unusable matte leaves the cutout as cut.
+        $this->assertSame('banner-background', $result->imageBytes);
+        $this->assertStudioCutout($result->productCutout);
+        $vertex = collect(Http::recorded())->map(fn (array $pair) => $pair[0])
+            ->filter(fn (Request $request) => str_contains($request->url(), 'aiplatform.googleapis.com'))->values();
+        $this->assertStringContainsString('flash-image', $vertex[0]->url());
+        $this->assertSame('image/png', $vertex[0]['contents'][0]['parts'][1]['inlineData']['mimeType']);
+        $this->assertCount(5, $vertex);
+        $aligned
+            ? Log::shouldNotHaveReceived('warning')
+            : Log::shouldHaveReceived('warning')->with('banner_studio_matte_unused', ['reason' => 'matte does not match the photo'])->once();
+    }
+
+    public static function mattes(): array
+    {
+        return ['lined up' => [true], 'redrawn elsewhere' => [false]];
+    }
+
+    /** The image model's matte of the studio photo: its stand's pages and base on pure green, the shadow gone. */
+    private static function matteOf(string $photo): string
+    {
+        $image = imagecreatefromstring($photo);
+        $f = imagesx($image) / 627;
+        imagefilledrectangle($image, 0, 0, imagesx($image) - 1, (int) (300 * $f) - 1, imagecolorallocate($image, 0, 255, 0));
+        imagefilledrectangle($image, 0, (int) (425 * $f) + 1, imagesx($image) - 1, imagesy($image) - 1, imagecolorallocate($image, 0, 255, 0));
+        imagefilledrectangle($image, 0, 0, (int) (150 * $f) - 1, imagesy($image) - 1, imagecolorallocate($image, 0, 255, 0));
+        imagefilledrectangle($image, (int) (476 * $f) + 1, 0, imagesx($image) - 1, imagesy($image) - 1, imagecolorallocate($image, 0, 255, 0));
+        imagefilledrectangle($image, 0, 0, (int) (165 * $f) - 1, (int) (390 * $f) - 1, imagecolorallocate($image, 0, 255, 0));
+        imagefilledrectangle($image, (int) (461 * $f) + 1, 0, imagesx($image) - 1, (int) (390 * $f) - 1, imagecolorallocate($image, 0, 255, 0));
+        ob_start();
+        imagepng($image);
+
+        return (string) ob_get_clean();
     }
 
     private function fakeVertex(array $scenes): void
@@ -1026,6 +1169,12 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         config()->set('campaigns.banners.check_product', true);
 
         $this->assertNotSame($unchecked, BannerReferenceImage::key('Kindle Stand'));
+
+        // And studio cutouts made before matting was turned on.
+        config()->set('campaigns.banners.matte_studio_cutouts', false);
+        $unmatted = BannerReferenceImage::key('Kindle Stand');
+        config()->set('campaigns.banners.matte_studio_cutouts', true);
+        $this->assertNotSame($unmatted, BannerReferenceImage::key('Kindle Stand'));
     }
 
     public function test_cutouts_are_remade_for_a_renamed_brand_because_its_own_mark_is_exempt(): void

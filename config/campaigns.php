@@ -56,6 +56,8 @@ return [
         'inspection_attempts' => (int) env('BANNER_INSPECTION_ATTEMPTS', 2),
         // An inspection normally answers in seconds; a stalled one must not eat the attempt's budget.
         'inspection_timeout_seconds' => 30,
+        // Image checks ask for little reasoning (Gemini 3 thinkingLevel); empty leaves the model's default.
+        'inspection_thinking_level' => env('BANNER_INSPECTION_THINKING', 'LOW'),
         // The product cutout is compared with the store's product photo once, before it is kept (and,
         // with compositing off, every drawn background is, and redrawn if it shows a different object).
         // It runs only while inspect_images is on, which switches every image check off together.
@@ -73,6 +75,9 @@ return [
         // against it) and composited on top, so it cannot be redrawn as something else. Pack 20's stand
         // came back as a paper book on wood through eight rounds of redraw-and-check.
         'composite_product' => env('BANNER_COMPOSITE_PRODUCT', true),
+        // A studio cutout's outline comes from a key-colour matte the image model draws over the photo
+        // (its pixels stay the photo's own); colour alone left the backdrop seen between the stand's pages.
+        'matte_studio_cutouts' => env('BANNER_STUDIO_MATTE', true),
         'disk' => env('BANNER_STORAGE_DISK', env('CAMPAIGN_MEDIA_DISK', 'local')),
         'prices_per_million' => [
             'input' => 0.50,
