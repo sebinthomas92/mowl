@@ -26,6 +26,20 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertSame(127, ($corner >> 24) & 127);
     }
 
+    public function test_a_grey_product_on_a_white_backdrop_is_not_taken_for_a_shadow(): void
+    {
+        $image = imagecreatetruecolor(400, 400);
+        imagefill($image, 0, 0, imagecolorallocate($image, 250, 250, 250));
+        imagefilledrectangle($image, 120, 120, 280, 260, imagecolorallocate($image, 170, 170, 170));
+        imagefilledrectangle($image, 110, 260, 290, 290, imagecolorallocate($image, 214, 72, 38));
+
+        $png = (new ProductPhotoCutout)->cut(self::encode($image));
+
+        $this->assertNotNull($png);
+        // The grey body and the red base, not the base alone.
+        $this->assertEqualsWithDelta(171, getimagesizefromstring($png)[1], 4);
+    }
+
     public function test_a_styled_scene_or_a_set_with_props_is_not_cut_out(): void
     {
         $cutter = new ProductPhotoCutout;

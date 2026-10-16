@@ -63,6 +63,18 @@ HTML;
         ], array_slice($page['images'], 0, 4));
     }
 
+    public function test_a_full_gallery_leaves_room_for_the_share_image(): void
+    {
+        $gallery = implode('', array_map(fn (int $i) => "<button data-full-src=\"/uploads/photo-{$i}.jpg\"></button>", range(1, 15)));
+        $html = '<html><head><title>Stand</title><meta property="og:image" content="/uploads/share.webp"></head><body>'.$gallery.'</body></html>';
+        Http::fake(['93.184.216.34/*' => Http::response($html, 200, ['Content-Type' => 'text/html; charset=UTF-8'])]);
+
+        $page = app(ProductPageFetcher::class)->fetch('https://93.184.216.34/product/stand');
+
+        $this->assertContains('https://93.184.216.34/uploads/share.webp', $page['images']);
+        $this->assertSame('https://93.184.216.34/uploads/photo-1.jpg', $page['images'][0]);
+    }
+
     public function test_it_downloads_and_validates_a_product_image(): void
     {
         $bytes = $this->imageBytes();

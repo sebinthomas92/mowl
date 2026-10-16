@@ -228,7 +228,8 @@ class ProductPageFetcher
      */
     private function extractImageUrls(DOMXPath $xpath, array $gallery, string $resolvedUrl): array
     {
-        $candidates = $gallery;
+        // A few places stay free for the share image and page images, in case gallery photos fail to download.
+        $candidates = array_slice($gallery, 0, max(1, (int) config('campaigns.source.max_image_candidates') - 4));
         foreach (['og:image', 'og:image:secure_url', 'twitter:image', 'twitter:image:src'] as $property) {
             $value = $this->metaProperty($xpath, $property) ?: $this->metaContent($xpath, $property);
             if ($value) {

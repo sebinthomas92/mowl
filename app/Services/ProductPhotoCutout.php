@@ -128,23 +128,33 @@ class ProductPhotoCutout
             }
         }
 
-        // The photo's own shadow on the backdrop (the backdrop's tint, only darker) goes too: the banner
-        // draws a shadow for its own scene, and a cream shadow patch would show on a dark one.
+        // The photo's own shadow on the backdrop (the backdrop's tint, only somewhat darker) goes too:
+        // the banner draws a shadow for its own scene, and a cream shadow patch would show on a dark
+        // one. On a neutral backdrop a grey product has the same tint as a shadow, so nothing is taken
+        // there, and a removal that would take a large part of the object is undone.
         $shade = $this->tint($backdrop);
-        $stack = [];
-        for ($index = 0; $index < $count; $index++) {
-            if ($mask[$index] === "\1") {
-                $stack[] = $index;
-            }
-        }
-        while ($stack !== []) {
-            $index = array_pop($stack);
-            $x = $index % $width;
-            foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
-                if ($next >= 0 && $next < $count && $mask[$next] === "\0" && $this->isShadow(imagecolorat($image, $next % $width, intdiv($next, $width)), $backdrop, $shade)) {
-                    $mask[$next] = "\1";
-                    $stack[] = $next;
+        if (abs($shade[0] - 1 / 3) + abs($shade[1] - 1 / 3) >= 0.012) {
+            $before = $mask;
+            $stack = [];
+            for ($index = 0; $index < $count; $index++) {
+                if ($mask[$index] === "\1") {
+                    $stack[] = $index;
                 }
+            }
+            $removed = 0;
+            while ($stack !== []) {
+                $index = array_pop($stack);
+                $x = $index % $width;
+                foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
+                    if ($next >= 0 && $next < $count && $mask[$next] === "\0" && $this->isShadow(imagecolorat($image, $next % $width, intdiv($next, $width)), $backdrop, $shade)) {
+                        $mask[$next] = "\1";
+                        $stack[] = $next;
+                        $removed++;
+                    }
+                }
+            }
+            if ($removed > 0.35 * substr_count($before, "\0")) {
+                $mask = $before;
             }
         }
 
@@ -315,7 +325,7 @@ class ProductPhotoCutout
     {
         $light = ((($colour >> 16) & 255) + (($colour >> 8) & 255) + ($colour & 255)) / 3;
         $backdropLight = ((($backdrop >> 16) & 255) + (($backdrop >> 8) & 255) + ($backdrop & 255)) / 3;
-        if ($light >= $backdropLight - 3 || $light < 25) {
+        if ($light >= $backdropLight - 3 || $light < 0.5 * $backdropLight) {
             return false;
         }
         [$r, $g] = $this->tint($colour & 0xFFFFFF);
