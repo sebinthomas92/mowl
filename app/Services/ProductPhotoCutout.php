@@ -43,7 +43,7 @@ class ProductPhotoCutout
     private const MIN_UNMIX_ALPHA = 0.25;
 
     /** How much darker a shadow pixel may be than the neighbour the shadow fill reached it from. */
-    private const MAX_SHADOW_STEP = 10.0;
+    private const MAX_SHADOW_STEP = 16.0;
 
     /**
      * How far a shadow's tint may drift from the backdrop's: a little for JPEG noise, plus more the
@@ -51,7 +51,7 @@ class ProductPhotoCutout
      */
     private const SHADOW_TINT = 0.008;
 
-    private const SHADOW_TINT_SLOPE = 0.04;
+    private const SHADOW_TINT_SLOPE = 0.12;
 
     /** Backdrop-coloured gaps at most this wide between product on both sides of a row are product (a page gutter). */
     private const NOTCH_WIDTH = 8;
