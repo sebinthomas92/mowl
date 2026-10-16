@@ -398,7 +398,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             && base64_decode($request['contents'][0]['parts'][1]['inlineData']['data']) === $main);
     }
 
-    public function test_image_checks_ask_for_low_thinking_and_drop_it_when_the_model_rejects_it(): void
+    public function test_image_checks_ask_for_low_thinking_drop_it_when_the_model_rejects_it_and_bill_thoughts(): void
     {
         Storage::fake('local');
         Storage::disk('local')->put('product.png', 'product-bytes');
@@ -415,16 +415,20 @@ class GoogleVertexBannerGeneratorTest extends TestCase
                 }
                 $levels[] = $request['generationConfig']['thinkingConfig']['thinkingLevel'] ?? null;
 
-                return count($levels) === 1
-                    ? Http::response(['error' => ['code' => 400, 'message' => 'Thinking level is not supported for this model.']], 400)
-                    : Http::response(self::inspection([]));
+                if (count($levels) === 1) {
+                    return Http::response(['error' => ['code' => 400, 'message' => 'Thinking level is not supported for this model.']], 400);
+                }
+                $response = self::inspection([]);
+                $response['usageMetadata']['thoughtsTokenCount'] = 40;
+
+                return Http::response($response);
             },
         ]);
         $property = new \ReflectionProperty(BannerImageInspector::class, 'thinkingRejected');
 
         try {
             $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
-            app(BannerImageInspector::class)->inspect('banner-background', 'image/png', 'Kindle Stand', '');
+            $checked = app(BannerImageInspector::class)->inspect('banner-background', 'image/png', 'Kindle Stand', '');
         } finally {
             $property->setValue(null, false);
         }
@@ -432,6 +436,8 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $this->assertSame('banner-background', $result->imageBytes);
         // Asked with low thinking, refused, asked again without it, and never with it afterwards.
         $this->assertSame(['LOW', null, null], $levels);
+        // Thinking tokens are billed as output.
+        $this->assertSame(52, $checked['output_tokens']);
     }
 
     public function test_a_retitled_page_with_the_same_sku_still_gives_its_gallery(): void

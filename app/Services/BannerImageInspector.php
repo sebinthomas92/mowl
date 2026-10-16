@@ -76,7 +76,8 @@ class BannerImageInspector
             'product_shown' => $sceneOnly && $decoded['product_shown'],
             'other_objects' => $cutout ? array_values(array_filter(array_map(fn ($object) => is_string($object) ? trim($object) : '', $decoded['other_objects']))) : [],
             'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
-            'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0),
+            // Thinking tokens are billed as output too.
+            'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0) + (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
         ];
     }
 
@@ -127,7 +128,8 @@ class BannerImageInspector
             'differences' => trim((string) ($decoded['differences'] ?? '')),
             'split' => $decoded['split'],
             'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
-            'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0),
+            // Thinking tokens are billed as output too.
+            'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0) + (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
         ];
     }
 

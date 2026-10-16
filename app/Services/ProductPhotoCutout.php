@@ -97,6 +97,8 @@ class ProductPhotoCutout
             [$width, $height] = [max(1, (int) round(imagesx($source) * $factor)), max(1, (int) round(imagesy($source) * $factor))];
             // Some GD builds return false for bicubic scaling (PHP 8.5 with GD 2.3.3); bilinear works everywhere.
             $image = imagescale($source, $width, $height, IMG_BICUBIC) ?: imagescale($source, $width, $height, IMG_BILINEAR_FIXED);
+            // The full-size photo is not held while the cutout allocates its masks.
+            imagedestroy($source);
         }
         if (! $image) {
             $this->reason = 'photo could not be scaled';
