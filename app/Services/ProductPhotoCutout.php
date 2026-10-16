@@ -30,6 +30,9 @@ class ProductPhotoCutout
 
     private const STRAY_PIXELS = 40;
 
+    /** How much darker a shadow pixel may be than the neighbour the shadow fill reached it from. */
+    private const MAX_SHADOW_STEP = 10.0;
+
     private const MIN_COVERAGE = 0.03;
 
     private const MAX_COVERAGE = 0.85;
@@ -47,6 +50,11 @@ class ProductPhotoCutout
         $this->reason = 'unreadable image';
         $size = @getimagesizefromstring($bytes);
         if (! $size || $size[0] * $size[1] > self::MAX_PIXELS) {
+            return null;
+        }
+        if (max($size[0], $size[1]) < ProductImageImporter::MIN_SIDE) {
+            $this->reason = 'photo too small';
+
             return null;
         }
         $source = @imagecreatefromstring($bytes);
@@ -155,7 +163,9 @@ class ProductPhotoCutout
         // The photo's own shadow on the backdrop (the backdrop's tint, only somewhat darker) goes too:
         // the banner draws a shadow for its own scene, and a cream shadow patch would show on a dark
         // one. On a neutral backdrop a grey product has the same tint as a shadow, so nothing is taken
-        // there, and a removal that would take a large part of the object is undone.
+        // there, and a removal that would take a large part of the object is undone. A shadow darkens
+        // gradually from the backdrop; a product part of the same hue starts at a sharp outline, which
+        // the fill does not cross.
         $shade = $this->tint($backdrop);
         if (! $alphaOnly && abs($shade[0] - 1 / 3) + abs($shade[1] - 1 / 3) >= 0.012) {
             $before = $mask;
@@ -169,8 +179,13 @@ class ProductPhotoCutout
             while ($stack !== []) {
                 $index = array_pop($stack);
                 $x = $index % $width;
+                $from = self::light(imagecolorat($image, $x, intdiv($index, $width)));
                 foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
-                    if ($next >= 0 && $next < $count && $mask[$next] === "\0" && $this->isShadow(imagecolorat($image, $next % $width, intdiv($next, $width)), $backdrop, $shade)) {
+                    if ($next < 0 || $next >= $count || $mask[$next] !== "\0") {
+                        continue;
+                    }
+                    $colour = imagecolorat($image, $next % $width, intdiv($next, $width));
+                    if (self::light($colour) >= $from - self::MAX_SHADOW_STEP && $this->isShadow($colour, $backdrop, $shade)) {
                         $mask[$next] = "\1";
                         $stack[] = $next;
                         $removed++;
@@ -187,7 +202,8 @@ class ProductPhotoCutout
             for ($y = 1; $y < $height - 1; $y++) {
                 for ($x = 1; $x < $width - 1; $x++) {
                     $index = $y * $width + $x;
-                    if ($mask[$index] === "\0" && $this->touchesBackdrop($mask, $index, $x, $y, $width, $height)) {
+                    // Only pixels close to the backdrop: a thin wire or chain stands well apart from it.
+                    if ($mask[$index] === "\0" && ord($near[$index]) < $tolerance + self::EDGE_RAMP && $this->touchesBackdrop($mask, $index, $x, $y, $width, $height)) {
                         $solid = 0;
                         foreach ([-$width - 1, -$width, -$width + 1, -1, 1, $width - 1, $width, $width + 1] as $offset) {
                             $solid += $mask[$index + $offset] === "\0" ? 1 : 0;
@@ -361,6 +377,11 @@ class ProductPhotoCutout
         $yellowBlue = (($ar + $ag) / 2 - $ab) - (($br + $bg) / 2 - $bb);
 
         return sqrt($light * $light + 2 * $redGreen * $redGreen + 2 * $yellowBlue * $yellowBlue);
+    }
+
+    private static function light(int $colour): float
+    {
+        return ((($colour >> 16) & 255) + (($colour >> 8) & 255) + ($colour & 255)) / 3;
     }
 
     private static function clear(int $colour): bool

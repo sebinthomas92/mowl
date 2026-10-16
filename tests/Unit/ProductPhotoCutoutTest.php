@@ -37,7 +37,35 @@ class ProductPhotoCutoutTest extends TestCase
 
         $this->assertNotNull($png);
         // The grey body and the red base, not the base alone.
-        $this->assertEqualsWithDelta(171, getimagesizefromstring($png)[1], 4);
+        $this->assertEqualsWithDelta(342, getimagesizefromstring($png)[1], 8);
+    }
+
+    public function test_a_same_hue_part_and_a_thin_antenna_stay_with_the_product(): void
+    {
+        $image = self::backdrop(627);
+        // A beige lid with the cream backdrop's own tint, only darker: a sharp outline, not a soft shadow.
+        imagefilledrectangle($image, 220, 260, 400, 330, imagecolorallocate($image, 181, 175, 164));
+        imagefilledrectangle($image, 180, 330, 440, 420, imagecolorallocate($image, 214, 72, 38));
+        // A one-pixel antenna standing on the lid.
+        imageline($image, 310, 200, 310, 259, imagecolorallocate($image, 40, 40, 40));
+
+        $png = (new ProductPhotoCutout)->cut(self::encode($image));
+
+        $this->assertNotNull($png);
+        $this->assertEqualsWithDelta(221, getimagesizefromstring($png)[1], 4);
+    }
+
+    public function test_a_thumbnail_is_not_cut_out(): void
+    {
+        $cutter = new ProductPhotoCutout;
+        $image = imagecreatetruecolor(240, 240);
+        imagefill($image, 0, 0, imagecolorallocate($image, 250, 250, 250));
+        imagefilledrectangle($image, 60, 60, 180, 180, imagecolorallocate($image, 214, 72, 38));
+        ob_start();
+        imagepng($image);
+
+        $this->assertNull($cutter->cut((string) ob_get_clean()));
+        $this->assertSame('photo too small', $cutter->reason);
     }
 
     public function test_a_transparent_png_keeps_its_own_soft_edges(): void
@@ -53,9 +81,9 @@ class ProductPhotoCutoutTest extends TestCase
 
         $this->assertNotNull($png);
         $cutout = imagecreatefromstring($png);
-        $this->assertSame(0, (imagecolorat($cutout, 50, 40) >> 24) & 127);
+        $this->assertSame(0, (imagecolorat($cutout, 100, 80) >> 24) & 127);
         // The half-clear edge column stays mostly clear instead of turning solid.
-        $this->assertGreaterThanOrEqual(90, (imagecolorat($cutout, 0, 40) >> 24) & 127);
+        $this->assertGreaterThanOrEqual(90, (imagecolorat($cutout, 0, 80) >> 24) & 127);
     }
 
     public function test_a_black_product_on_a_fully_clear_png_is_kept_by_its_alpha(): void
@@ -70,8 +98,8 @@ class ProductPhotoCutoutTest extends TestCase
         $png = (new ProductPhotoCutout)->cut(self::encode($image));
 
         $this->assertNotNull($png);
-        $this->assertSame([101, 81], array_slice(getimagesizefromstring($png), 0, 2));
-        $this->assertSame(0, (imagecolorat(imagecreatefromstring($png), 50, 40) >> 24) & 127);
+        $this->assertSame([202, 162], array_slice(getimagesizefromstring($png), 0, 2));
+        $this->assertSame(0, (imagecolorat(imagecreatefromstring($png), 100, 80) >> 24) & 127);
     }
 
     public function test_a_camera_jpeg_is_turned_upright_before_cutting(): void
@@ -87,8 +115,8 @@ class ProductPhotoCutoutTest extends TestCase
 
         $this->assertNotNull($png);
         [$width, $height] = getimagesizefromstring($png);
-        $this->assertEqualsWithDelta(81, $width, 8);
-        $this->assertEqualsWithDelta(161, $height, 8);
+        $this->assertEqualsWithDelta(162, $width, 12);
+        $this->assertEqualsWithDelta(322, $height, 12);
     }
 
     public function test_a_styled_scene_or_a_set_with_props_is_not_cut_out(): void
@@ -157,8 +185,13 @@ class ProductPhotoCutoutTest extends TestCase
         return $image;
     }
 
+    /** Drawn at 300-400 px for easy coordinates, saved at twice that: smaller photos are thumbnails. */
     private static function encode(\GdImage $image, bool $jpeg = false): string
     {
+        if (imagesx($image) < 500) {
+            $image = imagescale($image, imagesx($image) * 2, imagesy($image) * 2, IMG_NEAREST_NEIGHBOUR);
+            imagesavealpha($image, true);
+        }
         ob_start();
         $jpeg ? imagejpeg($image, null, 85) : imagepng($image);
 

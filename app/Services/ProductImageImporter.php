@@ -10,6 +10,9 @@ use Throwable;
 
 class ProductImageImporter
 {
+    /** Longest side, in pixels, below which a photo is a thumbnail. */
+    public const MIN_SIDE = 500;
+
     public function __construct(private ProductPageFetcher $fetcher) {}
 
     public function importFirst(Product $product, SourceSnapshot $source, array $imageUrls): ?MediaAsset
@@ -23,42 +26,28 @@ class ProductImageImporter
             return $existing;
         }
 
+        // A thumbnail (structured data sometimes lists one first) is only used when no full-size photo
+        // can be downloaded: the banner enlarges the product to around 450 px.
+        $small = null;
         $lastException = null;
         foreach ($imageUrls as $rank => $imageUrl) {
             try {
                 $image = $this->fetcher->fetchImage($imageUrl);
-                $hash = hash('sha256', $image['bytes']);
-                $extension = match ($image['mime_type']) {
-                    'image/jpeg' => 'jpg',
-                    'image/webp' => 'webp',
-                    default => 'png',
-                };
-                $disk = config('campaigns.banners.disk');
-                $path = "campaign-media/{$product->brand->workspace_id}/{$product->id}/source/{$hash}.{$extension}";
-                Storage::disk($disk)->put($path, $image['bytes']);
+                if (max($image['width'], $image['height']) < self::MIN_SIDE) {
+                    $small ??= [$rank, $image];
 
-                return $product->mediaAssets()->firstOrCreate(
-                    ['content_hash' => $hash],
-                    [
-                        'workspace_id' => $product->brand->workspace_id,
-                        'source_snapshot_id' => $source->id,
-                        'type' => 'image',
-                        'disk' => $disk,
-                        'path' => $path,
-                        'original_name' => $this->originalName($image['url'], $extension),
-                        'mime_type' => $image['mime_type'],
-                        'size_bytes' => strlen($image['bytes']),
-                        'status' => 'ready',
-                        'metadata' => [
-                            'origin' => 'product_page',
-                            'source_url' => $image['url'],
-                            'candidate_rank' => $rank + 1,
-                            'width' => $image['width'],
-                            'height' => $image['height'],
-                            'auto_imported' => true,
-                        ],
-                    ],
-                );
+                    continue;
+                }
+
+                return $this->store($product, $source, $rank, $image);
+            } catch (Throwable $exception) {
+                $lastException = $exception;
+            }
+        }
+
+        if ($small) {
+            try {
+                return $this->store($product, $source, ...$small);
             } catch (Throwable $exception) {
                 $lastException = $exception;
             }
@@ -69,6 +58,43 @@ class ProductImageImporter
         }
 
         return null;
+    }
+
+    /** @param  array{bytes: string, mime_type: string, url: string, width: int, height: int}  $image */
+    private function store(Product $product, SourceSnapshot $source, int $rank, array $image): MediaAsset
+    {
+        $hash = hash('sha256', $image['bytes']);
+        $extension = match ($image['mime_type']) {
+            'image/jpeg' => 'jpg',
+            'image/webp' => 'webp',
+            default => 'png',
+        };
+        $disk = config('campaigns.banners.disk');
+        $path = "campaign-media/{$product->brand->workspace_id}/{$product->id}/source/{$hash}.{$extension}";
+        Storage::disk($disk)->put($path, $image['bytes']);
+
+        return $product->mediaAssets()->firstOrCreate(
+            ['content_hash' => $hash],
+            [
+                'workspace_id' => $product->brand->workspace_id,
+                'source_snapshot_id' => $source->id,
+                'type' => 'image',
+                'disk' => $disk,
+                'path' => $path,
+                'original_name' => $this->originalName($image['url'], $extension),
+                'mime_type' => $image['mime_type'],
+                'size_bytes' => strlen($image['bytes']),
+                'status' => 'ready',
+                'metadata' => [
+                    'origin' => 'product_page',
+                    'source_url' => $image['url'],
+                    'candidate_rank' => $rank + 1,
+                    'width' => $image['width'],
+                    'height' => $image['height'],
+                    'auto_imported' => true,
+                ],
+            ],
+        );
     }
 
     private function originalName(string $url, string $extension): string
