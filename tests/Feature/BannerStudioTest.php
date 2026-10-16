@@ -60,9 +60,9 @@ class BannerStudioTest extends TestCase
         );
         $this->assertSame(3, $first->creatives->pluck('direction')->unique()->count());
         foreach ($first->creatives as $creative) {
-            $this->assertStringContainsString('expert ad creative prompt engineer', $creative->prompt);
-            $this->assertStringContainsString('PRODUCT DNA', $creative->prompt);
-            $this->assertStringContainsString('first supplied product image', $creative->prompt);
+            // The product is composited from its photo, so the scene prompt must keep it out of the picture.
+            $this->assertStringContainsString('do NOT show Source Product', $creative->prompt);
+            $this->assertStringContainsString('Approved benefit', $creative->prompt);
             $this->assertStringContainsString('Do not include any text', $creative->prompt);
             $this->assertStringContainsString('logos', $creative->prompt);
             $this->assertStringContainsString('watermarks', $creative->prompt);

@@ -80,7 +80,7 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
             $basePath = "campaign-banners/{$creative->batch->workspace_id}/{$creative->campaign_pack_id}/{$creative->id}";
             $backgroundPath = $basePath.'/background.'.($result->mimeType === 'image/webp' ? 'webp' : 'png');
             Storage::disk($creative->disk)->put($backgroundPath, $result->imageBytes);
-            $final = $composer->compose($result->imageBytes, $creative->campaignPack->product->brand, $creative);
+            $final = $composer->compose($result->imageBytes, $creative->campaignPack->product->brand, $creative, $result->productCutout);
             $outputPath = $basePath.'/banner.png';
             Storage::disk($creative->disk)->put($outputPath, $final);
 
