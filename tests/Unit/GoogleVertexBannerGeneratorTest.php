@@ -216,7 +216,8 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $this->configureGoogle();
         config()->set('campaigns.banners.clean_reference', true);
         request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
-        $images = [self::image('clean-product'), self::image('banner-background')];
+        $cleanPng = self::png();
+        $images = [self::image($cleanPng), self::image('banner-background')];
         Http::fake([
             'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
             'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
@@ -239,7 +240,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             $result->additionalCost,
             0.000001,
         );
-        $clean = base64_encode('clean-product');
+        $clean = base64_encode(self::png($cleanPng));
         $vertex = collect(Http::recorded())->map(fn (array $pair) => $pair[0])
             ->filter(fn (Request $request) => str_contains($request->url(), 'aiplatform.googleapis.com'))->values();
         $this->assertCount(3, $vertex);
@@ -292,20 +293,27 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
         $filtered = self::image('unused');
         $filtered['candidates'] = [['finishReason' => 'IMAGE_SAFETY']];
+        $notAnImage = self::image('not-an-image');
+        $answers = [$filtered, $notAnImage];
         Http::fake([
             'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
             'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
             'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
-            'aiplatform.googleapis.com/*' => Http::response($filtered),
+            'aiplatform.googleapis.com/*' => function () use (&$answers) {
+                return Http::response(array_shift($answers));
+            },
         ]);
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
 
-        try {
-            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([$asset]));
-            $this->fail('A cleanup without an image must fail the attempt.');
-        } catch (BannerAttemptFailed $exception) {
-            $this->assertSame('vertex_missing_image', $exception->errorCode);
-            $this->assertEqualsWithDelta(app(ProviderCostCalculator::class)->calculateBanner(400, 10, 1290), $exception->spentCost, 0.000001);
+        // A safety-filtered answer, then bytes that are not an image: both fail, both keep their spend.
+        foreach ([1, 2] as $round) {
+            try {
+                app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([$asset]));
+                $this->fail("Cleanup answer {$round} must fail the attempt.");
+            } catch (BannerAttemptFailed $exception) {
+                $this->assertSame('vertex_missing_image', $exception->errorCode);
+                $this->assertEqualsWithDelta(app(ProviderCostCalculator::class)->calculateBanner(400, 10, 1290), $exception->spentCost, 0.000001);
+            }
         }
     }
 
@@ -335,6 +343,16 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             app(GenerationDeadline::class)->clear();
         }
         Http::assertNothingSent();
+    }
+
+    private static function png(?string $bytes = null): string
+    {
+        $image = $bytes === null ? imagecreatetruecolor(4, 4) : imagecreatefromstring($bytes);
+        ob_start();
+        imagepng($image);
+        imagedestroy($image);
+
+        return (string) ob_get_clean();
     }
 
     private static function image(string $bytes): array
