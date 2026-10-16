@@ -71,7 +71,7 @@ class BannerImageInspector
     {
         $prompt = "The first image is an advertising picture. The second image is the store's own photo of the product \"{$product}\". "
             .'In the second image, any item on, in or around the product (a book, magazine, phone, tablet, e-reader, plant, cup or hand) is a prop, not the product, unless that item is itself the named product. '
-            .'Does the first image show the same product: the same kind of object, shape, proportions, material, surface finish and colour? '
+            .'Does the first image show the same product: the same kind of object, shape, proportions, material, surface finish and the colour of every part (a base, cover, frame or trim in a different colour does not match)? '
             .'A different kind of object does not match, even if it has a similar outline: for example a real paper book with pages is not a sculpted or moulded stand shaped like a book. '
             .'Ignore the background, lighting, camera angle and props in both images. '
             .'Separately, set split to true if the first image is divided into panels: a flat colour block, a split-screen, or a hard straight vertical or horizontal boundary between two areas that are not the same continuous scene. Return JSON only.';

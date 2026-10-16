@@ -56,9 +56,9 @@ return [
         'inspection_attempts' => (int) env('BANNER_INSPECTION_ATTEMPTS', 2),
         // An inspection normally answers in seconds; a stalled one must not eat the attempt's budget.
         'inspection_timeout_seconds' => 30,
-        // Each background is also compared with the store's product photo, and redrawn if it shows a
-        // different object (pack 20 drew a paper book in place of a book-shaped stand). It runs only
-        // while inspect_images is on, which switches every image check off together.
+        // The product cutout is compared with the store's product photo once, before it is kept (and,
+        // with compositing off, every drawn background is, and redrawn if it shows a different object).
+        // It runs only while inspect_images is on, which switches every image check off together.
         'check_product' => env('BANNER_PRODUCT_CHECK', true),
         // One banner attempt (generations plus inspections) stays under the 180s queue worker timeout;
         // a new round starts only with enough time left for a generation and an inspection.
@@ -68,10 +68,11 @@ return [
         'rate_limit_backoff_seconds' => [10, 25, 45],
         // Pause before a failed banner is re-run from the pack page (inside Vercel's 300s with the 240s budget).
         'retry_pause_seconds' => 30,
-        // The product photo is re-made once without props (books, magazines, devices) before it is used
-        // as the banner reference, since the image model copies everything a reference shows.
-        'clean_reference' => env('BANNER_CLEAN_REFERENCE', true),
         'reference_timeout_seconds' => 60,
+        // The image model draws only the scene; the product is cut out of its store photo once (checked
+        // against it) and composited on top, so it cannot be redrawn as something else. Pack 20's stand
+        // came back as a paper book on wood through eight rounds of redraw-and-check.
+        'composite_product' => env('BANNER_COMPOSITE_PRODUCT', true),
         'disk' => env('BANNER_STORAGE_DISK', env('CAMPAIGN_MEDIA_DISK', 'local')),
         'prices_per_million' => [
             'input' => 0.50,

@@ -18,7 +18,7 @@ class BannerComposer
         $this->font = resource_path('fonts/DM-Sans.ttf');
     }
 
-    public function compose(string $backgroundBytes, Brand $brand, BannerCreative $creative): string
+    public function compose(string $backgroundBytes, Brand $brand, BannerCreative $creative, ?string $productCutout = null): string
     {
         $source = @imagecreatefromstring($backgroundBytes);
         if (! $source) {
@@ -38,6 +38,9 @@ class BannerComposer
 
         $layout = $this->layout($creative->layout, $width, $height);
         $this->drawReadabilityLayer($canvas, $creative->layout, $width, $height);
+        if ($productCutout !== null) {
+            $this->drawProduct($canvas, $productCutout, $creative->layout);
+        }
         // The wordmark sits in the same bottom-right corner on every layout, over a soft dark scrim.
         $this->drawBrandScrim($canvas, $width, $height, $this->logoIsDark($brand));
         $this->drawBrand($canvas, $brand, $width - 360 - 80, $height - 62, 360, $width - 80);
@@ -88,6 +91,49 @@ class BannerComposer
             'bottom_panel' => ['x' => 80, 'headline_y' => 960, 'cta_y' => 1230, 'max_width' => $width - 160, 'headline_height' => 220, 'support_height' => 110],
             default => ['x' => 80, 'headline_y' => 240, 'cta_y' => 555, 'max_width' => 520, 'headline_height' => 300, 'support_height' => 130],
         };
+    }
+
+    /**
+     * Where the product cutout stands on each layout: centre x, the y its base rests on, and the box it
+     * is fitted into. These match the resting spot BannerCopySelector asks the scene to leave, and
+     * stay clear of the text column and the bottom-right wordmark.
+     *
+     * @return array{x: int, base: int, width: int, height: int}
+     */
+    public static function productSlot(?string $layout): array
+    {
+        return match ($layout) {
+            'split_left' => ['x' => 830, 'base' => 900, 'width' => 380, 'height' => 560],
+            'bottom_panel' => ['x' => 540, 'base' => 810, 'width' => 480, 'height' => 520],
+            default => ['x' => 590, 'base' => 1170, 'width' => 460, 'height' => 500],
+        };
+    }
+
+    /** The real product, fitted into its slot over a soft contact shadow so it sits on the scene's surface. */
+    private function drawProduct(\GdImage $canvas, string $cutoutBytes, ?string $layout): void
+    {
+        $cutout = @imagecreatefromstring($cutoutBytes);
+        if (! $cutout) {
+            throw new RuntimeException('The product cutout is not a supported image.');
+        }
+        $slot = self::productSlot($layout);
+        $scale = min($slot['width'] / imagesx($cutout), $slot['height'] / imagesy($cutout));
+        $width = max(1, (int) round(imagesx($cutout) * $scale));
+        $height = max(1, (int) round(imagesy($cutout) * $scale));
+        $x = $slot['x'] - intdiv($width, 2);
+        $y = $slot['base'] - $height;
+
+        // Stacked translucent ellipses give a shadow that is darkest under the product and fades out.
+        $shadowWidth = (int) round($width * 0.95);
+        $shadowHeight = max(10, (int) round($width * 0.08));
+        for ($step = 0; $step < 14; $step++) {
+            $shrink = 1 - $step / 16;
+            imagefilledellipse($canvas, $slot['x'], $slot['base'] - (int) round($shadowHeight * 0.15), (int) round($shadowWidth * $shrink), (int) round($shadowHeight * $shrink), imagecolorallocatealpha($canvas, 0, 0, 0, 121));
+        }
+
+        imagealphablending($canvas, true);
+        imagecopyresampled($canvas, $cutout, $x, $y, 0, 0, $width, $height, imagesx($cutout), imagesy($cutout));
+        imagedestroy($cutout);
     }
 
     /**

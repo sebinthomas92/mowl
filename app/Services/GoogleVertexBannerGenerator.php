@@ -18,10 +18,11 @@ class GoogleVertexBannerGenerator implements BannerGenerator
     public function __construct(private GoogleVertexAIClient $client, private BannerImageInspector $inspector, private ProviderCostCalculator $costs, private BannerReferenceImage $references) {}
 
     /**
-     * Generates the background from a prop-free copy of the product photo, then rejects and regenerates
-     * any image with readable third-party text or marks (a real book cover on the e-reader, a magazine
-     * spine). Every round's image tokens are kept; the cleanup and inspections are priced at their own
-     * models' rates.
+     * Generates a scene without the product and returns it with the product cutout for the composer
+     * (or, with compositing off, a background drawn from a prop-free copy of the product photo), then
+     * rejects and regenerates any image with readable third-party text or marks (a real book cover on
+     * the e-reader, a magazine spine). Every round's image tokens are kept; the cutout and inspections
+     * are priced at their own models' rates.
      */
     public function generate(BannerCreative $creative, Collection $productImages): BannerGenerationResult
     {
@@ -50,25 +51,28 @@ class GoogleVertexBannerGenerator implements BannerGenerator
     private function generateWithin(GenerationDeadline $deadline, int $attempts, BannerCreative $creative, Collection $productImages, string $product, string $brand, array $usage, float $extraCost, array $marks): BannerGenerationResult
     {
         $asset = $productImages->first();
+        $cutout = null;
+        // With compositing, the image model draws only the scene and never sees the product; the cutout
+        // (checked against the store photo when it was made) is placed on the scene by the composer.
+        $composite = $asset && config('campaigns.banners.composite_product');
+        $checkProduct = $asset && ! $composite && config('campaigns.banners.inspect_images') && config('campaigns.banners.check_product');
         try {
-            $clean = $asset && config('campaigns.banners.clean_reference');
-            $checkProduct = $asset && config('campaigns.banners.inspect_images') && config('campaigns.banners.check_product');
-            $photo = $asset && (! $clean || $checkProduct) ? $this->imagePart($asset)['inlineData'] : null;
-            $reference = $clean ? null : $photo;
-            if ($clean) {
+            $photo = $asset && ! $composite ? $this->imagePart($asset)['inlineData'] : null;
+            if ($composite) {
                 $round = (int) config('campaigns.banners.min_round_seconds');
                 $timeout = (int) config('campaigns.banners.reference_timeout_seconds');
-                $clean = $this->rateLimited($deadline, $round, fn () => $this->references->for(
+                $made = $this->rateLimited($deadline, $round, fn () => $this->references->for(
                     $asset,
                     $product,
                     $deadline->timeout($timeout),
-                    (int) min($timeout + 15, max(1, ($deadline->remaining() ?? INF) - $round)),
+                    // Waiters reuse the cutout another banner is making, including its two checks.
+                    (int) min($timeout + 2 * (int) config('campaigns.banners.inspection_timeout_seconds') + 15, max(1, ($deadline->remaining() ?? INF) - $round)),
                 ));
-                $extraCost += $clean['cost'];
-                $reference = $clean['inlineData'];
-                // The copy is stored, so a retry skips straight to the banner with the full budget.
+                $extraCost += $made['cost'];
+                $cutout = base64_decode($made['inlineData']['data']);
+                // The cutout is stored, so a retry skips straight to the scene with the full budget.
                 if (($deadline->remaining() ?? INF) < $round) {
-                    throw new VertexAIResponseException('banner_deadline_after_reference', 'Not enough time was left for a banner after preparing the clean product photo.', true);
+                    throw new VertexAIResponseException('banner_deadline_after_reference', 'Not enough time was left for a banner after cutting out the product photo.', true);
                 }
             }
         } catch (VertexAIResponseException $exception) {
@@ -82,10 +86,10 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             }
             try {
                 // A retried image still needs time for its inspection afterwards.
-                $result = $this->rateLimited($deadline, (int) config('campaigns.banners.min_round_seconds'), fn () => $this->generateOnce($creative, $reference));
+                $result = $this->rateLimited($deadline, (int) config('campaigns.banners.min_round_seconds'), fn () => $this->generateOnce($creative, $photo));
                 $usage = [$usage[0] + $result->inputTokens, $usage[1] + $result->outputTextTokens, $usage[2] + $result->outputImageTokens];
                 if (! config('campaigns.banners.inspect_images')) {
-                    return $this->result($result, $usage, $extraCost);
+                    return $this->result($result, $usage, $extraCost, $cutout);
                 }
                 $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand), retryHang: true);
             } catch (VertexAIResponseException $exception) {
@@ -99,7 +103,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                 continue;
             }
             if (! $checkProduct) {
-                return $this->result($result, $usage, $extraCost);
+                return $this->result($result, $usage, $extraCost, $cutout);
             }
             try {
                 $match = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS, fn () => $this->inspector->matchesProduct($result->imageBytes, $result->mimeType, $product, $photo), retryHang: true);
@@ -108,7 +112,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             }
             $extraCost += $this->costs->calculate((string) config('campaigns.google.model'), $match['input_tokens'], 0, $match['output_tokens']);
             if ($match['matches'] && ! $match['split']) {
-                return $this->result($result, $usage, $extraCost);
+                return $this->result($result, $usage, $extraCost, $cutout);
             }
             if ($match['matches']) {
                 // The overlay already fades softly; a panel edge drawn into the photo shows through it, so redraw.
@@ -123,18 +127,13 @@ class GoogleVertexBannerGenerator implements BannerGenerator
 
         if ($split) {
             // A visible seam is cosmetic; a correct product with clean text still beats no banner.
-            return $this->result($split, $usage, $extraCost);
-        }
-
-        if ($clean && ($failure[0] ?? null) === 'banner_product_mismatch') {
-            // Every round drew the wrong product, so the clean copy itself may be off: the next attempt remakes it.
-            $this->references->forget($asset);
+            return $this->result($split, $usage, $extraCost, $cutout);
         }
 
         throw new BannerAttemptFailed($failure[0] ?? 'banner_third_party_text', $failure[1] ?? 'No generated background passed its checks.', $this->spent($usage, $extraCost), $result->imageBytes ?? null);
     }
 
-    private function result(BannerGenerationResult $result, array $usage, float $extraCost): BannerGenerationResult
+    private function result(BannerGenerationResult $result, array $usage, float $extraCost, ?string $cutout): BannerGenerationResult
     {
         return new BannerGenerationResult(
             imageBytes: $result->imageBytes,
@@ -147,6 +146,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             providerRequestId: $result->providerRequestId,
             providerLatencyMs: $result->providerLatencyMs,
             additionalCost: round($extraCost, 6),
+            productCutout: $cutout,
         );
     }
 

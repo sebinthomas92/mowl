@@ -16,5 +16,7 @@ readonly class BannerGenerationResult
         public ?int $providerLatencyMs = null,
         // Spend outside the image model's own token prices, such as the background inspection.
         public float $additionalCost = 0.0,
+        // The product cut out of its store photo (PNG with transparency), composited onto the scene.
+        public ?string $productCutout = null,
     ) {}
 }
