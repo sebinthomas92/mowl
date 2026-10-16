@@ -224,8 +224,8 @@ class ProductPhotoCutout
         // A product surface close to the backdrop colour (a page fold on the Kindle Stand, within the
         // tolerance of its beige) lets the fill run down into the product through a channel. Backdrop
         // is open space: only the part a disc of CHANNEL_RADIUS fits into, and what that disc sweeps,
-        // stays backdrop; narrower channels reached from it are product, unless they are as close to the
-        // backdrop colour as the border is (a real slot between a fork's tines or a U-shaped stand's arms).
+        // stays backdrop; in narrower channels reached from it, pixels further from the backdrop colour
+        // than the border's are product, while a real slot (between a fork's tines) stays clear.
         if (! $alphaOnly) {
             $mask = $this->opened($mask, $near, $typical + self::HOLE_MATCH, $width, $height, max(4, (int) round(self::CHANNEL_RADIUS * min($width, $height))));
         }
@@ -744,34 +744,11 @@ class ProductPhotoCutout
             $centres .= ord($inside[$index]) > $radius ? "\0" : $far;
         }
         $centres = $this->distances($centres, $width, $height);
-        $seen = '';
         for ($index = 0; $index < $count; $index++) {
-            $seen .= $mask[$index] === "\1" && ord($centres[$index]) > $radius ? "\1" : "\0";
-        }
-        for ($start = 0; $start < $count; $start++) {
-            if ($seen[$start] !== "\1") {
-                continue;
-            }
-            $seen[$start] = "\2";
-            $stack = [$start];
-            $channel = [];
-            $sum = 0;
-            while ($stack !== []) {
-                $index = array_pop($stack);
-                $channel[] = $index;
-                $sum += ord($near[$index]);
-                $x = $index % $width;
-                foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
-                    if ($next >= 0 && $next < $count && $seen[$next] === "\1") {
-                        $seen[$next] = "\2";
-                        $stack[] = $next;
-                    }
-                }
-            }
-            if ($sum / count($channel) > $plain) {
-                foreach ($channel as $index) {
-                    $mask[$index] = "\0";
-                }
+            // Pixel by pixel: the backdrop seen in a narrow V or a concave corner is as close to the
+            // backdrop colour as the border is and stays; a lit surface sits measurably further off.
+            if ($mask[$index] === "\1" && ord($centres[$index]) > $radius && ord($near[$index]) > $plain) {
+                $mask[$index] = "\0";
             }
         }
 
