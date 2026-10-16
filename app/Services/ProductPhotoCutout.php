@@ -53,8 +53,11 @@ class ProductPhotoCutout
 
     private const SHADOW_TINT_SLOPE = 0.04;
 
+    /** Backdrop-coloured gaps at most this wide between product on both sides of a row are product (a page gutter). */
+    private const NOTCH_WIDTH = 8;
+
     /** A product may touch the frame along at most this share of its own extent on that side. */
-    private const MAX_EDGE_CONTACT = 0.03;
+    private const MAX_EDGE_CONTACT = 0.05;
 
     /** More separate pieces than this is speckle or a busy scene, not one product on a backdrop. */
     private const MAX_PIECES = 2000;
@@ -323,7 +326,32 @@ class ProductPhotoCutout
                 $mask[$index] = "\0";
             }
         }
-        unset($outside, $openings);
+        unset($outside);
+
+        // A narrow backdrop-coloured gap with product on both sides of the row (a lit page gutter
+        // that opens at the top) is product too.
+        for ($y = 0; $y < $height; $y++) {
+            $last = -1;
+            for ($x = 0; $x < $width; $x++) {
+                $index = $y * $width + $x;
+                if ($mask[$index] === "\1") {
+                    continue;
+                }
+                if ($last >= 0 && $x - $last - 1 > 0 && $x - $last - 1 <= self::NOTCH_WIDTH) {
+                    $open = false;
+                    for ($gap = $last + 1; $gap < $x; $gap++) {
+                        $open = $open || $openings[$y * $width + $gap] === "\1";
+                    }
+                    if (! $open) {
+                        for ($gap = $last + 1; $gap < $x; $gap++) {
+                            $mask[$y * $width + $gap] = "\0";
+                        }
+                    }
+                }
+                $last = $x;
+            }
+        }
+        unset($openings);
 
         // Single-pixel spurs on the outline are JPEG ringing, not product.
         for ($pass = 0; $pass < 2; $pass++) {
@@ -635,7 +663,9 @@ class ProductPhotoCutout
                     continue;
                 }
                 $local = $this->backdropAt($x, $y, $width, $height);
-                $core .= $this->isShadow(imagecolorat($image, $x, $y), $local, $this->tint($local)) ? "\0" : "\1";
+                // Looser than the fill's own test: the darkest, most saturated core of a cast shadow
+                // must not count as product and stretch the extent over the shadow.
+                $core .= $this->isShadow(imagecolorat($image, $x, $y), $local, $this->tint($local), 0.03, 0.12, 0.35) ? "\0" : "\1";
             }
         }
         $pieces = [];
@@ -784,15 +814,15 @@ class ProductPhotoCutout
     }
 
     /** Darker than the backdrop with the backdrop's own tint: its shadow, not a light product edge. */
-    private function isShadow(int $colour, int $backdrop, array $shade): bool
+    private function isShadow(int $colour, int $backdrop, array $shade, float $tint = self::SHADOW_TINT, float $slope = self::SHADOW_TINT_SLOPE, float $darkest = 0.5): bool
     {
         $light = ((($colour >> 16) & 255) + (($colour >> 8) & 255) + ($colour & 255)) / 3;
         $backdropLight = ((($backdrop >> 16) & 255) + (($backdrop >> 8) & 255) + ($backdrop & 255)) / 3;
-        if ($light >= $backdropLight - 3 || $light < 0.5 * $backdropLight) {
+        if ($light >= $backdropLight - 3 || $light < $darkest * $backdropLight) {
             return false;
         }
         [$r, $g] = $this->tint($colour & 0xFFFFFF);
-        $drift = self::SHADOW_TINT + self::SHADOW_TINT_SLOPE * (1 - $light / $backdropLight);
+        $drift = $tint + $slope * (1 - $light / $backdropLight);
 
         return abs($r - $shade[0]) < $drift && abs($g - $shade[1]) < $drift;
     }

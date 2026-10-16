@@ -299,11 +299,15 @@ class ProductPhotoCutoutTest extends TestCase
             imageline($image, 305, $y, 321, $y, imagecolorallocate($image, (int) (240 * $f), (int) (232 * $f), (int) (218 * $f)));
         }
 
+        // A lit slit as light as the backdrop, opening at the top of the pages.
+        imagefilledrectangle($image, 379, 290, 386, 330, imagecolorallocate($image, 240, 232, 218));
+
         $cutter = new ProductPhotoCutout;
         $png = $cutter->cut(self::encode($image, true));
 
         $this->assertNotNull($png, (string) $cutter->reason);
         $cutout = imagecreatefromstring($png);
+        $this->assertSame(0, (imagecolorat($cutout, 382 - 150, 25) >> 24) & 127, 'slit');
         // Still trimmed to the stand, not the shadow below it.
         $this->assertEqualsWithDelta(125, imagesy($cutout), 10);
         foreach ([45, 65, 85] as $y) {
