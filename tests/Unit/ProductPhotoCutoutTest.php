@@ -301,6 +301,8 @@ class ProductPhotoCutoutTest extends TestCase
 
         // A lit slit as light as the backdrop, opening at the top of the pages.
         imagefilledrectangle($image, 379, 290, 386, 330, imagecolorallocate($image, 240, 232, 218));
+        // A wider fold within the backdrop tolerance (but not as close as an opening), from the top edge.
+        imagefilledrectangle($image, 410, 290, 433, 370, imagecolorallocate($image, 232, 222, 206));
 
         $cutter = new ProductPhotoCutout;
         $png = $cutter->cut(self::encode($image, true));
@@ -308,6 +310,7 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertNotNull($png, (string) $cutter->reason);
         $cutout = imagecreatefromstring($png);
         $this->assertSame(0, (imagecolorat($cutout, 382 - 150, 25) >> 24) & 127, 'slit');
+        $this->assertSame(0, (imagecolorat($cutout, 421 - 150, 50) >> 24) & 127, 'fold');
         // Still trimmed to the stand, not the shadow below it.
         $this->assertEqualsWithDelta(125, imagesy($cutout), 10);
         foreach ([45, 65, 85] as $y) {
