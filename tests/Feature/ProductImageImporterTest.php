@@ -47,6 +47,26 @@ class ProductImageImporterTest extends TestCase
         $this->assertSame(150, $asset->metadata['width']);
     }
 
+    public function test_the_search_past_a_thumbnail_is_kept_short(): void
+    {
+        [$product, $source] = $this->fixture();
+        Http::fake([
+            '93.184.216.34/uploads/thumb.jpg' => Http::response(self::png(150, 150), 200, ['Content-Type' => 'image/png']),
+            '93.184.216.34/uploads/full.jpg' => Http::response(self::png(900, 900), 200, ['Content-Type' => 'image/png']),
+            '93.184.216.34/uploads/*' => Http::response('', 404),
+        ]);
+        $urls = ['https://93.184.216.34/uploads/thumb.jpg'];
+        foreach (range(1, 6) as $i) {
+            $urls[] = "https://93.184.216.34/uploads/gone-{$i}.jpg";
+        }
+        $urls[] = 'https://93.184.216.34/uploads/full.jpg';
+
+        $asset = app(ProductImageImporter::class)->importFirst($product, $source, $urls);
+
+        $this->assertSame('https://93.184.216.34/uploads/thumb.jpg', $asset->metadata['source_url']);
+        Http::assertSentCount(4);
+    }
+
     private function fixture(): array
     {
         Storage::fake(config('campaigns.banners.disk'));

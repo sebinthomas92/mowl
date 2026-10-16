@@ -153,15 +153,19 @@ class BannerReferenceImage
     /**
      * The imported photo first, then the product's own gallery photos from its page (a share image is
      * often a styled scene, sometimes of another variant). A gallery can also show other variants, so a
-     * later gallery photo is compared with the store's main product photo (the gallery's first).
+     * photo other than the store's main product photo (the gallery's first) is compared with it. That
+     * includes an imported photo that was not the page's first image (the first was a thumbnail).
      *
      * @return \Generator<int, array{png: string, source: string, reference: array{mimeType: string, data: string}|null}>
      */
     private function studioCutouts(MediaAsset $asset, string $photo): \Generator
     {
         $source = (string) data_get($asset->metadata, 'source_url');
-        if ($png = $this->cutter->cut($photo)) {
-            yield ['png' => $png, 'source' => $source ?: $asset->path, 'reference' => null];
+        $imported = $this->cutter->cut($photo);
+        $importedIsMain = (int) data_get($asset->metadata, 'candidate_rank', 1) <= 1;
+        if ($imported && $importedIsMain) {
+            yield ['png' => $imported, 'source' => $source ?: $asset->path, 'reference' => null];
+            $imported = null;
         }
         $page = $asset->sourceSnapshot?->url;
         if (! $page) {
@@ -175,6 +179,10 @@ class BannerReferenceImage
             return;
         }
         $main = ($gallery[0] ?? null) === $source ? ['mimeType' => (string) $asset->mime_type, 'data' => base64_encode($photo)] : null;
+        if ($imported && $main) {
+            yield ['png' => $imported, 'source' => $source, 'reference' => null];
+            $imported = null;
+        }
         foreach (array_slice(array_values(array_diff($gallery, [$source])), 0, self::MAX_GALLERY_PHOTOS) as $url) {
             // A download is only started while it and both of the cutout's checks (marks, then the product
             // match) still fit the deadline. The scene is not reserved here: an accepted cutout is stored,
@@ -189,6 +197,10 @@ class BannerReferenceImage
             }
             $reference = $main;
             $main ??= ['mimeType' => $image['mime_type'], 'data' => base64_encode($image['bytes'])];
+            if ($imported) {
+                yield ['png' => $imported, 'source' => $source ?: $asset->path, 'reference' => $main];
+                $imported = null;
+            }
             if ($png = $this->cutter->cut($image['bytes'])) {
                 yield ['png' => $png, 'source' => $image['url'], 'reference' => $reference];
             }

@@ -55,6 +55,23 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertEqualsWithDelta(221, getimagesizefromstring($png)[1], 4);
     }
 
+    public function test_backdrop_seen_through_a_handle_is_made_clear(): void
+    {
+        $image = self::backdrop();
+        imagefilledrectangle($image, 100, 150, 220, 300, imagecolorallocate($image, 214, 72, 38));
+        // A closed handle on the right with backdrop inside it.
+        imagesetthickness($image, 10);
+        imagerectangle($image, 220, 180, 300, 260, imagecolorallocate($image, 214, 72, 38));
+
+        $png = (new ProductPhotoCutout)->cut(self::encode($image));
+
+        $this->assertNotNull($png);
+        $cutout = imagecreatefromstring($png);
+        // Inside the handle (around x 260, y 220 before trimming and doubling) is clear; the body is solid.
+        $this->assertSame(127, (imagecolorat($cutout, 2 * (260 - 100), 2 * (220 - 150)) >> 24) & 127);
+        $this->assertSame(0, (imagecolorat($cutout, 2 * (160 - 100), 2 * (220 - 150)) >> 24) & 127);
+    }
+
     public function test_a_thumbnail_is_not_cut_out(): void
     {
         $cutter = new ProductPhotoCutout;

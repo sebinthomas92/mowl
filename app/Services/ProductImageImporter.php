@@ -13,6 +13,8 @@ class ProductImageImporter
     /** Longest side, in pixels, below which a photo is a thumbnail. */
     public const MIN_SIDE = 500;
 
+    private const MORE_AFTER_THUMBNAIL = 3;
+
     public function __construct(private ProductPageFetcher $fetcher) {}
 
     public function importFirst(Product $product, SourceSnapshot $source, array $imageUrls): ?MediaAsset
@@ -30,7 +32,12 @@ class ProductImageImporter
         // can be downloaded: the banner enlarges the product to around 450 px.
         $small = null;
         $lastException = null;
-        foreach ($imageUrls as $rank => $imageUrl) {
+        foreach (array_values($imageUrls) as $rank => $imageUrl) {
+            // With a usable thumbnail in hand, only a few more candidates are tried: each download can
+            // take the full fetch timeout, and the pack's generation has not started yet.
+            if ($small && $rank - $small[0] > self::MORE_AFTER_THUMBNAIL) {
+                break;
+            }
             try {
                 $image = $this->fetcher->fetchImage($imageUrl);
                 if (max($image['width'], $image['height']) < self::MIN_SIDE) {

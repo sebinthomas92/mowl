@@ -143,10 +143,48 @@ class BannerImageInspector
             imagedestroy($image);
             $image = $scaled;
         }
+        $image = $this->flattened($image);
         ob_start();
         imagejpeg($image, null, 85);
         imagedestroy($image);
 
         return ['image/jpeg', (string) ob_get_clean()];
+    }
+
+    /**
+     * A transparent cutout on a backdrop that contrasts with the product: JPEG has no alpha, and the
+     * clear pixels' own RGB (black) would hide a dark product or prop.
+     */
+    private function flattened(\GdImage $image): \GdImage
+    {
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $step = max(1, intdiv(max($width, $height), 120));
+        $light = 0.0;
+        $opaque = 0;
+        $clear = 0;
+        for ($y = 0; $y < $height; $y += $step) {
+            for ($x = 0; $x < $width; $x += $step) {
+                $colour = imagecolorat($image, $x, $y);
+                if ((($colour >> 24) & 127) >= 64) {
+                    $clear++;
+
+                    continue;
+                }
+                $opaque++;
+                $light += ((($colour >> 16) & 255) + (($colour >> 8) & 255) + ($colour & 255)) / 3;
+            }
+        }
+        if ($clear === 0) {
+            return $image;
+        }
+        $grey = $opaque > 0 && $light / $opaque > 140 ? 45 : 235;
+        $flat = imagecreatetruecolor($width, $height);
+        imagefill($flat, 0, 0, imagecolorallocate($flat, $grey, $grey, $grey));
+        imagealphablending($flat, true);
+        imagecopy($flat, $image, 0, 0, 0, 0, $width, $height);
+        imagedestroy($image);
+
+        return $flat;
     }
 }

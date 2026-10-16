@@ -30,6 +30,9 @@ class ProductPhotoCutout
 
     private const STRAY_PIXELS = 40;
 
+    /** An enclosed backdrop patch at least this large is an opening in the product, not a highlight. */
+    private const HOLE_PIXELS = 64;
+
     /** How much darker a shadow pixel may be than the neighbour the shadow fill reached it from. */
     private const MAX_SHADOW_STEP = 10.0;
 
@@ -156,6 +159,35 @@ class ProductPhotoCutout
                 if ($next >= 0 && $next < $count && $mask[$next] === "\0" && ord($near[$next]) <= $tolerance) {
                     $mask[$next] = "\1";
                     $stack[] = $next;
+                }
+            }
+        }
+
+        // Backdrop seen through a closed opening (a mug or bag handle, a ring) is not reached from the
+        // edges. A patch of it larger than a specular highlight is backdrop too.
+        $seen = $mask;
+        $hole = max(self::HOLE_PIXELS, (int) round(0.0002 * $count));
+        for ($start = 0; $start < $count; $start++) {
+            if ($seen[$start] !== "\0" || ord($near[$start]) > $tolerance) {
+                continue;
+            }
+            $seen[$start] = "\1";
+            $stack = [$start];
+            $patch = [];
+            while ($stack !== []) {
+                $index = array_pop($stack);
+                $patch[] = $index;
+                $x = $index % $width;
+                foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
+                    if ($next >= 0 && $next < $count && $seen[$next] === "\0" && ord($near[$next]) <= $tolerance) {
+                        $seen[$next] = "\1";
+                        $stack[] = $next;
+                    }
+                }
+            }
+            if (count($patch) >= $hole) {
+                foreach ($patch as $index) {
+                    $mask[$index] = "\1";
                 }
             }
         }
