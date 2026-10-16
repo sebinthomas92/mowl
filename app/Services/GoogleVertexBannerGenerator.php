@@ -54,12 +54,13 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                 break;
             }
             try {
-                $result = $this->rateLimited($deadline, fn () => $this->generateOnce($creative, $productImages));
+                // A retried image still needs time for its inspection afterwards.
+                $result = $this->rateLimited($deadline, (int) config('campaigns.banners.min_round_seconds'), fn () => $this->generateOnce($creative, $productImages));
                 $usage = [$usage[0] + $result->inputTokens, $usage[1] + $result->outputTextTokens, $usage[2] + $result->outputImageTokens];
                 if (! config('campaigns.banners.inspect_images')) {
                     return $result;
                 }
-                $inspection = $this->rateLimited($deadline, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $reference ? $this->imagePart($reference)['inlineData'] : null));
+                $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $reference ? $this->imagePart($reference)['inlineData'] : null));
             } catch (VertexAIResponseException $exception) {
                 // Images already generated in this attempt were paid for, even when a later call fails.
                 $spent = $this->spent($usage, $inspectionCost);
@@ -92,16 +93,16 @@ class GoogleVertexBannerGenerator implements BannerGenerator
 
     /**
      * Vertex answers 429 when the project's per-minute quota is used up. Retrying at once only burns
-     * the job's attempts, so the call waits and tries again while the deadline leaves room for it.
+     * the job's attempts, so the call waits and tries again while the deadline still leaves $reserveSeconds after the wait.
      */
-    private function rateLimited(GenerationDeadline $deadline, callable $call): mixed
+    private function rateLimited(GenerationDeadline $deadline, int $reserveSeconds, callable $call): mixed
     {
         foreach ([...config('campaigns.banners.rate_limit_backoff_seconds'), null] as $wait) {
             try {
                 return $call();
             } catch (VertexAIResponseException $exception) {
                 $remaining = $deadline->remaining() ?? INF;
-                if ($exception->errorCode !== 'vertex_http_429' || $wait === null || $remaining - $wait < GenerationDeadline::MIN_ATTEMPT_SECONDS + 20) {
+                if ($exception->errorCode !== 'vertex_http_429' || $wait === null || $remaining - $wait < $reserveSeconds) {
                     throw $exception;
                 }
                 Sleep::for($wait + random_int(0, 3))->seconds();
