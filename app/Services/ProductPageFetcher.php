@@ -272,9 +272,10 @@ class ProductPageFetcher
         }
         // Custom store themes mark their gallery's full-size photo on the thumbnail (data-full-src). Only
         // inside the product's own gallery: a related-products or upsell block can use the same markup.
+        $class = 'translate(@class, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")';
         $gallery = '//*[(@data-full-src or @data-large_image)'
-            .' and ancestor-or-self::*[contains(translate(@class, "GALLERY", "gallery"), "gallery")]'
-            .' and not(ancestor-or-self::*[contains(@class, "related") or contains(@class, "upsell") or contains(@class, "cross-sell") or contains(@class, "recently")])]';
+            .' and ancestor-or-self::*[contains('.$class.', "gallery")]'
+            .' and not(ancestor-or-self::*[contains('.$class.', "related") or contains('.$class.', "upsell") or contains('.$class.', "cross-sell") or contains('.$class.', "recently")])]';
         foreach ($xpath->query($gallery) as $node) {
             $candidates[] = $node->getAttribute('data-full-src') ?: $node->getAttribute('data-large_image');
         }
