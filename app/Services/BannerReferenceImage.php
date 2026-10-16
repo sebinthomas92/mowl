@@ -65,6 +65,17 @@ class BannerReferenceImage
         }
     }
 
+    /** Drops a stored copy that produced the wrong product, so the next attempt makes a new one. */
+    public function forget(MediaAsset $asset): void
+    {
+        if (! $asset->exists || data_get($asset->derivatives, 'banner_reference') === null) {
+            return;
+        }
+        $derivatives = $asset->derivatives;
+        unset($derivatives['banner_reference'], $derivatives['banner_reference_key']);
+        $asset->forceFill(['derivatives' => $derivatives])->save();
+    }
+
     /** The copy depends on the product name in the prompt, so a renamed product gets a new one. */
     public static function key(string $product): string
     {

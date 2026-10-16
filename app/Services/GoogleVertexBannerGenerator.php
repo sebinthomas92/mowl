@@ -52,7 +52,9 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         $asset = $productImages->first();
         try {
             $clean = $asset && config('campaigns.banners.clean_reference');
-            $reference = $asset && ! $clean ? $this->imagePart($asset)['inlineData'] : null;
+            $checkProduct = $asset && config('campaigns.banners.inspect_images') && config('campaigns.banners.check_product');
+            $photo = $asset && (! $clean || $checkProduct) ? $this->imagePart($asset)['inlineData'] : null;
+            $reference = $clean ? null : $photo;
             if ($clean) {
                 $round = (int) config('campaigns.banners.min_round_seconds');
                 $timeout = (int) config('campaigns.banners.reference_timeout_seconds');
@@ -72,6 +74,8 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         } catch (VertexAIResponseException $exception) {
             throw $this->withSpend($exception, $usage, $extraCost);
         }
+        $failure = null;
+        $split = null;
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             if ($attempt > 1 && ($deadline->remaining() ?? INF) < (int) config('campaigns.banners.min_round_seconds')) {
                 break;
@@ -89,12 +93,45 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             }
             $extraCost += $this->costs->calculate((string) config('campaigns.google.model'), $inspection['input_tokens'], 0, $inspection['output_tokens']);
             $marks = $inspection['marks'];
-            if ($marks === []) {
+            if ($marks !== []) {
+                $failure = ['banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300)];
+
+                continue;
+            }
+            if (! $checkProduct) {
                 return $this->result($result, $usage, $extraCost);
             }
+            try {
+                $match = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS, fn () => $this->inspector->matchesProduct($result->imageBytes, $result->mimeType, $product, $photo), retryHang: true);
+            } catch (VertexAIResponseException $exception) {
+                throw $this->withSpend($exception, $usage, $extraCost);
+            }
+            $extraCost += $this->costs->calculate((string) config('campaigns.google.model'), $match['input_tokens'], 0, $match['output_tokens']);
+            if ($match['matches'] && ! $match['split']) {
+                return $this->result($result, $usage, $extraCost);
+            }
+            if ($match['matches']) {
+                // The overlay already fades softly; a panel edge drawn into the photo shows through it, so redraw.
+                $split = $result;
+                $failure = null;
+
+                continue;
+            }
+            // A banner must show the real product; a stand drawn as a paper book is a false picture of it.
+            $failure = ['banner_product_mismatch', 'The generated product did not match the store photo: '.mb_substr($match['differences'], 0, 300)];
         }
 
-        throw new BannerAttemptFailed('banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300), $this->spent($usage, $extraCost), $result->imageBytes ?? null);
+        if ($split) {
+            // A visible seam is cosmetic; a correct product with clean text still beats no banner.
+            return $this->result($split, $usage, $extraCost);
+        }
+
+        if ($clean && ($failure[0] ?? null) === 'banner_product_mismatch') {
+            // Every round drew the wrong product, so the clean copy itself may be off: the next attempt remakes it.
+            $this->references->forget($asset);
+        }
+
+        throw new BannerAttemptFailed($failure[0] ?? 'banner_third_party_text', $failure[1] ?? 'No generated background passed its checks.', $this->spent($usage, $extraCost), $result->imageBytes ?? null);
     }
 
     private function result(BannerGenerationResult $result, array $usage, float $extraCost): BannerGenerationResult
