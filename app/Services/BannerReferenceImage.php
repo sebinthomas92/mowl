@@ -29,6 +29,9 @@ class BannerReferenceImage
     /** Store photos downloaded while looking for a studio shot to cut out. */
     private const MAX_GALLERY_PHOTOS = 6;
 
+    /** @var array{0: string, 1: string}|null The store's main product photo (type, bytes) from the last gallery search. */
+    private ?array $mainPhoto = null;
+
     /** The lock outlives the cleanup call plus Google sign-in (OIDC, STS and IAM, up to 75s) before it. */
     private const LOCK_EXTRA_SECONDS = 120;
 
@@ -131,6 +134,7 @@ class BannerReferenceImage
     {
         $photo = Storage::disk($asset->disk)->get($asset->path);
         $spent = 0.0;
+        $this->mainPhoto = null;
         foreach ($this->studioCutouts($asset, $photo, $source) as $studio) {
             try {
                 $spent += $this->check($studio['png'], $product, $brand, $studio['reference'], $spent, studio: true);
@@ -149,7 +153,10 @@ class BannerReferenceImage
         }
 
         try {
-            $redrawn = $this->redraw($asset, $photo, $product, $timeoutSeconds, $brand, $spent);
+            // The store's main product photo, when it was downloaded and is not the import, is the truer
+            // picture to redraw from: the import can be a share image of another variant.
+            [$mime, $bytes] = $this->mainPhoto ?? [(string) $asset->mime_type, $photo];
+            $redrawn = $this->redraw($mime, $bytes, $product, $timeoutSeconds, $brand, $spent);
         } catch (VertexAIResponseException $exception) {
             // The studio photos' paid checks stay on the banner's cost when the redraw call fails.
             throw $spent > 0 ? new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), round($spent, 6)) : $exception;
@@ -229,7 +236,10 @@ class BannerReferenceImage
             $usable = $image['width'] * $image['height'] <= ProductImageImporter::MAX_PIXELS;
             $own = ['mimeType' => $image['mime_type'], 'data' => base64_encode($image['bytes'])];
             $reference = $main;
-            $main ??= $usable ? $own : null;
+            if ($main === null && $usable) {
+                $main = $own;
+                $this->mainPhoto = [$image['mime_type'], $image['bytes']];
+            }
             if ($main === null) {
                 break;
             }
@@ -244,7 +254,7 @@ class BannerReferenceImage
     }
 
     /** @return array{inlineData: array{mimeType: string, data: string}, cost: float} */
-    private function redraw(MediaAsset $asset, string $photo, string $product, int $timeoutSeconds, string $brand, float $earlier): array
+    private function redraw(string $mimeType, string $photo, string $product, int $timeoutSeconds, string $brand, float $earlier): array
     {
         [$keyName, $keyHex] = $this->keyColour($photo);
         [$response] = $this->client->generateContent([
@@ -253,7 +263,7 @@ class BannerReferenceImage
                     ."on a completely flat, evenly lit, pure {$keyName} ({$keyHex}) background that fills the whole image, with no shadow, reflection, floor or gradient. "
                     .'Remove everything that is not the product itself: books, magazines, devices, screens, plants, cups, hands and any other props, and fill in the product where they covered it. '
                     .'Show the whole product with a margin on every side. Keep marks printed on the product itself only. No other text, letters, logos or labels anywhere.'],
-                ['inlineData' => ['mimeType' => $asset->mime_type, 'data' => base64_encode($photo)]],
+                ['inlineData' => ['mimeType' => $mimeType, 'data' => base64_encode($photo)]],
             ]]],
             'generationConfig' => ['responseModalities' => ['TEXT', 'IMAGE']],
         ], config('campaigns.banners.model'), $timeoutSeconds);
@@ -278,7 +288,7 @@ class BannerReferenceImage
             throw $cost + $earlier > 0 ? new BannerAttemptFailed('vertex_missing_image', $message, round($earlier + $cost, 6), is_string($bytes) && $bytes !== '' ? $bytes : null) : new VertexAIResponseException('vertex_missing_image', $message, true);
         }
 
-        $cost += $this->check($png, $product, $brand, ['mimeType' => $asset->mime_type, 'data' => base64_encode($photo)], $earlier + $cost);
+        $cost += $this->check($png, $product, $brand, ['mimeType' => $mimeType, 'data' => base64_encode($photo)], $earlier + $cost);
 
         return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($png)], 'cost' => $cost];
     }

@@ -124,6 +124,20 @@ class ProductPhotoCutoutTest extends TestCase
         }
     }
 
+    public function test_a_store_size_photo_is_scaled_down_and_cut_out(): void
+    {
+        // Store gallery photos are usually over 1000px, so they always go through the scaling step.
+        $large = imagescale(imagecreatefromstring(self::studio()), 1254, 1254, IMG_NEAREST_NEIGHBOUR);
+        ob_start();
+        imagejpeg($large, null, 92);
+
+        $cutter = new ProductPhotoCutout;
+        $png = $cutter->cut((string) ob_get_clean());
+
+        $this->assertNotNull($png, (string) $cutter->reason);
+        $this->assertLessThanOrEqual(1000, max(array_slice(getimagesizefromstring($png), 0, 2)));
+    }
+
     public function test_a_thumbnail_is_not_cut_out(): void
     {
         $cutter = new ProductPhotoCutout;

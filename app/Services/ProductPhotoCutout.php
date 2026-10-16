@@ -81,13 +81,15 @@ class ProductPhotoCutout
         imagealphablending($source, false);
         imagesavealpha($source, true);
         $factor = min(1, self::MAX_SIDE / max(imagesx($source), imagesy($source)));
-        $image = $factor < 1
-            ? imagescale($source, max(1, (int) round(imagesx($source) * $factor)), max(1, (int) round(imagesy($source) * $factor)), IMG_BICUBIC)
-            : $source;
-        if ($image !== $source) {
-            imagedestroy($source);
+        $image = $source;
+        if ($factor < 1) {
+            [$width, $height] = [max(1, (int) round(imagesx($source) * $factor)), max(1, (int) round(imagesy($source) * $factor))];
+            // Some GD builds return false for bicubic scaling (PHP 8.5 with GD 2.3.3); bilinear works everywhere.
+            $image = imagescale($source, $width, $height, IMG_BICUBIC) ?: imagescale($source, $width, $height, IMG_BILINEAR_FIXED);
         }
         if (! $image) {
+            $this->reason = 'photo could not be scaled';
+
             return null;
         }
         // Turned after scaling, so no second full-size copy is held during the rotation.

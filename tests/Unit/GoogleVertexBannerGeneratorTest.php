@@ -364,6 +364,39 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'stand-old'));
     }
 
+    public function test_the_redraw_starts_from_the_stores_main_photo_not_a_share_image_of_another_variant(): void
+    {
+        Storage::fake('local');
+        $scene = function (int $r, int $g, int $b): string {
+            $image = imagecreatetruecolor(600, 600);
+            for ($x = 0; $x < 600; $x += 20) {
+                imagefilledrectangle($image, $x, 0, $x + 9, 599, imagecolorallocate($image, $r, $g, $b));
+            }
+            ob_start();
+            imagejpeg($image);
+
+            return (string) ob_get_clean();
+        };
+        [$share, $main] = [$scene(120, 80, 40), $scene(214, 72, 38)];
+        Storage::disk('local')->put('product.jpg', $share);
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $page = '<html><head><title>Stand</title></head><body><div class="pdp-gallery"><button data-full-src="/uploads/stand-1.jpg"></button></div></body></html>';
+        $this->fakeVertex([self::keyed(), 'banner-background']);
+        Http::fake([
+            '93.184.216.34/product/stand' => Http::response($page, 200, ['Content-Type' => 'text/html']),
+            '93.184.216.34/uploads/stand-1.jpg' => Http::response($main, 200, ['Content-Type' => 'image/jpeg']),
+        ]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/share.webp']]);
+        $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
+
+        app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+
+        Http::assertSent(fn (Request $request) => str_contains($request->url(), 'flash-image') && count($request['contents'][0]['parts']) > 1
+            && base64_decode($request['contents'][0]['parts'][1]['inlineData']['data']) === $main);
+    }
+
     public function test_a_retitled_page_with_the_same_sku_still_gives_its_gallery(): void
     {
         Storage::fake('local');
