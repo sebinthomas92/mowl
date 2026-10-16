@@ -53,11 +53,12 @@ class ProductPhotoCutout
 
     private const SHADOW_TINT_SLOPE = 0.12;
 
-    /** Backdrop channels narrower than twice this share of the photo's shorter side are product. */
-    private const CHANNEL_RADIUS = 0.03;
-
-    /** Backdrop-coloured gaps at most this wide between product on both sides of a row are product (a page gutter). */
-    private const NOTCH_WIDTH = 8;
+    /**
+     * Gaps at most this share of the photo's width, with product on both sides of the row and further
+     * from the backdrop colour than its border, are product: the Kindle Stand's page fold is lit to
+     * within the beige backdrop's tolerance and opens onto it through the V above the spine.
+     */
+    private const NOTCH_WIDTH = 0.05;
 
     /** A product may touch the frame along at most this share of its own extent on that side. */
     private const MAX_EDGE_CONTACT = 0.05;
@@ -221,15 +222,6 @@ class ProductPhotoCutout
             }
         }
 
-        // A product surface close to the backdrop colour (a page fold on the Kindle Stand, within the
-        // tolerance of its beige) lets the fill run down into the product through a channel. Backdrop
-        // is open space: only the part a disc of CHANNEL_RADIUS fits into, and what that disc sweeps,
-        // stays backdrop; in narrower channels reached from it, pixels further from the backdrop colour
-        // than the border's are product, while a real slot (between a fork's tines) stays clear.
-        if (! $alphaOnly) {
-            $mask = $this->opened($mask, $near, $typical + self::HOLE_MATCH, $width, $height, max(4, (int) round(self::CHANNEL_RADIUS * min($width, $height))));
-        }
-
         // Backdrop seen through a closed opening (a mug or bag handle, a ring) is not reached from the
         // edges. A patch larger than a specular highlight that is, on average, as close to the backdrop
         // colour as the border itself is backdrop too. A product surface of a near colour (a white
@@ -342,6 +334,7 @@ class ProductPhotoCutout
 
         // A narrow backdrop-coloured gap with product on both sides of the row (a lit page gutter
         // that opens at the top) is product too.
+        $notch = (int) round(self::NOTCH_WIDTH * $width);
         for ($y = 0; $y < $height; $y++) {
             $last = -1;
             for ($x = 0; $x < $width; $x++) {
@@ -349,7 +342,7 @@ class ProductPhotoCutout
                 if ($mask[$index] === "\1") {
                     continue;
                 }
-                if ($last >= 0 && $x - $last - 1 > 0 && $x - $last - 1 <= self::NOTCH_WIDTH) {
+                if ($last >= 0 && $x - $last - 1 > 0 && $x - $last - 1 <= $notch) {
                     $open = false;
                     $sum = 0;
                     for ($gap = $last + 1; $gap < $x; $gap++) {
@@ -722,88 +715,6 @@ class ProductPhotoCutout
         }
 
         return [$rows, $columns];
-    }
-
-    /**
-     * A morphological opening of the backdrop (mask "\1"): eroded by $radius, then grown back by it,
-     * both with chessboard distances. Outside the frame counts as backdrop.
-     */
-    private function opened(string $mask, string $near, float $plain, int $width, int $height, int $radius): string
-    {
-        $count = $width * $height;
-        $far = chr(255);
-        // Distance from each backdrop pixel to the nearest product pixel.
-        $inside = '';
-        for ($index = 0; $index < $count; $index++) {
-            $inside .= $mask[$index] === "\1" ? $far : "\0";
-        }
-        $inside = $this->distances($inside, $width, $height);
-        // Distance from each pixel to the nearest backdrop pixel that a disc of $radius fits around.
-        $centres = '';
-        for ($index = 0; $index < $count; $index++) {
-            $centres .= ord($inside[$index]) > $radius ? "\0" : $far;
-        }
-        $centres = $this->distances($centres, $width, $height);
-        for ($index = 0; $index < $count; $index++) {
-            // Pixel by pixel: the backdrop seen in a narrow V or a concave corner is as close to the
-            // backdrop colour as the border is and stays; a lit surface sits measurably further off.
-            if ($mask[$index] === "\1" && ord($centres[$index]) > $radius && ord($near[$index]) > $plain) {
-                $mask[$index] = "\0";
-            }
-        }
-
-        return $mask;
-    }
-
-    /** Chessboard distance to the nearest zero byte, capped at 255, in two passes. */
-    private function distances(string $field, int $width, int $height): string
-    {
-        for ($y = 0; $y < $height; $y++) {
-            for ($x = 0; $x < $width; $x++) {
-                $index = $y * $width + $x;
-                $best = ord($field[$index]);
-                if ($best === 0) {
-                    continue;
-                }
-                if ($x > 0) {
-                    $best = min($best, ord($field[$index - 1]) + 1);
-                }
-                if ($y > 0) {
-                    $best = min($best, ord($field[$index - $width]) + 1);
-                    if ($x > 0) {
-                        $best = min($best, ord($field[$index - $width - 1]) + 1);
-                    }
-                    if ($x < $width - 1) {
-                        $best = min($best, ord($field[$index - $width + 1]) + 1);
-                    }
-                }
-                $field[$index] = chr(min(255, $best));
-            }
-        }
-        for ($y = $height - 1; $y >= 0; $y--) {
-            for ($x = $width - 1; $x >= 0; $x--) {
-                $index = $y * $width + $x;
-                $best = ord($field[$index]);
-                if ($best === 0) {
-                    continue;
-                }
-                if ($x < $width - 1) {
-                    $best = min($best, ord($field[$index + 1]) + 1);
-                }
-                if ($y < $height - 1) {
-                    $best = min($best, ord($field[$index + $width]) + 1);
-                    if ($x < $width - 1) {
-                        $best = min($best, ord($field[$index + $width + 1]) + 1);
-                    }
-                    if ($x > 0) {
-                        $best = min($best, ord($field[$index + $width - 1]) + 1);
-                    }
-                }
-                $field[$index] = chr(min(255, $best));
-            }
-        }
-
-        return $field;
     }
 
     /** A JPEG turned the way its camera's orientation tag says it is shown. */
