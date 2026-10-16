@@ -85,6 +85,24 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertSame(0, (imagecolorat(imagecreatefromstring($png), 2 * 80, 2 * 80) >> 24) & 127);
     }
 
+    public function test_soft_edges_lose_the_backdrops_colour(): void
+    {
+        $image = imagecreatetruecolor(400, 400);
+        imagefill($image, 0, 0, imagecolorallocate($image, 245, 240, 230));
+        imagefilledrectangle($image, 120, 120, 280, 280, imagecolorallocate($image, 30, 30, 30));
+        // An antialiased column on the left edge, mostly backdrop with a little of the product in it.
+        imageline($image, 119, 120, 119, 280, imagecolorallocate($image, 215, 210, 201));
+
+        $png = (new ProductPhotoCutout)->cut(self::encode($image));
+
+        $this->assertNotNull($png);
+        $edge = imagecolorat(imagecreatefromstring($png), 0, 100);
+        // Partly clear, and darker than the light blend it was: the backdrop's share is taken out.
+        $this->assertGreaterThan(0, ($edge >> 24) & 127);
+        $this->assertLessThan(127, ($edge >> 24) & 127);
+        $this->assertLessThan(205, ($edge >> 16) & 255);
+    }
+
     public function test_a_thumbnail_is_not_cut_out(): void
     {
         $cutter = new ProductPhotoCutout;

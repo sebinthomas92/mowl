@@ -36,6 +36,9 @@ class ProductPhotoCutout
     /** How much further from the backdrop colour than the border's typical pixel an opening may be. */
     private const HOLE_MATCH = 4.0;
 
+    /** Below this opacity an edge pixel's colour is too little product to recover reliably. */
+    private const MIN_UNMIX_ALPHA = 0.25;
+
     /** How much darker a shadow pixel may be than the neighbour the shadow fill reached it from. */
     private const MAX_SHADOW_STEP = 10.0;
 
@@ -271,14 +274,24 @@ class ProductPhotoCutout
                     continue;
                 }
                 $c = imagecolorat($image, $x, $y);
+                $rgb = [($c >> 16) & 255, ($c >> 8) & 255, $c & 255];
                 $alpha = 1.0;
                 if ($this->touchesBackdrop($mask, $index, $x, $y, $width, $height)) {
                     // Edge pixels are part backdrop: blend them out by how close they are to it.
                     $alpha = max(0.0, min(1.0, (ord($near[$index]) - $tolerance) / self::EDGE_RAMP));
+                    if (! $alphaOnly && $alpha > 0.0 && $alpha < 1.0) {
+                        // Take the backdrop's share out of the colour too, or it shows as a light fringe on a
+                        // darker scene: pixel = alpha * product + (1 - alpha) * backdrop.
+                        $from = [($backdrop >> 16) & 255, ($backdrop >> 8) & 255, $backdrop & 255];
+                        $share = max($alpha, self::MIN_UNMIX_ALPHA);
+                        foreach ($rgb as $channel => $value) {
+                            $rgb[$channel] = (int) max(0, min(255, round(($value - (1 - $share) * $from[$channel]) / $share)));
+                        }
+                    }
                 }
                 // A transparent PNG's own soft edges keep their transparency.
                 $alpha *= (127 - (($c >> 24) & 127)) / 127;
-                imagesetpixel($out, $x - $left, $y - $top, imagecolorallocatealpha($out, ($c >> 16) & 255, ($c >> 8) & 255, $c & 255, (int) round(127 * (1 - $alpha))));
+                imagesetpixel($out, $x - $left, $y - $top, imagecolorallocatealpha($out, $rgb[0], $rgb[1], $rgb[2], (int) round(127 * (1 - $alpha))));
             }
         }
         ob_start();
