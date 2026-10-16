@@ -70,8 +70,11 @@ class ProductPhotoCutout
 
     private const MAX_EDGE_CONTACT = 0.05;
 
-    /** Frame contact must lie within this share of the product's extent from either end of that side. */
-    private const CORNER_SHARE = 0.25;
+    /**
+     * Frame contact must lie within this share of the product's extent from either end of that side. The
+     * Kindle Stand's slanted base meets the frame 23-26% up from its box's bottom, which its shadow sets.
+     */
+    private const CORNER_SHARE = 0.35;
 
     /** More separate pieces than this is speckle or a busy scene, not one product on a backdrop. */
     private const MAX_PIECES = 2000;
