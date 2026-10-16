@@ -61,6 +61,17 @@ class ProductPhotoCutout
     /** Why the last photo was not cut out, for the error a banner records. */
     public ?string $reason = null;
 
+    /**
+     * The backdrop along each side of the photo (top, bottom, left, right), smoothed, as [r, g, b] per
+     * pixel. A studio backdrop is rarely one colour: a soft light falloff from top to bottom spread
+     * pixel distances from a single median colour so widely that the tolerance took in the stand's
+     * lit white pages, and the fill split the stand into pieces. Each pixel is compared with the
+     * backdrop blended in from the four sides instead.
+     *
+     * @var array<string, list<array{float, float, float}>>
+     */
+    private array $sides = [];
+
     public function cut(string $bytes): ?string
     {
         $this->reason = 'unreadable image';
@@ -106,6 +117,7 @@ class ProductPhotoCutout
 
     private function cutImage(\GdImage $image): ?string
     {
+        $this->sides = [];
         $width = imagesx($image);
         $height = imagesy($image);
         if ($width < 32 || $height < 32) {
@@ -142,7 +154,13 @@ class ProductPhotoCutout
 
                 return null;
             }
-            // The backdrop's own unevenness (a soft gradient, JPEG noise) sets how close counts as backdrop.
+            $this->sides = $this->sides($image, $ring, $backdrop);
+            $distances = [];
+            foreach ($border as $i => $index) {
+                $distances[] = self::clear($borderColours[$i]) ? 0.0 : $this->distance($borderColours[$i] & 0xFFFFFF, $this->backdropAt($index % $width, intdiv($index, $width), $width, $height));
+            }
+            sort($distances);
+            // What is left of the backdrop's unevenness (JPEG noise, a mottled paper) sets how close counts as backdrop.
             $tolerance = (int) min(40, max(14, ceil($distances[(int) floor(0.95 * (count($distances) - 1))] + 8)));
             $typical = $distances[intdiv(count($distances) - 1, 2)];
         }
@@ -156,7 +174,7 @@ class ProductPhotoCutout
                 $near .= match (true) {
                     self::clear($colour) => "\0",
                     $alphaOnly => "\xFF",
-                    default => chr((int) min(255, round($this->distance($colour & 0xFFFFFF, $backdrop)))),
+                    default => chr((int) min(255, round($this->distance($colour & 0xFFFFFF, $this->backdropAt($x, $y, $width, $height))))),
                 };
             }
         }
@@ -238,8 +256,10 @@ class ProductPhotoCutout
                     if ($next < 0 || $next >= $count || $mask[$next] !== "\0") {
                         continue;
                     }
-                    $colour = imagecolorat($image, $next % $width, intdiv($next, $width));
-                    if (self::light($colour) >= $from - self::MAX_SHADOW_STEP && $this->isShadow($colour, $backdrop, $shade)) {
+                    [$nx, $ny] = [$next % $width, intdiv($next, $width)];
+                    $colour = imagecolorat($image, $nx, $ny);
+                    $local = $this->backdropAt($nx, $ny, $width, $height);
+                    if (self::light($colour) >= $from - self::MAX_SHADOW_STEP && $this->isShadow($colour, $local, $this->tint($local))) {
                         $mask[$next] = "\1";
                         $stack[] = $next;
                         $removed++;
@@ -314,13 +334,14 @@ class ProductPhotoCutout
                 if ($edge[$index] === "\1") {
                     // Edge pixels are part backdrop: blend them out by how close they are to it.
                     $alpha = max(0.0, min(1.0, (ord($near[$index]) - $tolerance) / self::EDGE_RAMP));
+                    $local = $alphaOnly ? 0 : $this->backdropAt($x, $y, $width, $height);
                     if (! $alphaOnly) {
-                        $alpha = min($alpha, $this->blendShare($image, $keep, $rgb, $backdrop, $x, $y, $width, $height));
+                        $alpha = min($alpha, $this->blendShare($image, $keep, $rgb, $local, $x, $y, $width, $height));
                     }
                     if (! $alphaOnly && $alpha > 0.0 && $alpha < 1.0) {
                         // Take the backdrop's share out of the colour too, or it shows as a light fringe on a
                         // darker scene: pixel = alpha * product + (1 - alpha) * backdrop.
-                        $from = [($backdrop >> 16) & 255, ($backdrop >> 8) & 255, $backdrop & 255];
+                        $from = [($local >> 16) & 255, ($local >> 8) & 255, $local & 255];
                         $share = max($alpha, self::MIN_UNMIX_ALPHA);
                         foreach ($rgb as $channel => $value) {
                             $rgb[$channel] = (int) max(0, min(255, round(($value - (1 - $share) * $from[$channel]) / $share)));
@@ -434,6 +455,92 @@ class ProductPhotoCutout
         }
 
         return [$keep, $mainBox];
+    }
+
+    /**
+     * Each side's backdrop colour along its length: the ring's pixels near the backdrop colour averaged
+     * across the ring, gaps (a prop or shadow at the edge) bridged from their neighbours, and smoothed
+     * so JPEG noise does not carry inward.
+     *
+     * @return array<string, list<array{float, float, float}>>
+     */
+    private function sides(\GdImage $image, int $ring, int $backdrop): array
+    {
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $sides = [];
+        foreach (['top' => [$width, false, 0], 'bottom' => [$width, false, $height - $ring], 'left' => [$height, true, 0], 'right' => [$height, true, $width - $ring]] as $side => [$length, $vertical, $offset]) {
+            $profile = [];
+            for ($at = 0; $at < $length; $at++) {
+                $sum = [0, 0, 0];
+                $n = 0;
+                for ($depth = $offset; $depth < $offset + $ring; $depth++) {
+                    $colour = $vertical ? imagecolorat($image, $depth, $at) : imagecolorat($image, $at, $depth);
+                    if (self::clear($colour) || $this->distance($colour & 0xFFFFFF, $backdrop) > self::PLAIN_DISTANCE) {
+                        continue;
+                    }
+                    $sum = [$sum[0] + (($colour >> 16) & 255), $sum[1] + (($colour >> 8) & 255), $sum[2] + ($colour & 255)];
+                    $n++;
+                }
+                $profile[] = $n > 0 ? [$sum[0] / $n, $sum[1] / $n, $sum[2] / $n] : null;
+            }
+            $known = array_keys(array_filter($profile, fn ($value) => $value !== null));
+            $fallback = [($backdrop >> 16) & 255, ($backdrop >> 8) & 255, $backdrop & 255];
+            $before = null;
+            foreach ($profile as $at => $value) {
+                if ($value !== null) {
+                    $before = $at;
+
+                    continue;
+                }
+                $after = null;
+                foreach ($known as $candidate) {
+                    if ($candidate > $at) {
+                        $after = $candidate;
+                        break;
+                    }
+                }
+                $profile[$at] = match (true) {
+                    $before === null && $after === null => $fallback,
+                    $before === null => $profile[$after],
+                    $after === null => $profile[$before],
+                    default => array_map(fn ($a, $b) => $a + ($b - $a) * ($at - $before) / ($after - $before), $profile[$before], $profile[$after]),
+                };
+            }
+            $half = max(2, intdiv($length, 60));
+            $smooth = [];
+            for ($at = 0; $at < $length; $at++) {
+                $sum = [0.0, 0.0, 0.0];
+                $from = max(0, $at - $half);
+                $to = min($length - 1, $at + $half);
+                for ($near = $from; $near <= $to; $near++) {
+                    $sum = [$sum[0] + $profile[$near][0], $sum[1] + $profile[$near][1], $sum[2] + $profile[$near][2]];
+                }
+                $smooth[] = [$sum[0] / ($to - $from + 1), $sum[1] / ($to - $from + 1), $sum[2] / ($to - $from + 1)];
+            }
+            $sides[$side] = $smooth;
+        }
+
+        return $sides;
+    }
+
+    /** The backdrop colour at a pixel, blended in from the four sides (a Coons patch over the photo). */
+    private function backdropAt(int $x, int $y, int $width, int $height): int
+    {
+        $u = $width > 1 ? $x / ($width - 1) : 0.0;
+        $v = $height > 1 ? $y / ($height - 1) : 0.0;
+        ['top' => $top, 'bottom' => $bottom, 'left' => $left, 'right' => $right] = $this->sides;
+        $colour = 0;
+        for ($channel = 0; $channel < 3; $channel++) {
+            $corners = (1 - $u) * (1 - $v) * ($top[0][$channel] + $left[0][$channel]) / 2
+                + $u * (1 - $v) * ($top[$width - 1][$channel] + $right[0][$channel]) / 2
+                + (1 - $u) * $v * ($bottom[0][$channel] + $left[$height - 1][$channel]) / 2
+                + $u * $v * ($bottom[$width - 1][$channel] + $right[$height - 1][$channel]) / 2;
+            $value = (1 - $v) * $top[$x][$channel] + $v * $bottom[$x][$channel] + (1 - $u) * $left[$y][$channel] + $u * $right[$y][$channel] - $corners;
+            $colour = ($colour << 8) | (int) max(0, min(255, round($value)));
+        }
+
+        return $colour;
     }
 
     /** A JPEG turned the way its camera's orientation tag says it is shown. */

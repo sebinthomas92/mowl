@@ -259,6 +259,35 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertNull($cutter->cut('not-an-image'));
     }
 
+    public function test_lit_pages_on_a_backdrop_that_darkens_towards_the_top_stay_one_product(): void
+    {
+        // The Kindle Stand's studio shot: a beige backdrop lit from below, and white pages split by a
+        // shaded spine, only a little lighter than the backdrop. Against one median backdrop colour the
+        // tolerance took in the pages, and the stand fell apart into "other objects".
+        $image = imagecreatetruecolor(627, 627);
+        for ($y = 0; $y < 627; $y++) {
+            $t = $y / 626;
+            imageline($image, 0, $y, 626, $y, imagecolorallocate($image, (int) (184 + 44 * $t), (int) (164 + 44 * $t), (int) (140 + 44 * $t)));
+        }
+        imagefilledrectangle($image, 150, 400, 476, 430, imagecolorallocate($image, 214, 72, 38));
+        imagefilledrectangle($image, 165, 300, 309, 400, imagecolorallocate($image, 236, 227, 221));
+        imagefilledrectangle($image, 317, 300, 461, 400, imagecolorallocate($image, 238, 229, 222));
+        // The spine and a highlight band: page-white shaded towards the backdrop.
+        imagefilledrectangle($image, 310, 300, 316, 400, imagecolorallocate($image, 218, 202, 188));
+        imagefilledrectangle($image, 165, 345, 461, 349, imagecolorallocate($image, 220, 205, 192));
+
+        $cutter = new ProductPhotoCutout;
+        $png = $cutter->cut(self::encode($image, true));
+
+        $this->assertNotNull($png, (string) $cutter->reason);
+        $cutout = imagecreatefromstring($png);
+        // Both page blocks and the base, as one piece.
+        $this->assertEqualsWithDelta(327, imagesx($cutout), 12);
+        $this->assertEqualsWithDelta(131, imagesy($cutout), 6);
+        $spine = imagecolorat($cutout, 313 - 150, 330 - 300);
+        $this->assertSame(0, ($spine >> 24) & 127);
+    }
+
     /** A low white stand with page lines on a red-orange base, on a cream backdrop with a soft shadow. */
     public static function studio(): string
     {

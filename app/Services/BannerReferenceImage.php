@@ -23,8 +23,8 @@ use Throwable;
  */
 class BannerReferenceImage
 {
-    /** Bump when the cleanup prompt changes, so stored copies made by the old prompt are redone. */
-    private const PROMPT_VERSION = 3;
+    /** Bump when the cleanup prompt or the cutout changes, so stored copies made the old way are redone. */
+    private const PROMPT_VERSION = 4;
 
     /** Store photos downloaded while looking for a studio shot to cut out. */
     private const MAX_GALLERY_PHOTOS = 6;
