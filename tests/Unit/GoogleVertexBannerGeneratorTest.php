@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\BannerCreative;
+use App\Models\CampaignPack;
 use App\Models\MediaAsset;
 use App\Models\SourceSnapshot;
 use App\Services\BannerCopySelector;
@@ -334,6 +335,33 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'lamp.jpg'));
         // The imported photo, unconfirmed as the main photo, goes through the redraw instead.
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'flash-image') && count($request['contents'][0]['parts']) > 1);
+    }
+
+    public function test_the_packs_own_refreshed_source_gives_the_gallery_not_the_imports_older_one(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.jpg', ProductPhotoCutoutTest::studio());
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $page = '<html><head><title>Stand</title></head><body><div class="pdp-gallery"><button data-full-src="/uploads/stand.jpg"></button></div></body></html>';
+        $this->fakeVertex(['banner-background']);
+        Http::fake([
+            '93.184.216.34/product/stand-new' => Http::response($page, 200, ['Content-Type' => 'text/html']),
+            '93.184.216.34/product/stand-old' => Http::response('', 404),
+        ]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/stand.jpg']]);
+        $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand-old']));
+        $pack = new CampaignPack;
+        $pack->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand-new']));
+        $creative = new BannerCreative(['prompt' => self::SCENE]);
+        $creative->setRelation('campaignPack', $pack);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate($creative, collect([$asset]));
+
+        $this->assertStudioCutout($result->productCutout);
+        Http::assertSent(fn (Request $request) => str_contains($request->url(), 'stand-new'));
+        Http::assertNotSent(fn (Request $request) => str_contains($request->url(), 'stand-old'));
     }
 
     public function test_a_retitled_page_with_the_same_sku_still_gives_its_gallery(): void

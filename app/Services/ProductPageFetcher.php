@@ -272,11 +272,11 @@ class ProductPageFetcher
         }
         // Custom store themes mark their gallery's full-size photo on the thumbnail (data-full-src). Only
         // inside the product's own gallery (a product or pdp gallery class, not a reviews or editorial
-        // gallery): a related-products or upsell block can use the same markup.
+        // gallery): a related, recommended or upsell products block can use the same markup.
         $class = 'translate(@class, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")';
         $gallery = '//*[(@data-full-src or @data-large_image)'
             .' and ancestor-or-self::*[contains('.$class.', "gallery") and (contains('.$class.', "product") or contains('.$class.', "pdp"))]'
-            .' and not(ancestor-or-self::*[contains('.$class.', "related") or contains('.$class.', "upsell") or contains('.$class.', "cross-sell") or contains('.$class.', "recently") or contains('.$class.', "review") or contains('.$class.', "testimonial")])]';
+            .' and not(ancestor-or-self::*[contains('.$class.', "related") or contains('.$class.', "upsell") or contains('.$class.', "cross-sell") or contains('.$class.', "recently") or contains('.$class.', "recommend") or contains('.$class.', "similar") or contains('.$class.', "review") or contains('.$class.', "testimonial")])]';
         foreach ($xpath->query($gallery) as $node) {
             $candidates[] = $node->getAttribute('data-full-src') ?: $node->getAttribute('data-large_image');
         }

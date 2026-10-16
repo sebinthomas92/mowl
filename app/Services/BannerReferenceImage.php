@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\MediaAsset;
+use App\Models\SourceSnapshot;
 use App\Support\GenerationDeadline;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
@@ -54,24 +55,26 @@ class BannerReferenceImage
      *
      * @return array{inlineData: array{mimeType: string, data: string}, cost: float}
      */
-    public function for(MediaAsset $asset, string $product, int $timeoutSeconds, int $waitSeconds, string $brand = ''): array
+    public function for(MediaAsset $asset, string $product, int $timeoutSeconds, int $waitSeconds, string $brand = '', ?SourceSnapshot $source = null): array
     {
+        // The pack's own source wins: a product refreshed since the photo was imported keeps that older
+        // asset, and its gallery and approval are the pack's, not the import's.
+        $source ??= $asset->sourceSnapshot;
         if (! $asset->exists) {
-            return $this->make($asset, $product, $timeoutSeconds, $brand);
+            return $this->make($asset, $product, $timeoutSeconds, $brand, $source);
         }
         // A cutout can come from the page's gallery, so a refreshed (and re-approved) page makes a new one.
-        $snapshot = $asset->sourceSnapshot;
-        $key = self::key($product, $brand, $snapshot ? $snapshot->content_hash.'|'.$snapshot->approved_at?->toIso8601String() : '');
+        $key = self::key($product, $brand, $source ? $source->content_hash.'|'.$source->approved_at?->toIso8601String() : '');
         if ($cached = $this->cached($asset, $key)) {
             return $cached;
         }
 
         try {
-            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + 2 * (int) config('campaigns.banners.inspection_timeout_seconds') + self::LOCK_EXTRA_SECONDS)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds, $key, $brand) {
+            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + 2 * (int) config('campaigns.banners.inspection_timeout_seconds') + self::LOCK_EXTRA_SECONDS)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds, $key, $brand, $source) {
                 if ($cached = $this->cached($asset->refresh(), $key)) {
                     return $cached;
                 }
-                $clean = $this->make($asset, $product, $timeoutSeconds, $brand);
+                $clean = $this->make($asset, $product, $timeoutSeconds, $brand, $source);
                 $path = dirname($asset->path).'/banner-reference-'.$asset->id.'.png';
                 // The copy is already paid for: a failed write (false, or a throw on the gcs disk) only
                 // means it is used once and not recorded.
@@ -124,11 +127,11 @@ class BannerReferenceImage
      *
      * @return array{inlineData: array{mimeType: string, data: string}, cost: float, source?: string}
      */
-    private function make(MediaAsset $asset, string $product, int $timeoutSeconds, string $brand): array
+    private function make(MediaAsset $asset, string $product, int $timeoutSeconds, string $brand, ?SourceSnapshot $source): array
     {
         $photo = Storage::disk($asset->disk)->get($asset->path);
         $spent = 0.0;
-        foreach ($this->studioCutouts($asset, $photo) as $studio) {
+        foreach ($this->studioCutouts($asset, $photo, $source) as $studio) {
             try {
                 $spent += $this->check($studio['png'], $product, $brand, $studio['reference'], $spent, studio: true);
             } catch (BannerAttemptFailed $exception) {
@@ -164,11 +167,11 @@ class BannerReferenceImage
      *
      * @return \Generator<int, array{png: string, source: string, reference: array{mimeType: string, data: string}|null}>
      */
-    private function studioCutouts(MediaAsset $asset, string $photo): \Generator
+    private function studioCutouts(MediaAsset $asset, string $photo, ?SourceSnapshot $snapshot): \Generator
     {
         $source = (string) data_get($asset->metadata, 'source_url');
         $imported = $this->cutter->cut($photo);
-        $page = $asset->sourceSnapshot?->url;
+        $page = $snapshot?->url;
         // An uploaded photo is the product by the owner's word. An imported one is trusted unchecked only
         // when it is the gallery's main photo: older imports took the page's share image first.
         $gallery = [];
@@ -185,7 +188,7 @@ class BannerReferenceImage
             // The owner approved the product the page showed then. A page that now names another
             // product (a reused URL) is not that product's gallery. The SKU decides when both have one,
             // so a retitled page of the same product still counts.
-            $approved = (array) ($asset->sourceSnapshot->extracted_truth ?? []);
+            $approved = (array) ($snapshot->extracted_truth ?? []);
             $then = fn (string $field) => mb_strtolower(trim((string) ($approved[$field] ?? '')));
             $now = fn (string $field) => mb_strtolower(trim((string) ($fetched['product_truth'][$field] ?? '')));
             $field = $then('sku') !== '' && $now('sku') !== '' ? 'sku' : 'name';

@@ -71,6 +71,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                     // Waiters reuse the cutout another banner is making, including its two checks.
                     (int) min($timeout + 2 * (int) config('campaigns.banners.inspection_timeout_seconds') + 15, max(1, ($deadline->remaining() ?? INF) - $round)),
                     $brand,
+                    $creative->campaignPack?->sourceSnapshot,
                 ));
                 $extraCost += $made['cost'];
                 $cutout = base64_decode($made['inlineData']['data']);
