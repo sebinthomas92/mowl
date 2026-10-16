@@ -455,6 +455,32 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         Http::assertNotSent(fn (Request $request) => $request->url() === 'https://93.184.216.34/uploads/walnut.jpg');
     }
 
+    public function test_an_imported_studio_photo_is_not_trusted_when_its_page_cannot_be_read(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.jpg', ProductPhotoCutoutTest::studio());
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $images = [self::image(self::keyed()), self::image('banner-background')];
+        Http::fake([
+            '93.184.216.34/product/stand' => Http::response('', 503),
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$images) {
+                return Http::response(str_contains($request->url(), 'gemini-3.5-flash:') ? self::inspection([]) : array_shift($images));
+            },
+        ]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/share.jpg']]);
+        $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+
+        // The checked redraw was used, not the imported photo's own cutout.
+        $this->assertSame([20, 16], array_slice(getimagesizefromstring((string) $result->productCutout), 0, 2));
+    }
+
     public function test_a_failed_redraw_call_keeps_the_studio_checks_spend(): void
     {
         Storage::fake('local');

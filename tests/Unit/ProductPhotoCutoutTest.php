@@ -196,6 +196,16 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertNull($cutter->cut(self::encode($cropped)));
         $this->assertSame('product cropped by the photo edge', $cutter->reason);
 
+        // Speckle in thousands of separate pieces stops early instead of tracking every piece.
+        $speckled = self::backdrop();
+        for ($y = 20; $y < 380; $y += 6) {
+            for ($x = 20; $x < 380; $x += 6) {
+                imagesetpixel($speckled, $x, $y, imagecolorallocate($speckled, 20, 20, 20));
+            }
+        }
+        $this->assertNull($cutter->cut(self::encode($speckled)));
+        $this->assertSame('not a plain backdrop', $cutter->reason);
+
         $this->assertNull($cutter->cut('not-an-image'));
     }
 

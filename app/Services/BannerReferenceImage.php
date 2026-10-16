@@ -173,7 +173,11 @@ class BannerReferenceImage
             try {
                 $gallery = $this->fetcher->fetch($page)['gallery_images'] ?? [];
             } catch (Throwable $exception) {
+                // Without the page there is no telling whether the import is the main photo: the redraw,
+                // which is checked against the imported photo as a whole, is used instead.
                 report($exception);
+
+                return;
             }
         }
         // With no gallery to compare with, the imported photo is the reference the redraw would use too.

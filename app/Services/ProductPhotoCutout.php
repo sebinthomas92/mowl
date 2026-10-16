@@ -42,6 +42,9 @@ class ProductPhotoCutout
     /** How much darker a shadow pixel may be than the neighbour the shadow fill reached it from. */
     private const MAX_SHADOW_STEP = 10.0;
 
+    /** More separate pieces than this is speckle or a busy scene, not one product on a backdrop. */
+    private const MAX_PIECES = 2000;
+
     private const MIN_COVERAGE = 0.03;
 
     private const MAX_COVERAGE = 0.85;
@@ -313,14 +316,23 @@ class ProductPhotoCutout
     {
         $count = $width * $height;
         $labels = array_fill(0, $count, 0);
-        $sizes = [];
-        $boxes = [];
+        // Only the two largest pieces matter, so per-piece bookkeeping stays constant however speckled
+        // the photo is, and a photo in thousands of pieces is not a studio shot at all.
+        $main = 0;
+        $mainSize = 0;
+        $mainBox = [0, 0, 0, 0];
+        $second = 0;
         $label = 0;
         for ($start = 0; $start < $count; $start++) {
             if ($mask[$start] !== "\0" || $labels[$start] !== 0) {
                 continue;
             }
             $label++;
+            if ($label > self::MAX_PIECES) {
+                $this->reason = 'not a plain backdrop';
+
+                return [null, [0, 0, 0, 0]];
+            }
             $labels[$start] = $label;
             $stack = [$start];
             $size = 0;
@@ -346,23 +358,23 @@ class ProductPhotoCutout
                     }
                 }
             }
-            $sizes[$label] = $size;
-            $boxes[$label] = $box;
+            if ($size > $mainSize) {
+                $second = $mainSize;
+                [$main, $mainSize, $mainBox] = [$label, $size, $box];
+            } elseif ($size > $second) {
+                $second = $size;
+            }
         }
-        if ($sizes === []) {
+        if ($main === 0) {
             return [null, [0, 0, 0, 0]];
         }
-        arsort($sizes);
-        $order = array_keys($sizes);
-        $main = $order[0];
-        $second = isset($order[1]) ? $sizes[$order[1]] : 0;
-        $coverage = $sizes[$main] / $count;
-        if ($second > self::MAX_SECOND_OBJECT * $sizes[$main]) {
+        $coverage = $mainSize / $count;
+        if ($second > self::MAX_SECOND_OBJECT * $mainSize) {
             $this->reason = 'other objects beside the product';
 
             return [null, [0, 0, 0, 0]];
         }
-        if ($second > max(self::STRAY_PIXELS, self::MAX_STRAY * $sizes[$main])) {
+        if ($second > max(self::STRAY_PIXELS, self::MAX_STRAY * $mainSize)) {
             $this->reason = 'a detached piece beside the product';
 
             return [null, [0, 0, 0, 0]];
@@ -372,7 +384,7 @@ class ProductPhotoCutout
 
             return [null, [0, 0, 0, 0]];
         }
-        [$left, $top, $right, $bottom] = $boxes[$main];
+        [$left, $top, $right, $bottom] = $mainBox;
         // A product touching the frame was cropped by the photographer, so it cannot be shown whole.
         if ($left === 0 || $top === 0 || $right === $width - 1 || $bottom === $height - 1) {
             $this->reason = 'product cropped by the photo edge';
@@ -386,7 +398,7 @@ class ProductPhotoCutout
             }
         }
 
-        return [$keep, $boxes[$main]];
+        return [$keep, $mainBox];
     }
 
     /** A JPEG turned the way its camera's orientation tag says it is shown. */
