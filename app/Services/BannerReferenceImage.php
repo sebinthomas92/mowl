@@ -156,8 +156,8 @@ class BannerReferenceImage
     /**
      * The imported photo first, then the product's own gallery photos from its page (a share image is
      * often a styled scene, sometimes of another variant). A gallery can also show other variants, so a
-     * photo other than the store's main product photo (the gallery's first) is compared with it. That
-     * includes an imported photo that was not the page's first image (the first was a thumbnail).
+     * photo other than the store's main product photo (the gallery's first) is compared with it,
+     * the imported photo included.
      *
      * @return \Generator<int, array{png: string, source: string, reference: array{mimeType: string, data: string}|null}>
      */
@@ -165,27 +165,26 @@ class BannerReferenceImage
     {
         $source = (string) data_get($asset->metadata, 'source_url');
         $imported = $this->cutter->cut($photo);
-        $importedIsMain = (int) data_get($asset->metadata, 'candidate_rank', 1) <= 1;
-        if ($imported && $importedIsMain) {
+        $page = $asset->sourceSnapshot?->url;
+        // An uploaded photo is the product by the owner's word. An imported one is trusted unchecked only
+        // when it is the gallery's main photo: older imports took the page's share image first.
+        $gallery = [];
+        if ($page) {
+            try {
+                $gallery = $this->fetcher->fetch($page)['gallery_images'] ?? [];
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
+        // With no gallery to compare with, the imported photo is the reference the redraw would use too.
+        if ($imported && ($gallery === [] || $gallery[0] === $source)) {
             yield ['png' => $imported, 'source' => $source ?: $asset->path, 'reference' => null];
             $imported = null;
         }
-        $page = $asset->sourceSnapshot?->url;
-        if (! $page) {
+        if ($gallery === []) {
             return;
         }
-        try {
-            $gallery = $this->fetcher->fetch($page)['gallery_images'] ?? [];
-        } catch (Throwable $exception) {
-            report($exception);
-
-            return;
-        }
-        $main = ($gallery[0] ?? null) === $source ? ['mimeType' => (string) $asset->mime_type, 'data' => base64_encode($photo)] : null;
-        if ($imported && $main) {
-            yield ['png' => $imported, 'source' => $source, 'reference' => null];
-            $imported = null;
-        }
+        $main = $gallery[0] === $source ? ['mimeType' => (string) $asset->mime_type, 'data' => base64_encode($photo)] : null;
         foreach (array_slice(array_values(array_diff($gallery, [$source])), 0, self::MAX_GALLERY_PHOTOS) as $url) {
             // Only the gallery's first photo is trusted unchecked: when it cannot be downloaded, a later
             // one (possibly another variant) has nothing to be compared with.

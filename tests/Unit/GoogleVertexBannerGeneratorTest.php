@@ -384,7 +384,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $this->assertSame([], $answers);
     }
 
-    public function test_an_imported_photo_that_was_not_the_pages_first_image_is_compared_with_the_main_photo(): void
+    public function test_an_imported_photo_that_is_not_the_gallerys_main_photo_is_compared_with_it(): void
     {
         Storage::fake('local');
         Storage::disk('local')->put('product.jpg', ProductPhotoCutoutTest::studio());
@@ -392,7 +392,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         config()->set('campaigns.banners.composite_product', true);
         config()->set('campaigns.banners.check_product', true);
         request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
-        // The page's first photo was a thumbnail, so the importer took the second.
+        // Imported first under the old share-image-first order (rank 1), but not the gallery's main photo.
         $thumbnail = imagecreatetruecolor(200, 200);
         ob_start();
         imagepng($thumbnail);
@@ -408,7 +408,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
                 return Http::response(str_contains($request->url(), 'gemini-3.5-flash:') ? array_shift($answers) : self::image('banner-background'));
             },
         ]);
-        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/walnut.jpg', 'candidate_rank' => 2]]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/walnut.jpg', 'candidate_rank' => 1]]);
         $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
 
         $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
