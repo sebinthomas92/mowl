@@ -67,6 +67,23 @@ class ProductImageImporterTest extends TestCase
         Http::assertSentCount(4);
     }
 
+    public function test_a_photo_too_large_to_decode_is_skipped(): void
+    {
+        [$product, $source] = $this->fixture();
+        // A flat 4000 x 4000 PNG is a small download but 16 megapixels.
+        Http::fake([
+            '93.184.216.34/uploads/huge.png' => Http::response(self::png(4000, 4000), 200, ['Content-Type' => 'image/png']),
+            '93.184.216.34/uploads/full.jpg' => Http::response(self::png(900, 900), 200, ['Content-Type' => 'image/png']),
+        ]);
+
+        $asset = app(ProductImageImporter::class)->importFirst($product, $source, [
+            'https://93.184.216.34/uploads/huge.png',
+            'https://93.184.216.34/uploads/full.jpg',
+        ]);
+
+        $this->assertSame('https://93.184.216.34/uploads/full.jpg', $asset->metadata['source_url']);
+    }
+
     private function fixture(): array
     {
         Storage::fake(config('campaigns.banners.disk'));

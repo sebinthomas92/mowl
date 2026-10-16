@@ -419,6 +419,66 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $this->assertSame([], $answers);
     }
 
+    public function test_later_gallery_photos_are_not_trusted_when_the_main_photo_cannot_be_downloaded(): void
+    {
+        Storage::fake('local');
+        $styled = imagecreatetruecolor(300, 300);
+        for ($x = 0; $x < 300; $x += 20) {
+            imagefilledrectangle($styled, $x, 0, $x + 9, 299, imagecolorallocate($styled, 140, 100, 60));
+        }
+        ob_start();
+        imagepng($styled);
+        Storage::disk('local')->put('product.png', (string) ob_get_clean());
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $page = '<html><head><title>Stand</title></head><body><div class="pdp-gallery"><button data-full-src="/uploads/main.jpg"></button><button data-full-src="/uploads/walnut.jpg"></button></div></body></html>';
+        $images = [self::image(self::keyed()), self::image('banner-background')];
+        Http::fake([
+            '93.184.216.34/product/stand' => Http::response($page, 200, ['Content-Type' => 'text/html']),
+            '93.184.216.34/uploads/main.jpg' => Http::response('', 404),
+            '93.184.216.34/uploads/walnut.jpg' => Http::response(ProductPhotoCutoutTest::studio(), 200, ['Content-Type' => 'image/jpeg']),
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$images) {
+                return Http::response(str_contains($request->url(), 'gemini-3.5-flash:') ? self::inspection([]) : array_shift($images));
+            },
+        ]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png', 'metadata' => ['source_url' => 'https://93.184.216.34/uploads/share.webp']]);
+        $asset->setRelation('sourceSnapshot', new SourceSnapshot(['url' => 'https://93.184.216.34/product/stand']));
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([$asset]));
+
+        // The product was redrawn from the imported photo; the unchecked later photo was never fetched.
+        $this->assertSame([20, 16], array_slice(getimagesizefromstring((string) $result->productCutout), 0, 2));
+        Http::assertNotSent(fn (Request $request) => $request->url() === 'https://93.184.216.34/uploads/walnut.jpg');
+    }
+
+    public function test_a_failed_redraw_call_keeps_the_studio_checks_spend(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.jpg', ProductPhotoCutoutTest::studio());
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => fn (Request $request) => str_contains($request->url(), 'gemini-3.5-flash:')
+                ? Http::response(self::inspection(['THE HOBBIT']))
+                : Http::response(['error' => ['message' => 'bad request']], 400),
+        ]);
+
+        try {
+            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.jpg', 'mime_type' => 'image/jpeg'])]));
+            $this->fail('The redraw call should have failed.');
+        } catch (BannerAttemptFailed $exception) {
+            $this->assertEqualsWithDelta(app(ProviderCostCalculator::class)->calculate('gemini-3.5-flash', 300, 0, 12), $exception->spentCost, 0.000001);
+        }
+    }
+
     public function test_a_studio_shot_with_readable_text_is_skipped_and_its_check_still_costed(): void
     {
         Storage::fake('local');

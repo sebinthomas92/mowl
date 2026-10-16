@@ -43,8 +43,6 @@ class ProductPhotoCutout
     /** Edge pixels this far beyond the backdrop tolerance are fully opaque; closer ones are blended. */
     private const EDGE_RAMP = 28.0;
 
-    private const MAX_PIXELS = 25_000_000;
-
     /** Why the last photo was not cut out, for the error a banner records. */
     public ?string $reason = null;
 
@@ -52,7 +50,7 @@ class ProductPhotoCutout
     {
         $this->reason = 'unreadable image';
         $size = @getimagesizefromstring($bytes);
-        if (! $size || $size[0] * $size[1] > self::MAX_PIXELS) {
+        if (! $size || $size[0] * $size[1] > ProductImageImporter::MAX_PIXELS) {
             return null;
         }
         if (max($size[0], $size[1]) < ProductImageImporter::MIN_SIDE) {

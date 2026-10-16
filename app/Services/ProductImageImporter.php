@@ -13,6 +13,12 @@ class ProductImageImporter
     /** Longest side, in pixels, below which a photo is a thumbnail. */
     public const MIN_SIDE = 500;
 
+    /**
+     * Largest photo decoded later (cutout, banner reference) within the 128 MB memory limit: GD holds
+     * 4 bytes a pixel, and a well-compressed huge PNG can still be a small download.
+     */
+    public const MAX_PIXELS = 12_000_000;
+
     private const MORE_AFTER_THUMBNAIL = 3;
 
     public function __construct(private ProductPageFetcher $fetcher) {}
@@ -40,6 +46,9 @@ class ProductImageImporter
             }
             try {
                 $image = $this->fetcher->fetchImage($imageUrl);
+                if ($image['width'] * $image['height'] > self::MAX_PIXELS) {
+                    continue;
+                }
                 if (max($image['width'], $image['height']) < self::MIN_SIDE) {
                     $small ??= [$rank, $image];
 

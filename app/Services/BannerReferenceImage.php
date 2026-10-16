@@ -40,8 +40,6 @@ class BannerReferenceImage
     private const MIN_KEYED_BORDER = 0.9;
 
     /** A small compressed file can decode to hundreds of MB; photos and cutouts are far below this. */
-    private const MAX_PIXELS = 25_000_000;
-
     public function __construct(
         private GoogleVertexAIClient $client,
         private ProviderCostCalculator $costs,
@@ -145,7 +143,12 @@ class BannerReferenceImage
             return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($studio['png'])], 'cost' => $spent, 'source' => $studio['source']];
         }
 
-        $redrawn = $this->redraw($asset, $photo, $product, $timeoutSeconds, $brand, $spent);
+        try {
+            $redrawn = $this->redraw($asset, $photo, $product, $timeoutSeconds, $brand, $spent);
+        } catch (VertexAIResponseException $exception) {
+            // The studio photos' paid checks stay on the banner's cost when the redraw call fails.
+            throw $spent > 0 ? new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), round($spent, 6)) : $exception;
+        }
 
         return [...$redrawn, 'cost' => $redrawn['cost'] + $spent];
     }
@@ -184,6 +187,11 @@ class BannerReferenceImage
             $imported = null;
         }
         foreach (array_slice(array_values(array_diff($gallery, [$source])), 0, self::MAX_GALLERY_PHOTOS) as $url) {
+            // Only the gallery's first photo is trusted unchecked: when it cannot be downloaded, a later
+            // one (possibly another variant) has nothing to be compared with.
+            if ($main === null && $url !== $gallery[0]) {
+                break;
+            }
             // A download is only started while it and both of the cutout's checks (marks, then the product
             // match) still fit the deadline. The scene is not reserved here: an accepted cutout is stored,
             // and a banner short of time for its scene retries straight from it.
@@ -326,7 +334,7 @@ class BannerReferenceImage
     private static function decode(string $bytes): ?\GdImage
     {
         $size = @getimagesizefromstring($bytes);
-        if (! $size || $size[0] * $size[1] > self::MAX_PIXELS) {
+        if (! $size || $size[0] * $size[1] > ProductImageImporter::MAX_PIXELS) {
             return null;
         }
         $image = @imagecreatefromstring($bytes);
