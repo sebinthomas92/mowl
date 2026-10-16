@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Exceptions\BannerAttemptFailed;
+use App\Exceptions\VertexAIResponseException;
 use App\Models\BannerCreative;
 use App\Models\MediaAsset;
 use App\Services\GoogleVertexBannerGenerator;
@@ -11,6 +12,7 @@ use App\Support\GenerationDeadline;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Sleep;
 use Tests\TestCase;
 
 class GoogleVertexBannerGeneratorTest extends TestCase
@@ -154,6 +156,58 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         Http::assertSentCount(3 + 2);
     }
 
+    public function test_a_rate_limited_call_waits_and_retries_instead_of_failing_the_attempt(): void
+    {
+        Sleep::fake();
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $images = [Http::response(['error' => ['message' => 'Resource has been exhausted (e.g. check quota).']], 429), Http::response(self::image('blank-screen'))];
+        $inspections = [Http::response(['error' => ['message' => 'Resource has been exhausted (e.g. check quota).']], 429), Http::response(self::inspection([]))];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$images, &$inspections) {
+                return str_contains($request->url(), 'gemini-3.5-flash:') ? array_shift($inspections) : array_shift($images);
+            },
+        ]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
+
+        $this->assertSame('blank-screen', $result->imageBytes);
+        Sleep::assertSleptTimes(2);
+    }
+
+    public function test_a_rate_limit_fails_fast_when_the_deadline_cannot_fit_a_wait(): void
+    {
+        Sleep::fake();
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => Http::response(['error' => ['message' => 'Resource has been exhausted (e.g. check quota).']], 429),
+        ]);
+        app(GenerationDeadline::class)->start(45);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
+
+        try {
+            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text.']), collect([$asset]));
+            $this->fail('A 429 with no time left must fail the attempt.');
+        } catch (VertexAIResponseException $exception) {
+            $this->assertSame('vertex_http_429', $exception->errorCode);
+        } finally {
+            app(GenerationDeadline::class)->clear();
+        }
+        Sleep::assertNeverSlept();
+    }
+
     private static function image(string $bytes): array
     {
         return [
@@ -179,6 +233,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         config()->set('campaigns.google.prices_per_million.gemini-3.5-flash', ['input' => 2.70, 'cached_input' => 0.27, 'output' => 16.20]);
         config()->set('campaigns.banners.inspect_images', true);
         config()->set('campaigns.banners.inspection_attempts', 2);
+        config()->set('campaigns.banners.rate_limit_backoff_seconds', [10, 25, 45]);
         config()->set('campaigns.banners.model', 'gemini-3.1-flash-image');
         config()->set('campaigns.google.project', 'callingdesk-marketingowl');
         config()->set('campaigns.google.location', 'global');

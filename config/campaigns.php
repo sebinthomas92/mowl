@@ -58,6 +58,8 @@ return [
         // a new round starts only with enough time left for a generation and an inspection.
         'time_budget_seconds' => 160,
         'min_round_seconds' => 70,
+        // Waits before retrying a call Vertex rejected with 429 (per-minute quota), inside the time budget.
+        'rate_limit_backoff_seconds' => [10, 25, 45],
         'disk' => env('BANNER_STORAGE_DISK', env('CAMPAIGN_MEDIA_DISK', 'local')),
         'prices_per_million' => [
             'input' => 0.50,
