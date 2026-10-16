@@ -452,6 +452,13 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertNull($cutter->cut($prepared, self::encode($moved), 'green'));
         $this->assertSame('matte does not match the photo', $cutter->reason);
 
+        // Drawn a few pixels off: most of it still overlaps the photo's cutout.
+        $nudged = imagecreatetruecolor(400, 400);
+        imagefill($nudged, 0, 0, imagecolorallocate($nudged, 0, 255, 0));
+        imagecopy($nudged, $matte, 6, 0, 0, 0, 394, 400);
+        $this->assertNull($cutter->cut($prepared, self::encode($nudged), 'green'));
+        $this->assertSame('matte does not match the photo', $cutter->reason);
+
         $wide = imagescale($matte, 400, 300);
         $this->assertNull($cutter->cut($prepared, self::encode($wide), 'green'));
         $this->assertSame('matte framed differently', $cutter->reason);

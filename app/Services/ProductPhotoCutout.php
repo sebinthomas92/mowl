@@ -65,6 +65,12 @@ class ProductPhotoCutout
     /** A matte and the photo's own cutout share at least this much of their combined outline. */
     private const MIN_MATTE_AGREEMENT = 0.9;
 
+    /**
+     * A matte's outline may sit this share of the photo's longest side off the photo's own (centre to
+     * centre). The Kindle Stand's backdrop collar, which the matte removes, moves its centre a few px.
+     */
+    private const MAX_MATTE_SHIFT = 0.008;
+
     /** A matte's shape may differ from the photo's by this share (the image model's sizes are fixed). */
     private const MAX_MATTE_STRETCH = 0.03;
 
@@ -506,13 +512,24 @@ class ProductPhotoCutout
                 return null;
             }
             [$both, $either] = [0, 0];
+            // Centres of mass (x, y, count) of both outlines: a matte drawn a few pixels off still overlaps
+            // most of the photo's cutout, but its centre moves the whole way.
+            [$ownCentre, $drawnCentre] = [[0, 0, 0], [0, 0, 0]];
             for ($index = 0; $index < $count; $index++) {
                 $own = $keep[$index] === "\1";
                 $drawn = $matched[$index] === "\1";
                 $both += $own && $drawn ? 1 : 0;
                 $either += $own || $drawn ? 1 : 0;
+                [$x, $y] = [$index % $width, intdiv($index, $width)];
+                if ($own) {
+                    $ownCentre = [$ownCentre[0] + $x, $ownCentre[1] + $y, $ownCentre[2] + 1];
+                }
+                if ($drawn) {
+                    $drawnCentre = [$drawnCentre[0] + $x, $drawnCentre[1] + $y, $drawnCentre[2] + 1];
+                }
             }
-            if ($both < self::MIN_MATTE_AGREEMENT * $either) {
+            $shift = hypot($ownCentre[0] / max(1, $ownCentre[2]) - $drawnCentre[0] / max(1, $drawnCentre[2]), $ownCentre[1] / max(1, $ownCentre[2]) - $drawnCentre[1] / max(1, $drawnCentre[2]));
+            if ($both < self::MIN_MATTE_AGREEMENT * $either || $shift > max(2.0, self::MAX_MATTE_SHIFT * max($width, $height))) {
                 $this->reason = 'matte does not match the photo';
 
                 return null;

@@ -341,6 +341,8 @@ class BannerReferenceImage
             // Without a breakdown the output is priced as image tokens, so a cleanup is never under-recorded.
             $image = (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0);
         }
+        // Thinking is reported apart from the candidates and billed as text output.
+        $text += (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0);
         $cost = $this->costs->calculateBanner((int) data_get($json, 'usageMetadata.promptTokenCount', 0), $text, $image);
         $encoded = collect(data_get($json, 'candidates.0.content.parts', []))
             ->map(fn (array $part) => data_get($part, 'inlineData.data'))
