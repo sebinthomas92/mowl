@@ -49,6 +49,12 @@ class ProductPhotoCutout
 
     private const MAX_COVERAGE = 0.85;
 
+    /** How many pixels in from the backdrop an antialiased outline can blend into it. */
+    private const EDGE_DEPTH = 3;
+
+    /** How far (RGB distance) an outline pixel can be from a backdrop-product blend and still be one. */
+    private const BLEND_MATCH = 18.0;
+
     /** Edge pixels this far beyond the backdrop tolerance are fully opaque; closer ones are blended. */
     private const EDGE_RAMP = 28.0;
 
@@ -267,6 +273,29 @@ class ProductPhotoCutout
             return null;
         }
         [$left, $top, $right, $bottom] = $box;
+        // An antialiased outline is a few pixels wide, each a blend of product and backdrop, so the kept
+        // pixels within EDGE_DEPTH steps of the backdrop are all feathered, not only the outermost one.
+        $edge = str_repeat("\0", $count);
+        $front = [];
+        for ($index = 0; $index < $count; $index++) {
+            if ($keep[$index] === "\1" && $this->touchesBackdrop($mask, $index, $index % $width, intdiv($index, $width), $width, $height)) {
+                $edge[$index] = "\1";
+                $front[] = $index;
+            }
+        }
+        for ($step = 1; $step < self::EDGE_DEPTH && $front !== []; $step++) {
+            $next = [];
+            foreach ($front as $index) {
+                $x = $index % $width;
+                foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $side) {
+                    if ($side >= 0 && $side < $count && $keep[$side] === "\1" && $edge[$side] === "\0") {
+                        $edge[$side] = "\1";
+                        $next[] = $side;
+                    }
+                }
+            }
+            $front = $next;
+        }
         $out = imagecreatetruecolor($right - $left + 1, $bottom - $top + 1);
         imagealphablending($out, false);
         imagesavealpha($out, true);
@@ -280,9 +309,12 @@ class ProductPhotoCutout
                 $c = imagecolorat($image, $x, $y);
                 $rgb = [($c >> 16) & 255, ($c >> 8) & 255, $c & 255];
                 $alpha = 1.0;
-                if ($this->touchesBackdrop($mask, $index, $x, $y, $width, $height)) {
+                if ($edge[$index] === "\1") {
                     // Edge pixels are part backdrop: blend them out by how close they are to it.
                     $alpha = max(0.0, min(1.0, (ord($near[$index]) - $tolerance) / self::EDGE_RAMP));
+                    if (! $alphaOnly) {
+                        $alpha = min($alpha, $this->blendShare($image, $keep, $rgb, $backdrop, $x, $y, $width, $height));
+                    }
                     if (! $alphaOnly && $alpha > 0.0 && $alpha < 1.0) {
                         // Take the backdrop's share out of the colour too, or it shows as a light fringe on a
                         // darker scene: pixel = alpha * product + (1 - alpha) * backdrop.
@@ -420,6 +452,48 @@ class ProductPhotoCutout
         }
 
         return $image;
+    }
+
+    /**
+     * How much of the product an outline pixel holds, when it lies on the line between the backdrop
+     * and the nearby product colour (the kept pixel within EDGE_DEPTH that is furthest from the
+     * backdrop). A pixel off that line, such as a trim of another colour, is product: 1.
+     *
+     * @param  array{int, int, int}  $rgb
+     */
+    private function blendShare(\GdImage $image, string $keep, array $rgb, int $backdrop, int $x, int $y, int $width, int $height): float
+    {
+        $from = [($backdrop >> 16) & 255, ($backdrop >> 8) & 255, $backdrop & 255];
+        $product = null;
+        $furthest = 0;
+        for ($dy = -self::EDGE_DEPTH; $dy <= self::EDGE_DEPTH; $dy++) {
+            for ($dx = -self::EDGE_DEPTH; $dx <= self::EDGE_DEPTH; $dx++) {
+                [$nx, $ny] = [$x + $dx, $y + $dy];
+                if ($nx < 0 || $ny < 0 || $nx >= $width || $ny >= $height || $keep[$ny * $width + $nx] !== "\1") {
+                    continue;
+                }
+                $c = imagecolorat($image, $nx, $ny);
+                $candidate = [($c >> 16) & 255, ($c >> 8) & 255, $c & 255];
+                $far = ($candidate[0] - $from[0]) ** 2 + ($candidate[1] - $from[1]) ** 2 + ($candidate[2] - $from[2]) ** 2;
+                if ($far > $furthest) {
+                    [$furthest, $product] = [$far, $candidate];
+                }
+            }
+        }
+        if ($product === null || $furthest < 40 ** 2) {
+            return 1.0;
+        }
+        $share = 0.0;
+        for ($channel = 0; $channel < 3; $channel++) {
+            $share += ($rgb[$channel] - $from[$channel]) * ($product[$channel] - $from[$channel]);
+        }
+        $share = max(0.0, min(1.0, $share / $furthest));
+        $off = 0.0;
+        for ($channel = 0; $channel < 3; $channel++) {
+            $off += ($rgb[$channel] - ($from[$channel] + $share * ($product[$channel] - $from[$channel]))) ** 2;
+        }
+
+        return sqrt($off) <= self::BLEND_MATCH ? $share : 1.0;
     }
 
     private function touchesBackdrop(string $mask, int $index, int $x, int $y, int $width, int $height): bool

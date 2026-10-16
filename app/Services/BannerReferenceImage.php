@@ -59,7 +59,9 @@ class BannerReferenceImage
         if (! $asset->exists) {
             return $this->make($asset, $product, $timeoutSeconds, $brand);
         }
-        $key = self::key($product, $brand);
+        // A cutout can come from the page's gallery, so a refreshed (and re-approved) page makes a new one.
+        $snapshot = $asset->sourceSnapshot;
+        $key = self::key($product, $brand, $snapshot ? $snapshot->content_hash.'|'.$snapshot->approved_at?->toIso8601String() : '');
         if ($cached = $this->cached($asset, $key)) {
             return $cached;
         }
@@ -97,12 +99,12 @@ class BannerReferenceImage
      * The copy depends on the product name in the prompt, and its marks check exempts the brand's own
      * mark, so a renamed product or brand gets a new one.
      */
-    public static function key(string $product, string $brand = ''): string
+    public static function key(string $product, string $brand = '', string $source = ''): string
     {
         // Which checks the cutout passed is part of the key, so turning a check on remakes cutouts made without it.
         $checks = (int) (bool) config('campaigns.banners.inspect_images').(int) (bool) config('campaigns.banners.check_product');
 
-        return substr(sha1(self::PROMPT_VERSION."\n".$product."\n".$brand."\n".$checks), 0, 16);
+        return substr(sha1(self::PROMPT_VERSION."\n".$product."\n".$brand."\n".$checks.($source !== '' ? "\n".$source : '')), 0, 16);
     }
 
     /** @return array{inlineData: array{mimeType: string, data: string}, cost: float}|null */

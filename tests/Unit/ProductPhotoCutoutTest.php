@@ -103,6 +103,27 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertLessThan(205, ($edge >> 16) & 255);
     }
 
+    public function test_a_wide_antialiased_outline_is_feathered_all_the_way_in(): void
+    {
+        $image = imagecreatetruecolor(600, 600);
+        imagefill($image, 0, 0, imagecolorallocate($image, 250, 250, 250));
+        imagefilledrectangle($image, 180, 180, 420, 420, imagecolorallocate($image, 20, 20, 20));
+        // A three-pixel blend from backdrop to product on the left edge.
+        foreach ([177 => 235, 178 => 215, 179 => 195] as $x => $grey) {
+            imageline($image, $x, 180, $x, 420, imagecolorallocate($image, $grey, $grey, $grey));
+        }
+
+        $png = (new ProductPhotoCutout)->cut(self::encode($image));
+
+        $this->assertNotNull($png);
+        $cutout = imagecreatefromstring($png);
+        // No light pixel along the outline stays fully opaque: it would show as a pale line on a dark scene.
+        for ($x = 0; $x < 8; $x++) {
+            $c = imagecolorat($cutout, $x, 120);
+            $this->assertFalse((($c >> 24) & 127) === 0 && (($c >> 16) & 255) > 120, "pixel {$x} is an opaque light fringe");
+        }
+    }
+
     public function test_a_thumbnail_is_not_cut_out(): void
     {
         $cutter = new ProductPhotoCutout;

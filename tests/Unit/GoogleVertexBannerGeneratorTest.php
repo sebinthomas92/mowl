@@ -805,7 +805,10 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             }
             $part = $request['contents'][0]['parts'][1]['inlineData'];
 
-            return $part['mimeType'] === 'image/jpeg' && imagesx(imagecreatefromstring(base64_decode($part['data']))) === 768;
+            $sent = imagecreatefromstring(base64_decode($part['data']));
+
+            // Bounded by the longer side: 1024x1280 is sent at 614x768.
+            return $part['mimeType'] === 'image/jpeg' && [imagesx($sent), imagesy($sent)] === [614, 768];
         });
     }
 
@@ -1000,6 +1003,12 @@ class GoogleVertexBannerGeneratorTest extends TestCase
     public function test_cutouts_are_remade_for_a_renamed_brand_because_its_own_mark_is_exempt(): void
     {
         $this->assertNotSame(BannerReferenceImage::key('Kindle Stand', 'Old Brand'), BannerReferenceImage::key('Kindle Stand', 'New Brand'));
+    }
+
+    public function test_cutouts_are_remade_when_the_source_page_is_refreshed_and_approved_again(): void
+    {
+        $this->assertNotSame(BannerReferenceImage::key('Kindle Stand', '', 'hash-a|2026-10-15T10:00:00+00:00'), BannerReferenceImage::key('Kindle Stand', '', 'hash-b|2026-10-16T10:00:00+00:00'));
+        $this->assertSame(BannerReferenceImage::key('Kindle Stand'), BannerReferenceImage::key('Kindle Stand', '', ''));
     }
 
     public function test_a_very_narrow_photo_is_sampled_for_its_key_colour_without_being_upscaled(): void

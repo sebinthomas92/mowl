@@ -146,9 +146,10 @@ class BannerImageInspector
         }
         // An indexed PNG's pixels are palette indexes, not colours with their alpha.
         imagepalettetotruecolor($image);
-        $width = imagesx($image);
-        if ($width > 768) {
-            $scaled = imagescale($image, 768);
+        // Bounded by the longer side: a tall, narrow store photo is as large as a wide one.
+        $factor = 768 / max(imagesx($image), imagesy($image));
+        if ($factor < 1) {
+            $scaled = imagescale($image, max(1, (int) round(imagesx($image) * $factor)), max(1, (int) round(imagesy($image) * $factor)));
             imagedestroy($image);
             $image = $scaled;
         }

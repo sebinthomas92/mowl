@@ -45,6 +45,8 @@ HTML;
 <div class="pdp-gallery__thumbs"><button class="pdp-gallery__thumb" data-idx="2" data-full-src="/wp-content/uploads/set-1.jpg"><img src="https://cdn.example/set-1-300x300.jpg"></button></div>
 <section class="related products"><div class="card-gallery"><button data-full-src="/wp-content/uploads/other-product.jpg"><img src="/wp-content/uploads/other-product.jpg"></button></div></section>
 <div class="RelatedProducts"><div class="ProductGallery"><button data-full-src="/wp-content/uploads/capitalised-related.jpg"></button></div></div>
+<div class="Reviews-Gallery"><button data-full-src="/wp-content/uploads/customer-photo.jpg"></button></div>
+<div class="editorial-gallery"><button data-full-src="/wp-content/uploads/lookbook.jpg"></button></div>
 <div class="quick-view"><button data-full-src="/wp-content/uploads/not-in-a-gallery.jpg"></button></div>
 </body></html>
 HTML;
