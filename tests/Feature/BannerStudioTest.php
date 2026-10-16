@@ -22,6 +22,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Sleep;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 use RuntimeException;
@@ -281,6 +282,21 @@ class BannerStudioTest extends TestCase
 
         $this->assertSame(1, $batch->creatives()->where('status', 'completed')->count());
         $this->assertSame(2, $batch->creatives()->where('status', 'queued')->count());
+    }
+
+    public function test_a_banner_re_run_right_after_a_failure_waits_out_the_retry_pause(): void
+    {
+        $this->freezeTime();
+        Sleep::fake();
+        [$user, $workspace, $pack] = $this->fixture();
+        $batch = app(BannerBatchCreator::class)->createIncluded($workspace, $pack, $user);
+        $creative = $batch->creatives()->oldest()->firstOrFail();
+        $creative->forceFill(['status' => 'retrying', 'attempts' => 1, 'updated_at' => now()->subSeconds(10)])->saveQuietly();
+        $url = URL::temporarySignedRoute('banner-creatives.process', now()->addMinutes(5), ['bannerCreative' => $creative]);
+
+        $this->actingAs($user)->post($url)->assertOk()->assertJson(['status' => 'completed']);
+
+        Sleep::assertSequence([Sleep::for(20)->seconds()]);
     }
 
     public function test_banner_costs_and_credit_events_appear_in_usage_reporting(): void

@@ -20,6 +20,9 @@ class GoogleVertexAIClient
         try {
             $response = Http::withToken($this->tokens->fetchAuthToken()['access_token'])
                 ->acceptJson()
+                // Bodies over 1MB (a generated banner sent for inspection) made curl send
+                // "Expect: 100-continue", which came back as HTTP 417.
+                ->withOptions(['expect' => false])
                 ->timeout(app(GenerationDeadline::class)->timeout(config('campaigns.google.timeout_seconds')))
                 ->post($this->endpoint($model), $payload);
         } catch (ConnectionException $exception) {
