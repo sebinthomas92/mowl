@@ -11,6 +11,7 @@ use App\Models\MediaAsset;
 use App\Support\GenerationDeadline;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Sleep;
 
 class GoogleVertexBannerGenerator implements BannerGenerator
 {
@@ -53,12 +54,12 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                 break;
             }
             try {
-                $result = $this->generateOnce($creative, $productImages);
+                $result = $this->rateLimited($deadline, fn () => $this->generateOnce($creative, $productImages));
                 $usage = [$usage[0] + $result->inputTokens, $usage[1] + $result->outputTextTokens, $usage[2] + $result->outputImageTokens];
                 if (! config('campaigns.banners.inspect_images')) {
                     return $result;
                 }
-                $inspection = $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $reference ? $this->imagePart($reference)['inlineData'] : null);
+                $inspection = $this->rateLimited($deadline, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $reference ? $this->imagePart($reference)['inlineData'] : null));
             } catch (VertexAIResponseException $exception) {
                 // Images already generated in this attempt were paid for, even when a later call fails.
                 $spent = $this->spent($usage, $inspectionCost);
@@ -87,6 +88,25 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         }
 
         throw new BannerAttemptFailed('banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300), $this->spent($usage, $inspectionCost));
+    }
+
+    /**
+     * Vertex answers 429 when the project's per-minute quota is used up. Retrying at once only burns
+     * the job's attempts, so the call waits and tries again while the deadline leaves room for it.
+     */
+    private function rateLimited(GenerationDeadline $deadline, callable $call): mixed
+    {
+        foreach ([...config('campaigns.banners.rate_limit_backoff_seconds'), null] as $wait) {
+            try {
+                return $call();
+            } catch (VertexAIResponseException $exception) {
+                $remaining = $deadline->remaining() ?? INF;
+                if ($exception->errorCode !== 'vertex_http_429' || $wait === null || $remaining - $wait < GenerationDeadline::MIN_ATTEMPT_SECONDS + 20) {
+                    throw $exception;
+                }
+                Sleep::for($wait + random_int(0, 3))->seconds();
+            }
+        }
     }
 
     private function spent(array $usage, float $inspectionCost): float

@@ -402,7 +402,7 @@
 
                                 @if($bannerProcessUrl && $nextBannerCreative)
                                     <span hidden wire:key="banner-process-{{ $nextBannerCreative->id }}-{{ $nextBannerCreative->attempts }}"
-                                        x-init="fetch(@js($bannerProcessUrl), { method: 'POST', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content, 'Accept': 'application/json' } }).finally(() => $wire.$refresh())"></span>
+                                        x-init="setTimeout(() => fetch(@js($bannerProcessUrl), { method: 'POST', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content, 'Accept': 'application/json' } }).finally(() => $wire.$refresh()), {{ $nextBannerCreative->status === 'retrying' ? 30000 : 0 }})"></span>
                                 @endif
                             @endif
                         </section>
