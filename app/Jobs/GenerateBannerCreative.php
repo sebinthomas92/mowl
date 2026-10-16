@@ -167,7 +167,8 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
             $creative->update([
                 'status' => 'failed',
                 'error_code' => $exception instanceof VertexAIResponseException || $exception instanceof BannerAttemptFailed ? $exception->errorCode : ($exception ? class_basename($exception) : $creative->error_code),
-                'error_message' => $exception ? mb_substr($exception->getMessage(), 0, 2000) : $creative->error_message,
+                // The attempt already wrote this message, possibly with the rejected background's path appended.
+                'error_message' => $exception && ! str_starts_with((string) $creative->error_message, mb_substr($exception->getMessage(), 0, 2000)) ? mb_substr($exception->getMessage(), 0, 2000) : $creative->error_message,
                 'completed_at' => now(),
             ]);
             app(BannerBatchStatus::class)->refresh($creative->batch->fresh());

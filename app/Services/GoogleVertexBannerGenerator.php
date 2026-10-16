@@ -133,7 +133,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             } catch (VertexAIResponseException $exception) {
                 $remaining = $deadline->remaining() ?? INF;
                 // A text call that hung with no answer (cURL 28, 0 bytes) is retried once at once; it was not billed.
-                if ($retryHang && $exception->errorCode === 'vertex_connection_error' && $remaining >= $reserveSeconds) {
+                if ($retryHang && $wait !== null && $exception->errorCode === 'vertex_connection_error' && $remaining >= $reserveSeconds) {
                     $retryHang = false;
 
                     continue;
