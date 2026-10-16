@@ -54,7 +54,7 @@ class ProductPhotoCutout
     private const SHADOW_TINT_SLOPE = 0.04;
 
     /** A product may touch the frame along at most this share of its own extent on that side. */
-    private const MAX_EDGE_CONTACT = 0.0;
+    private const MAX_EDGE_CONTACT = 0.03;
 
     /** More separate pieces than this is speckle or a busy scene, not one product on a backdrop. */
     private const MAX_PIECES = 2000;
@@ -220,6 +220,7 @@ class ProductPhotoCutout
         // colour as the border itself is backdrop too. A product surface of a near colour (a white
         // dial on cream) sits measurably further away and stays.
         $seen = $mask;
+        $openings = str_repeat("\0", $count);
         $hole = max(self::HOLE_PIXELS, (int) round(0.0002 * $count));
         for ($start = 0; $start < $count; $start++) {
             if ($seen[$start] !== "\0" || ord($near[$start]) > $tolerance) {
@@ -247,6 +248,7 @@ class ProductPhotoCutout
             if (count($patch) >= $hole && count($patch) / $long >= self::HOLE_WIDTH && $sum / count($patch) <= $typical + self::HOLE_MATCH) {
                 foreach ($patch as $index) {
                     $mask[$index] = "\1";
+                    $openings[$index] = "\1";
                 }
             }
         }
@@ -259,6 +261,7 @@ class ProductPhotoCutout
         // the fill does not cross.
         $shade = $this->tint($backdrop);
         if (! $alphaOnly && abs($shade[0] - 1 / 3) + abs($shade[1] - 1 / 3) >= 0.012) {
+            [$rows, $columns] = $this->productSpans($image, $mask);
             $before = $mask;
             $stack = [];
             for ($index = 0; $index < $count; $index++) {
@@ -276,6 +279,11 @@ class ProductPhotoCutout
                         continue;
                     }
                     [$nx, $ny] = [$next % $width, intdiv($next, $width)];
+                    // Shading inside the product (a page gutter, the band under a ledge) has the
+                    // backdrop's tint too; only what lies outside the product's own extent is shadow.
+                    if (($nx >= $rows[$ny][0] && $nx <= $rows[$ny][1]) || ($ny >= $columns[$nx][0] && $ny <= $columns[$nx][1])) {
+                        continue;
+                    }
                     $colour = imagecolorat($image, $nx, $ny);
                     $local = $this->backdropAt($nx, $ny, $width, $height);
                     if (self::light($colour) >= $from - self::MAX_SHADOW_STEP && $this->isShadow($colour, $local, $this->tint($local))) {
@@ -289,6 +297,33 @@ class ProductPhotoCutout
                 $mask = $before;
             }
         }
+
+        // Backdrop-coloured patches the product closes in on every side are product (a lit page),
+        // unless they were taken as an opening above.
+        $outside = str_repeat("\0", $count);
+        $stack = [];
+        foreach ($border as $index) {
+            if ($mask[$index] === "\1") {
+                $outside[$index] = "\1";
+                $stack[] = $index;
+            }
+        }
+        while ($stack !== []) {
+            $index = array_pop($stack);
+            $x = $index % $width;
+            foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
+                if ($next >= 0 && $next < $count && $mask[$next] === "\1" && $outside[$next] === "\0") {
+                    $outside[$next] = "\1";
+                    $stack[] = $next;
+                }
+            }
+        }
+        for ($index = 0; $index < $count; $index++) {
+            if ($mask[$index] === "\1" && $outside[$index] === "\0" && $openings[$index] === "\0") {
+                $mask[$index] = "\0";
+            }
+        }
+        unset($outside, $openings);
 
         // Single-pixel spurs on the outline are JPEG ringing, not product.
         for ($pass = 0; $pass < 2; $pass++) {
@@ -577,6 +612,71 @@ class ProductPhotoCutout
         }
 
         return $colour;
+    }
+
+    /**
+     * The product's extent along each row and column ([first, last], or [1, 0] for none), from the
+     * pixels that are neither backdrop nor shadow-coloured, ignoring specks.
+     *
+     * @return array{0: list<array{int, int}>, 1: list<array{int, int}>}
+     */
+    private function productSpans(\GdImage $image, string $mask): array
+    {
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $count = $width * $height;
+        $core = '';
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $index = $y * $width + $x;
+                if ($mask[$index] !== "\0") {
+                    $core .= "\0";
+
+                    continue;
+                }
+                $local = $this->backdropAt($x, $y, $width, $height);
+                $core .= $this->isShadow(imagecolorat($image, $x, $y), $local, $this->tint($local)) ? "\0" : "\1";
+            }
+        }
+        $pieces = [];
+        $largest = 0;
+        for ($start = 0; $start < $count; $start++) {
+            if ($core[$start] !== "\1") {
+                continue;
+            }
+            $core[$start] = "\2";
+            $stack = [$start];
+            $piece = [];
+            while ($stack !== []) {
+                $index = array_pop($stack);
+                $piece[] = $index;
+                $x = $index % $width;
+                foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
+                    if ($next >= 0 && $next < $count && $core[$next] === "\1") {
+                        $core[$next] = "\2";
+                        $stack[] = $next;
+                    }
+                }
+            }
+            if (count($piece) >= self::STRAY_PIXELS) {
+                $pieces[] = $piece;
+                $largest = max($largest, count($piece));
+            }
+        }
+        $rows = array_fill(0, $height, [1, 0]);
+        $columns = array_fill(0, $width, [1, 0]);
+        foreach ($pieces as $piece) {
+            if (count($piece) < self::MAX_STRAY * $largest) {
+                continue;
+            }
+            foreach ($piece as $index) {
+                [$x, $y] = [$index % $width, intdiv($index, $width)];
+                $rows[$y] = $rows[$y][0] > $rows[$y][1] ? [$x, $x] : [min($rows[$y][0], $x), max($rows[$y][1], $x)];
+                $columns[$x] = $columns[$x][0] > $columns[$x][1] ? [$y, $y] : [min($columns[$x][0], $y), max($columns[$x][1], $y)];
+            }
+        }
+
+        return [$rows, $columns];
     }
 
     /** A JPEG turned the way its camera's orientation tag says it is shown. */

@@ -288,6 +288,44 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertSame(0, ($spine >> 24) & 127);
     }
 
+    public function test_shading_inside_the_product_stays_while_its_cast_shadow_goes(): void
+    {
+        // The spine gutter between the stand's pages is shaded in the backdrop's own tint and opens
+        // onto the backdrop at the top, so the shadow fill reached in and cut the stand apart.
+        $image = imagecreatefromstring(self::studio());
+        for ($y = 300; $y < 390; $y++) {
+            // Darkening gradually from the backdrop's colour at the top, as a soft shadow does.
+            $f = 1 - 0.25 * ($y - 300) / 89;
+            imageline($image, 305, $y, 321, $y, imagecolorallocate($image, (int) (240 * $f), (int) (232 * $f), (int) (218 * $f)));
+        }
+
+        $cutter = new ProductPhotoCutout;
+        $png = $cutter->cut(self::encode($image, true));
+
+        $this->assertNotNull($png, (string) $cutter->reason);
+        $cutout = imagecreatefromstring($png);
+        // Still trimmed to the stand, not the shadow below it.
+        $this->assertEqualsWithDelta(125, imagesy($cutout), 10);
+        foreach ([45, 65, 85] as $y) {
+            $this->assertSame(0, (imagecolorat($cutout, 313 - 150, $y) >> 24) & 127, "gutter row {$y}");
+        }
+    }
+
+    public function test_a_corner_grazing_the_frame_is_kept_but_a_cropped_side_is_not(): void
+    {
+        $graze = self::backdrop();
+        imagefilledrectangle($graze, 100, 150, 380, 260, imagecolorallocate($graze, 214, 72, 38));
+        // The base's corner runs flush to the frame for a few rows.
+        imagefilledrectangle($graze, 381, 250, 399, 251, imagecolorallocate($graze, 214, 72, 38));
+        $this->assertNotNull((new ProductPhotoCutout)->cut(self::encode($graze)));
+
+        $cropped = self::backdrop();
+        imagefilledrectangle($cropped, 100, 150, 399, 230, imagecolorallocate($cropped, 214, 72, 38));
+        $cutter = new ProductPhotoCutout;
+        $this->assertNull($cutter->cut(self::encode($cropped)));
+        $this->assertSame('product cropped by the photo edge', $cutter->reason);
+    }
+
     /** A low white stand with page lines on a red-orange base, on a cream backdrop with a soft shadow. */
     public static function studio(): string
     {
