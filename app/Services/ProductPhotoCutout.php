@@ -36,11 +36,25 @@ class ProductPhotoCutout
     /** How much further from the backdrop colour than the border's typical pixel an opening may be. */
     private const HOLE_MATCH = 4.0;
 
+    /** An opening is at least this wide on average; a thinner backdrop-coloured sliver is a lit gutter or crest. */
+    private const HOLE_WIDTH = 6;
+
     /** Below this opacity an edge pixel's colour is too little product to recover reliably. */
     private const MIN_UNMIX_ALPHA = 0.25;
 
     /** How much darker a shadow pixel may be than the neighbour the shadow fill reached it from. */
     private const MAX_SHADOW_STEP = 10.0;
+
+    /**
+     * How far a shadow's tint may drift from the backdrop's: a little for JPEG noise, plus more the
+     * darker it is, since a shadow on a warm paper is more saturated than the paper.
+     */
+    private const SHADOW_TINT = 0.008;
+
+    private const SHADOW_TINT_SLOPE = 0.04;
+
+    /** A product may touch the frame along at most this share of its own extent on that side. */
+    private const MAX_EDGE_CONTACT = 0.0;
 
     /** More separate pieces than this is speckle or a busy scene, not one product on a backdrop. */
     private const MAX_PIECES = 2000;
@@ -215,11 +229,13 @@ class ProductPhotoCutout
             $stack = [$start];
             $patch = [];
             $sum = 0;
+            $box = [$width, $height, -1, -1];
             while ($stack !== []) {
                 $index = array_pop($stack);
                 $patch[] = $index;
                 $sum += ord($near[$index]);
                 $x = $index % $width;
+                $box = [min($box[0], $x), min($box[1], intdiv($index, $width)), max($box[2], $x), max($box[3], intdiv($index, $width))];
                 foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
                     if ($next >= 0 && $next < $count && $seen[$next] === "\0" && ord($near[$next]) <= $tolerance) {
                         $seen[$next] = "\1";
@@ -227,7 +243,8 @@ class ProductPhotoCutout
                     }
                 }
             }
-            if (count($patch) >= $hole && $sum / count($patch) <= $typical + self::HOLE_MATCH) {
+            $long = max($box[2] - $box[0], $box[3] - $box[1]) + 1;
+            if (count($patch) >= $hole && count($patch) / $long >= self::HOLE_WIDTH && $sum / count($patch) <= $typical + self::HOLE_MATCH) {
                 foreach ($patch as $index) {
                     $mask[$index] = "\1";
                 }
@@ -443,11 +460,28 @@ class ProductPhotoCutout
             return [null, [0, 0, 0, 0]];
         }
         [$left, $top, $right, $bottom] = $mainBox;
-        // A product touching the frame was cropped by the photographer, so it cannot be shown whole.
-        if ($left === 0 || $top === 0 || $right === $width - 1 || $bottom === $height - 1) {
-            $this->reason = 'product cropped by the photo edge';
+        // A product touching the frame was cropped by the photographer, so it cannot be shown whole;
+        // only a corner grazing the edge over a small share of the product's own extent is allowed.
+        foreach (['left' => $left === 0, 'top' => $top === 0, 'right' => $right === $width - 1, 'bottom' => $bottom === $height - 1] as $side => $touches) {
+            if (! $touches) {
+                continue;
+            }
+            $vertical = $side === 'left' || $side === 'right';
+            $line = match ($side) {
+                'left', 'top' => 0,
+                'right' => $width - 1,
+                'bottom' => $height - 1,
+            };
+            $contact = 0;
+            for ($at = 0, $length = $vertical ? $height : $width; $at < $length; $at++) {
+                $contact += $labels[$vertical ? $at * $width + $line : $line * $width + $at] === $main ? 1 : 0;
+            }
+            $extent = $vertical ? $bottom - $top + 1 : $right - $left + 1;
+            if ($contact > self::MAX_EDGE_CONTACT * $extent) {
+                $this->reason = 'product cropped by the photo edge';
 
-            return [null, [0, 0, 0, 0]];
+                return [null, [0, 0, 0, 0]];
+            }
         }
         $keep = str_repeat("\0", $count);
         for ($index = 0; $index < $count; $index++) {
@@ -658,8 +692,9 @@ class ProductPhotoCutout
             return false;
         }
         [$r, $g] = $this->tint($colour & 0xFFFFFF);
+        $drift = self::SHADOW_TINT + self::SHADOW_TINT_SLOPE * (1 - $light / $backdropLight);
 
-        return abs($r - $shade[0]) < 0.008 && abs($g - $shade[1]) < 0.008;
+        return abs($r - $shade[0]) < $drift && abs($g - $shade[1]) < $drift;
     }
 
     /** @param  list<int>  $colours */
