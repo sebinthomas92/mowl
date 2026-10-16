@@ -33,6 +33,9 @@ class ProductPhotoCutout
     /** An enclosed backdrop patch at least this large is an opening in the product, not a highlight. */
     private const HOLE_PIXELS = 64;
 
+    /** How much further from the backdrop colour than the border's typical pixel an opening may be. */
+    private const HOLE_MATCH = 4.0;
+
     /** How much darker a shadow pixel may be than the neighbour the shadow fill reached it from. */
     private const MAX_SHADOW_STEP = 10.0;
 
@@ -113,6 +116,7 @@ class ProductPhotoCutout
         $alphaOnly = count($opaque) <= (1 - self::MIN_PLAIN_BORDER) * count($borderColours);
         $backdrop = 0;
         $tolerance = 14;
+        $typical = 0.0;
         if (! $alphaOnly) {
             $backdrop = $this->median(array_map(fn (int $colour) => $colour & 0xFFFFFF, $opaque));
             $distances = array_map(fn (int $colour) => self::clear($colour) ? 0.0 : $this->distance($colour & 0xFFFFFF, $backdrop), $borderColours);
@@ -125,6 +129,7 @@ class ProductPhotoCutout
             }
             // The backdrop's own unevenness (a soft gradient, JPEG noise) sets how close counts as backdrop.
             $tolerance = (int) min(40, max(14, ceil($distances[(int) floor(0.95 * (count($distances) - 1))] + 8)));
+            $typical = $distances[intdiv(count($distances) - 1, 2)];
         }
 
         // Each pixel's distance from the backdrop, one byte per pixel (an array of a million floats
@@ -162,7 +167,9 @@ class ProductPhotoCutout
         }
 
         // Backdrop seen through a closed opening (a mug or bag handle, a ring) is not reached from the
-        // edges. A patch of it larger than a specular highlight is backdrop too.
+        // edges. A patch larger than a specular highlight that is, on average, as close to the backdrop
+        // colour as the border itself is backdrop too. A product surface of a near colour (a white
+        // dial on cream) sits measurably further away and stays.
         $seen = $mask;
         $hole = max(self::HOLE_PIXELS, (int) round(0.0002 * $count));
         for ($start = 0; $start < $count; $start++) {
@@ -172,9 +179,11 @@ class ProductPhotoCutout
             $seen[$start] = "\1";
             $stack = [$start];
             $patch = [];
+            $sum = 0;
             while ($stack !== []) {
                 $index = array_pop($stack);
                 $patch[] = $index;
+                $sum += ord($near[$index]);
                 $x = $index % $width;
                 foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
                     if ($next >= 0 && $next < $count && $seen[$next] === "\0" && ord($near[$next]) <= $tolerance) {
@@ -183,7 +192,7 @@ class ProductPhotoCutout
                     }
                 }
             }
-            if (count($patch) >= $hole) {
+            if (count($patch) >= $hole && $sum / count($patch) <= $typical + self::HOLE_MATCH) {
                 foreach ($patch as $index) {
                     $mask[$index] = "\1";
                 }

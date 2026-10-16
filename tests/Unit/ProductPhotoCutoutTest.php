@@ -72,6 +72,19 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertSame(0, (imagecolorat($cutout, 2 * (160 - 100), 2 * (220 - 150)) >> 24) & 127);
     }
 
+    public function test_a_light_dial_inside_a_frame_is_not_taken_for_an_opening(): void
+    {
+        $image = self::backdrop();
+        imagefilledrectangle($image, 120, 120, 280, 280, imagecolorallocate($image, 60, 50, 45));
+        // A light dial a shade darker than the cream backdrop: within its tolerance, but not the backdrop itself.
+        imagefilledellipse($image, 200, 200, 120, 120, imagecolorallocate($image, 231, 223, 209));
+
+        $png = (new ProductPhotoCutout)->cut(self::encode($image));
+
+        $this->assertNotNull($png);
+        $this->assertSame(0, (imagecolorat(imagecreatefromstring($png), 2 * 80, 2 * 80) >> 24) & 127);
+    }
+
     public function test_a_thumbnail_is_not_cut_out(): void
     {
         $cutter = new ProductPhotoCutout;
