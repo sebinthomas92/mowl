@@ -87,6 +87,51 @@ class BannerComposerTest extends TestCase
         $this->assertGreaterThanOrEqual((int) floor(245 * 0.82 * 0.95), $red);
     }
 
+    public function test_the_product_stands_on_the_scenes_own_resting_spot_with_a_contact_shadow_under_its_base(): void
+    {
+        $product = imagecreatetruecolor(300, 200);
+        imagefill($product, 0, 0, imagecolorallocate($product, 210, 70, 40));
+        ob_start();
+        imagepng($product);
+        $cutout = (string) ob_get_clean();
+
+        // The scene is 896x1120 (4:5), so its shares map straight onto the 1080x1350 canvas.
+        $scene = $this->image(896, 1120, [200, 170, 130]);
+        $banner = imagecreatefromstring(app(BannerComposer::class)->compose(
+            $scene,
+            new Brand(['name' => 'Exact Brand', 'primary_color' => '#F4B942']),
+            new BannerCreative(['layout' => 'split_left', 'headline' => 'A stand', 'cta' => 'Shop now']),
+            $cutout,
+            ['x' => 0.76, 'y' => 0.7, 'width' => 0.45],
+        ));
+        $red = fn (int $x, int $y) => (imagecolorat($banner, $x, $y) >> 16) & 255;
+        [$x, $base] = [(int) round(0.76 * 1080), (int) round(0.7 * 1350)];
+
+        // The product's base sits on the spot, not on the layout's fixed slot.
+        $this->assertGreaterThan(150, $red($x, $base - 5));
+        $this->assertNotSame(BannerComposer::productSlot('split_left')['base'], $base);
+        // Right under the base the surface is darkened by the contact shadow, and further down it is not.
+        $this->assertLessThan($red($x, $base + 60) - 25, $red($x, $base + 2));
+    }
+
+    public function test_a_resting_spot_far_from_the_slot_or_under_the_copy_falls_back_to_the_slot(): void
+    {
+        $slot = BannerComposer::productSlot('split_left');
+        $fallback = BannerComposer::placement('split_left', null, 300, 200);
+        $this->assertSame([$slot['x'], $slot['base']], [$fallback['x'], $fallback['base']]);
+
+        // Far away from where the scene was asked to leave it.
+        $this->assertSame($fallback, BannerComposer::placement('split_left', ['x' => 820, 'y' => 300, 'width' => 400], 300, 200));
+        // Close enough, but the product would cover the headline column.
+        $this->assertSame($fallback, BannerComposer::placement('split_left', ['x' => 640, 'y' => 900, 'width' => 400], 300, 200));
+        // Near the slot and clear of the copy: used, and sized to the surface within limits.
+        $placed = BannerComposer::placement('split_left', ['x' => 810, 'y' => 940, 'width' => 600], 300, 200);
+        $this->assertSame([810, 940, 480], [$placed['x'], $placed['base'], $placed['width']]);
+        // A wide surface never grows the product past a fifth over the slot's size.
+        $wide = BannerComposer::placement('bottom_panel', ['x' => 540, 'y' => 820, 'width' => 1000], 300, 200);
+        $this->assertSame((int) round(BannerComposer::placement('bottom_panel', null, 300, 200)['width'] * 1.2), $wide['width']);
+    }
+
     public function test_a_keyed_image_that_lost_the_product_or_its_key_is_not_a_cutout(): void
     {
         $references = app(BannerReferenceImage::class);

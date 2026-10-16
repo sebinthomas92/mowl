@@ -18,7 +18,8 @@ class BannerComposer
         $this->font = resource_path('fonts/DM-Sans.ttf');
     }
 
-    public function compose(string $backgroundBytes, Brand $brand, BannerCreative $creative, ?string $productCutout = null): string
+    /** @param  array{x: float, y: float, width: float}|null  $productSpot  the scene's empty resting spot, as shares of its width and height */
+    public function compose(string $backgroundBytes, Brand $brand, BannerCreative $creative, ?string $productCutout = null, ?array $productSpot = null): string
     {
         $source = @imagecreatefromstring($backgroundBytes);
         if (! $source) {
@@ -33,13 +34,21 @@ class BannerComposer
         $canvas = imagecreatetruecolor($width, $height);
         imagealphablending($canvas, true);
         imagesavealpha($canvas, true);
-        $this->cover($source, $canvas, $width, $height);
+        $cover = $this->cover($source, $canvas, $width, $height);
+        if ($productSpot !== null) {
+            // From shares of the generated scene to canvas pixels, through the cover crop.
+            $productSpot = [
+                'x' => ($productSpot['x'] * imagesx($source) - $cover[1]) * $cover[0],
+                'y' => ($productSpot['y'] * imagesy($source) - $cover[2]) * $cover[0],
+                'width' => $productSpot['width'] * imagesx($source) * $cover[0],
+            ];
+        }
         imagedestroy($source);
 
         $layout = $this->layout($creative->layout, $width, $height);
         $this->drawReadabilityLayer($canvas, $creative->layout, $width, $height);
         if ($productCutout !== null) {
-            $this->drawProduct($canvas, $productCutout, $creative->layout);
+            $this->drawProduct($canvas, $productCutout, $creative->layout, $productSpot);
         }
         // The wordmark sits in the same bottom-right corner on every layout, over a soft dark scrim.
         $this->drawBrandScrim($canvas, $width, $height, $this->logoIsDark($brand));
@@ -72,7 +81,8 @@ class BannerComposer
         return $bytes;
     }
 
-    private function cover(\GdImage $source, \GdImage $canvas, int $width, int $height): void
+    /** @return array{float, int, int} the scale and the source crop's left and top */
+    private function cover(\GdImage $source, \GdImage $canvas, int $width, int $height): array
     {
         $sourceWidth = imagesx($source);
         $sourceHeight = imagesy($source);
@@ -82,6 +92,8 @@ class BannerComposer
         $sourceX = max(0, (int) floor(($sourceWidth - $cropWidth) / 2));
         $sourceY = max(0, (int) floor(($sourceHeight - $cropHeight) / 2));
         imagecopyresampled($canvas, $source, 0, 0, $sourceX, $sourceY, $width, $height, $cropWidth, $cropHeight);
+
+        return [$scale, $sourceX, $sourceY];
     }
 
     private function layout(string $layout, int $width, int $height): array
@@ -103,25 +115,83 @@ class BannerComposer
     public static function productSlot(?string $layout): array
     {
         return match ($layout) {
-            'split_left' => ['x' => 830, 'base' => 900, 'width' => 380, 'height' => 560],
-            'bottom_panel' => ['x' => 540, 'base' => 810, 'width' => 480, 'height' => 520],
-            default => ['x' => 590, 'base' => 1170, 'width' => 460, 'height' => 500],
+            'split_left' => ['x' => 820, 'base' => 900, 'width' => 420, 'height' => 580],
+            'bottom_panel' => ['x' => 540, 'base' => 820, 'width' => 520, 'height' => 540],
+            default => ['x' => 600, 'base' => 1170, 'width' => 500, 'height' => 500],
         };
     }
 
-    /** The real product, fitted into its slot over a soft contact shadow so it sits on the scene's surface. */
-    private function drawProduct(\GdImage $canvas, string $cutoutBytes, ?string $layout): void
+    /**
+     * Boxes the product must stay out of on each layout (left, top, right, bottom): the copy and CTA,
+     * and the wordmark corner every layout shares.
+     *
+     * @return list<array{int, int, int, int}>
+     */
+    private static function keepOut(?string $layout, int $width, int $height): array
+    {
+        $wordmark = [$width - 460, $height - 120, $width, $height];
+
+        return [$wordmark, ...match ($layout) {
+            'split_left' => [[0, 0, 560, $height]],
+            'bottom_panel' => [[0, 930, $width, $height]],
+            default => [[0, 0, 640, 660]],
+        }];
+    }
+
+    /**
+     * Where the product stands: on the scene's own empty spot when the scene check found one near the
+     * slot the scene was asked for (so it sits on the surface that was drawn, not mid-air or on the
+     * table's front edge), sized to that surface within limits; otherwise the layout's fixed slot.
+     *
+     * @param  array{x: float, y: float, width: float}|null  $spot  in canvas pixels
+     * @return array{x: int, base: int, width: int, height: int}
+     */
+    public static function placement(?string $layout, ?array $spot, int $cutoutWidth, int $cutoutHeight, int $width = 1080, int $height = 1350): array
+    {
+        $slot = self::productSlot($layout);
+        $fit = min($slot['width'] / $cutoutWidth, $slot['height'] / $cutoutHeight);
+        $fallback = ['x' => $slot['x'], 'base' => $slot['base'], 'width' => max(1, (int) round($cutoutWidth * $fit)), 'height' => max(1, (int) round($cutoutHeight * $fit))];
+        if ($spot === null || abs($spot['x'] - $slot['x']) > 0.2 * $width || abs($spot['y'] - $slot['base']) > 0.15 * $height) {
+            return $fallback;
+        }
+        // A product a little narrower than the free surface, never far from the size the layout expects.
+        $grow = max(0.85, min(1.2, 0.8 * $spot['width'] / max(1, $fallback['width'])));
+        $placed = [
+            'x' => (int) round($spot['x']),
+            'base' => (int) round($spot['y']),
+            'width' => max(1, (int) round($fallback['width'] * $grow)),
+            'height' => max(1, (int) round($fallback['height'] * $grow)),
+        ];
+        $box = [$placed['x'] - $placed['width'] / 2, $placed['base'] - $placed['height'], $placed['x'] + $placed['width'] / 2, $placed['base']];
+        if ($box[0] < 20 || $box[1] < 20 || $box[2] > $width - 20 || $box[3] > $height - 20) {
+            return $fallback;
+        }
+        foreach (self::keepOut($layout, $width, $height) as [$left, $top, $right, $bottom]) {
+            if ($box[0] < $right && $box[2] > $left && $box[1] < $bottom && $box[3] > $top) {
+                return $fallback;
+            }
+        }
+
+        return $placed;
+    }
+
+    /**
+     * The real product, standing on the scene's surface: a cast shadow falling back and away from the
+     * front-left light, a dark contact line that follows the product's own base (so no gap of lit table
+     * shows under it), and edges softened to the scene's photographic softness.
+     *
+     * @param  array{x: float, y: float, width: float}|null  $spot
+     */
+    private function drawProduct(\GdImage $canvas, string $cutoutBytes, ?string $layout, ?array $spot = null): void
     {
         $cutout = @imagecreatefromstring($cutoutBytes);
         if (! $cutout) {
             throw new RuntimeException('The product cutout is not a supported image.');
         }
-        $slot = self::productSlot($layout);
-        $scale = min($slot['width'] / imagesx($cutout), $slot['height'] / imagesy($cutout));
-        $width = max(1, (int) round(imagesx($cutout) * $scale));
-        $height = max(1, (int) round(imagesy($cutout) * $scale));
-        $x = $slot['x'] - intdiv($width, 2);
-        $y = $slot['base'] - $height;
+        $place = self::placement($layout, $spot, imagesx($cutout), imagesy($cutout), imagesx($canvas), imagesy($canvas));
+        [$width, $height] = [$place['width'], $place['height']];
+        $x = $place['x'] - intdiv($width, 2);
+        $y = $place['base'] - $height;
         // Resized first, so the light match below touches only the pixels that are drawn.
         $product = imagecreatetruecolor($width, $height);
         imagealphablending($product, false);
@@ -130,23 +200,135 @@ class BannerComposer
         imagecopyresampled($product, $cutout, 0, 0, 0, 0, $width, $height, imagesx($cutout), imagesy($cutout));
         imagedestroy($cutout);
         $this->matchLight($product, $this->averageColour($canvas, $x, $y, $width, $height));
-
-        // Stacked translucent ellipses give a soft shadow that is darkest under the product and fades
-        // out, and a tight dark band right at the base keeps it from looking like it hovers.
-        $shadowWidth = (int) round($width * 0.95);
-        $shadowHeight = max(10, (int) round($width * 0.08));
-        for ($step = 0; $step < 14; $step++) {
-            $shrink = 1 - $step / 16;
-            imagefilledellipse($canvas, $slot['x'], $slot['base'] - (int) round($shadowHeight * 0.15), (int) round($shadowWidth * $shrink), (int) round($shadowHeight * $shrink), imagecolorallocatealpha($canvas, 0, 0, 0, 121));
-        }
-        for ($step = 0; $step < 6; $step++) {
-            $shrink = 1 - $step / 8;
-            imagefilledellipse($canvas, $slot['x'], $slot['base'] - 2, (int) round($width * 0.9 * $shrink), max(4, (int) round($shadowHeight * 0.35 * $shrink)), imagecolorallocatealpha($canvas, 0, 0, 0, 112));
-        }
+        $this->drawShadow($canvas, $product, $x, $y);
+        $this->softenEdges($product);
 
         imagealphablending($canvas, true);
         imagecopy($canvas, $product, $x, $y, 0, 0, $width, $height);
         imagedestroy($product);
+    }
+
+    /**
+     * Darkens the scene under and behind the product. The cast shadow is the product's silhouette laid
+     * flat on the surface and sheared back to the right, away from the front-left light the scene is
+     * asked for, then blurred wide; the contact shadow is a tight dark band along the lowest opaque
+     * pixel of every column, where the product meets the surface.
+     */
+    private function drawShadow(\GdImage $canvas, \GdImage $product, int $x, int $y): void
+    {
+        [$width, $height] = [imagesx($product), imagesy($product)];
+        $opaque = fn (int $px, int $py): bool => ((imagecolorat($product, $px, $py) >> 24) & 127) < 64;
+        $bottoms = [];
+        for ($px = 0; $px < $width; $px++) {
+            for ($py = $height - 1; $py >= 0; $py--) {
+                if ($opaque($px, $py)) {
+                    $bottoms[$px] = $py;
+
+                    break;
+                }
+            }
+        }
+        if ($bottoms === []) {
+            return;
+        }
+        // Shadow buffers are a quarter of the size: blurring them wide is cheap, and upscaling softens more.
+        $pad = (int) max(24, round($width * 0.25));
+        $factor = 4;
+        $bufferWidth = intdiv($width + 2 * $pad, $factor) + 1;
+        $bufferHeight = intdiv($height + 2 * $pad, $factor) + 1;
+        $cast = $this->shadowBuffer($bufferWidth, $bufferHeight);
+        $contact = $this->shadowBuffer($bufferWidth, $bufferHeight);
+        $black = imagecolorallocate($cast, 0, 0, 0);
+        $contactBlack = imagecolorallocate($contact, 0, 0, 0);
+        $depth = max(1, $height * 0.22);
+        for ($py = 0; $py < $height; $py += 2) {
+            for ($px = 0; $px < $width; $px += 2) {
+                if (! isset($bottoms[$px]) || ! $opaque($px, $py)) {
+                    continue;
+                }
+                $rise = $bottoms[$px] - $py;
+                $sx = $px + $pad + 0.35 * $rise * $depth / $height;
+                $sy = $bottoms[$px] + $pad - $rise * $depth / $height;
+                imagesetpixel($cast, (int) ($sx / $factor), (int) ($sy / $factor), $black);
+            }
+        }
+        foreach ($bottoms as $px => $bottom) {
+            imagefilledrectangle($contact, intdiv($px + $pad, $factor), intdiv($bottom + $pad - 4, $factor), intdiv($px + $pad, $factor), intdiv($bottom + $pad + 5, $factor), $contactBlack);
+        }
+        for ($pass = 0; $pass < 10; $pass++) {
+            imagefilter($cast, IMG_FILTER_GAUSSIAN_BLUR);
+        }
+        for ($pass = 0; $pass < 3; $pass++) {
+            imagefilter($contact, IMG_FILTER_GAUSSIAN_BLUR);
+        }
+        // Scaled back up smoothly, so the soft shadow shows no blocks.
+        [$fullWidth, $fullHeight] = [$bufferWidth * $factor, $bufferHeight * $factor];
+        foreach ([&$cast, &$contact] as &$buffer) {
+            $full = imagescale($buffer, $fullWidth, $fullHeight, IMG_BILINEAR_FIXED);
+            imagedestroy($buffer);
+            $buffer = $full;
+        }
+        unset($buffer);
+        $left = $x - $pad;
+        $top = $y - $pad;
+        for ($cy = max(0, $top); $cy < min(imagesy($canvas), $top + $fullHeight); $cy++) {
+            for ($cx = max(0, $left); $cx < min(imagesx($canvas), $left + $fullWidth); $cx++) {
+                $dark = 0.5 * (1 - (imagecolorat($cast, $cx - $left, $cy - $top) & 255) / 255) + 0.9 * (1 - (imagecolorat($contact, $cx - $left, $cy - $top) & 255) / 255);
+                if ($dark < 0.01) {
+                    continue;
+                }
+                $keep = max(0.35, 1 - $dark);
+                $c = imagecolorat($canvas, $cx, $cy);
+                imagesetpixel($canvas, $cx, $cy, imagecolorallocate($canvas, (int) ((($c >> 16) & 255) * $keep), (int) ((($c >> 8) & 255) * $keep), (int) (($c & 255) * $keep)));
+            }
+        }
+        imagedestroy($cast);
+        imagedestroy($contact);
+    }
+
+    private function shadowBuffer(int $width, int $height): \GdImage
+    {
+        $buffer = imagecreatetruecolor($width, $height);
+        imagefill($buffer, 0, 0, imagecolorallocate($buffer, 255, 255, 255));
+
+        return $buffer;
+    }
+
+    /**
+     * A cutout's edge is sharper than anything in a photographed scene, which made it look pasted on.
+     * Each partly or fully opaque edge pixel takes the mean opacity of its 3x3 neighbourhood.
+     */
+    private function softenEdges(\GdImage $product): void
+    {
+        [$width, $height] = [imagesx($product), imagesy($product)];
+        $alpha = [];
+        for ($py = 0; $py < $height; $py++) {
+            for ($px = 0; $px < $width; $px++) {
+                $alpha[$py][$px] = (imagecolorat($product, $px, $py) >> 24) & 127;
+            }
+        }
+        imagealphablending($product, false);
+        for ($py = 0; $py < $height; $py++) {
+            for ($px = 0; $px < $width; $px++) {
+                if ($alpha[$py][$px] === 127) {
+                    continue;
+                }
+                [$sum, $count, $edge] = [0, 0, false];
+                for ($dy = -1; $dy <= 1; $dy++) {
+                    for ($dx = -1; $dx <= 1; $dx++) {
+                        $neighbour = $alpha[$py + $dy][$px + $dx] ?? 127;
+                        $edge = $edge || $neighbour === 127;
+                        [$sum, $count] = [$sum + $neighbour, $count + 1];
+                    }
+                }
+                if (! $edge) {
+                    continue;
+                }
+                $c = imagecolorat($product, $px, $py);
+                imagesetpixel($product, $px, $py, imagecolorallocatealpha($product, ($c >> 16) & 255, ($c >> 8) & 255, $c & 255, (int) round(max($alpha[$py][$px], $sum / $count))));
+            }
+        }
+        imagealphablending($product, true);
     }
 
     /** @return array{float, float, float} */

@@ -983,6 +983,106 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         });
     }
 
+    public function test_a_scene_check_that_hangs_twice_is_asked_a_third_time_instead_of_losing_the_paid_image(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        [$inspections, $images] = [0, 0];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$inspections, &$images) {
+                if (! str_contains($request->url(), 'gemini-3.5-flash:')) {
+                    $images++;
+
+                    return Http::response(self::image('background'));
+                }
+                if (++$inspections <= 2) {
+                    throw new ConnectionException('cURL error 28: Operation timed out after 30002 milliseconds with 0 bytes received');
+                }
+
+                return Http::response(self::inspection([]));
+            },
+        ]);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+
+        $this->assertSame('background', $result->imageBytes);
+        $this->assertSame([3, 1], [$inspections, $images]);
+        // Every check caps its answer, so a runaway list ends instead of holding the connection open.
+        Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'gemini-3.5-flash:')
+            && $request['generationConfig']['maxOutputTokens'] === 2048);
+    }
+
+    public function test_a_scene_check_cut_off_at_its_output_cap_counts_as_full_of_text_and_the_scene_is_redrawn(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $images = [self::image('shelf-of-spines'), self::image('clean')];
+        $answers = [
+            ['candidates' => [['finishReason' => 'MAX_TOKENS', 'content' => ['parts' => [['text' => '{"marks": ["Spine 1", "Spine 2", "Spi']]]]], 'usageMetadata' => ['promptTokenCount' => 300, 'candidatesTokenCount' => 2048]],
+            self::inspection([]),
+        ];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$images, &$answers) {
+                return Http::response(str_contains($request->url(), 'gemini-3.5-flash:') ? array_shift($answers) : array_shift($images));
+            },
+        ]);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+
+        $this->assertSame('clean', $result->imageBytes);
+        $calculator = app(ProviderCostCalculator::class);
+        // The cut-off check was still billed.
+        $this->assertEqualsWithDelta($calculator->calculate('gemini-3.5-flash', 300, 0, 2048) + $calculator->calculate('gemini-3.5-flash', 300, 0, 12), $result->additionalCost, 0.000001);
+    }
+
+    public function test_the_scene_checks_resting_spot_is_passed_on_for_the_cutout(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        config()->set('campaigns.banners.composite_product', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $images = [self::image(self::keyed()), self::image('scene')];
+        $spot = ['spot_found' => true, 'spot_x' => 740, 'spot_y' => 680, 'spot_width' => 450];
+        $answers = [self::inspection([]), self::inspection([], false, [], $spot)];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$images, &$answers) {
+                return Http::response(str_contains($request->url(), 'gemini-3.5-flash:') ? array_shift($answers) : array_shift($images));
+            },
+        ]);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => self::SCENE]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+
+        $this->assertEqualsWithDelta(['x' => 0.74, 'y' => 0.68, 'width' => 0.45], $result->productSpot, 0.0001);
+        $scene = collect(Http::recorded())->map(fn (array $pair) => $pair[0])
+            ->filter(fn (Request $request) => str_contains($request->url(), 'gemini-3.5-flash:'))->values()[1];
+        $this->assertSame(['marks', 'product_shown', 'spot_found', 'spot_x', 'spot_y', 'spot_width'], $scene['generationConfig']['responseSchema']['required']);
+    }
+
+    public function test_a_resting_spot_the_check_did_not_find_or_gave_out_of_range_is_not_used(): void
+    {
+        $inspector = new \ReflectionMethod(BannerImageInspector::class, 'spot');
+        $instance = app(BannerImageInspector::class);
+
+        $this->assertNull($inspector->invoke($instance, ['spot_found' => false, 'spot_x' => 500, 'spot_y' => 500, 'spot_width' => 300]));
+        $this->assertNull($inspector->invoke($instance, ['spot_found' => true, 'spot_x' => 1500, 'spot_y' => 500, 'spot_width' => 300]));
+        $this->assertNull($inspector->invoke($instance, ['spot_found' => true, 'spot_x' => 500, 'spot_y' => 500]));
+        $this->assertSame(['x' => 0.5, 'y' => 0.6, 'width' => 0.3], $inspector->invoke($instance, ['spot_found' => true, 'spot_x' => 500, 'spot_y' => 600, 'spot_width' => 300]));
+    }
+
     public function test_a_background_showing_a_different_object_is_redrawn_and_checked_against_the_store_photo(): void
     {
         Storage::fake('local');
@@ -1273,10 +1373,10 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         ];
     }
 
-    private static function inspection(array $marks, bool $productShown = false, array $otherObjects = []): array
+    private static function inspection(array $marks, bool $productShown = false, array $otherObjects = [], array $spot = ['spot_found' => false]): array
     {
         return [
-            'candidates' => [['content' => ['parts' => [['text' => json_encode(['marks' => $marks, 'product_shown' => $productShown, 'other_objects' => $otherObjects])]]]]],
+            'candidates' => [['content' => ['parts' => [['text' => json_encode(['marks' => $marks, 'product_shown' => $productShown, 'other_objects' => $otherObjects, ...$spot])]]]]],
             'usageMetadata' => ['promptTokenCount' => 300, 'candidatesTokenCount' => 12],
         ];
     }
