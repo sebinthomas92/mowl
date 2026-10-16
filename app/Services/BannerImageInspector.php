@@ -60,6 +60,55 @@ class BannerImageInspector
     }
 
     /**
+     * Checks the product in the generated image against the store's own photo. The photo is styled
+     * (the Kindle Stand page shows a book and a Kindle on the stand), and the image model has drawn a
+     * real paper book in place of a sculpted stand, so props are named as props and material counts.
+     *
+     * @param  array{mimeType: string, data: string}  $photo
+     * @return array{matches: bool, differences: string, split: bool, input_tokens: int, output_tokens: int}
+     */
+    public function matchesProduct(string $imageBytes, string $mimeType, string $product, array $photo): array
+    {
+        $prompt = "The first image is an advertising picture. The second image is the store's own photo of the product \"{$product}\". "
+            .'In the second image, any item on, in or around the product (a book, magazine, phone, tablet, e-reader, plant, cup or hand) is a prop, not the product, unless that item is itself the named product. '
+            .'Does the first image show the same product: the same kind of object, shape, proportions, material, surface finish and colour? '
+            .'A different kind of object does not match, even if it has a similar outline: for example a real paper book with pages is not a sculpted or moulded stand shaped like a book. '
+            .'Ignore the background, lighting, camera angle and props in both images. '
+            .'Separately, set split to true if the first image is divided into panels: a flat colour block, a split-screen, or a hard straight vertical or horizontal boundary between two areas that are not the same continuous scene. Return JSON only.';
+        [$mimeType, $imageBytes] = $this->smaller($mimeType, $imageBytes);
+        [$response] = $this->client->generateContent([
+            'contents' => [['role' => 'user', 'parts' => [
+                ['text' => $prompt],
+                ['inlineData' => ['mimeType' => $mimeType, 'data' => base64_encode($imageBytes)]],
+                ['inlineData' => $photo],
+            ]]],
+            'generationConfig' => [
+                'temperature' => 0,
+                'responseMimeType' => 'application/json',
+                'responseSchema' => [
+                    'type' => 'OBJECT',
+                    'properties' => ['matches' => ['type' => 'BOOLEAN'], 'differences' => ['type' => 'STRING'], 'split' => ['type' => 'BOOLEAN']],
+                    'required' => ['matches', 'differences', 'split'],
+                ],
+            ],
+        ], config('campaigns.google.model'), (int) config('campaigns.banners.inspection_timeout_seconds', 30));
+
+        $json = $response->json();
+        $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
+        if (! is_array($decoded) || ! is_bool($decoded['matches'] ?? null) || ! is_bool($decoded['split'] ?? null)) {
+            throw new VertexAIResponseException('vertex_invalid_inspection', 'Vertex AI returned no product match check.', true);
+        }
+
+        return [
+            'matches' => $decoded['matches'],
+            'differences' => trim((string) ($decoded['differences'] ?? '')),
+            'split' => $decoded['split'],
+            'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
+            'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0),
+        ];
+    }
+
+    /**
      * A 1K PNG is 1-2MB; reading text needs far less, and smaller bodies answer faster.
      *
      * @return array{0: string, 1: string}
