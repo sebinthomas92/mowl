@@ -557,7 +557,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $this->assertSame(1, collect(Http::recorded())->filter(fn (array $pair) => str_contains($pair[0]->url(), 'gemini-3.1-flash-image:'))->count());
     }
 
-    private const SCENE = 'An empty set; the product '.BannerCopySelector::SCENE_MARKER.'. No text or logos.';
+    private const SCENE = BannerCopySelector::SCENE_OPENING.'Kindle Stand. An empty set. No text or logos.';
 
     public function test_a_banner_queued_with_a_product_prompt_is_drawn_from_the_photo_even_when_compositing_is_on(): void
     {
@@ -574,7 +574,9 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             'aiplatform.googleapis.com/*' => Http::response(self::image('drawn-with-product')),
         ]);
 
-        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'Show the product. No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+        // Product copy inside the prompt can contain any phrase, the scene prompt's opening included.
+        $prompt = 'Show the product, "'.BannerCopySelector::SCENE_OPENING.'". No text or logos.';
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => $prompt]), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
 
         // No cutout is made or overlaid, so the product is never shown twice.
         $this->assertNull($result->productCutout);
@@ -619,6 +621,55 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         config()->set('campaigns.banners.check_product', true);
 
         $this->assertNotSame($unchecked, BannerReferenceImage::key('Kindle Stand'));
+    }
+
+    public function test_cutouts_are_remade_for_a_renamed_brand_because_its_own_mark_is_exempt(): void
+    {
+        $this->assertNotSame(BannerReferenceImage::key('Kindle Stand', 'Old Brand'), BannerReferenceImage::key('Kindle Stand', 'New Brand'));
+    }
+
+    public function test_a_very_narrow_photo_is_sampled_for_its_key_colour_without_being_upscaled(): void
+    {
+        $image = imagecreatetruecolor(2, 6000);
+        imagefill($image, 0, 0, imagecolorallocate($image, 0, 200, 0));
+        ob_start();
+        imagepng($image);
+        $photo = (string) ob_get_clean();
+
+        $key = (new \ReflectionMethod(BannerReferenceImage::class, 'keyColour'))->invoke(app(BannerReferenceImage::class), $photo);
+
+        // A green product is keyed on magenta.
+        $this->assertSame(['magenta', '#FF00FF'], $key);
+    }
+
+    public function test_a_rate_limited_cutout_check_is_not_retried_when_the_deadline_cannot_fit_it(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        Sleep::fake();
+        $this->configureGoogle();
+        config()->set('campaigns.banners.inspection_timeout_seconds', 60);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*gemini-3.1-flash-image:*' => Http::response(self::image(self::keyed())),
+            'aiplatform.googleapis.com/*gemini-3.5-flash:*' => Http::response(['error' => ['message' => 'Resource exhausted']], 429),
+        ]);
+        // Room for one 60s check, not for a 10s pause and a second one.
+        app(GenerationDeadline::class)->start(70);
+
+        try {
+            app(BannerReferenceImage::class)->for(new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']), 'Kindle Stand', 60, 1);
+            $this->fail('The check should have failed.');
+        } catch (BannerAttemptFailed $exception) {
+            $this->assertSame('vertex_http_429', $exception->errorCode);
+            $this->assertGreaterThan(0, $exception->spentCost);
+        } finally {
+            app(GenerationDeadline::class)->clear();
+        }
+        Sleep::assertNeverSlept();
     }
 
     private static function match(bool $matches, string $differences, bool $split = false): array

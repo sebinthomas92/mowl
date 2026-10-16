@@ -55,8 +55,9 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         // With compositing, the image model draws only the scene and never sees the product; the cutout
         // (checked against the store photo when it was made) is placed on the scene by the composer. The
         // mode follows the stored prompt, not the current setting, so a banner queued before a switch is
-        // never drawn with a product and then given a second one.
-        $composite = $asset && str_contains((string) $creative->prompt, BannerCopySelector::SCENE_MARKER);
+        // never drawn with a product and then given a second one. Only the prompt's fixed opening counts:
+        // product copy further in could contain any phrase.
+        $composite = $asset && str_starts_with((string) $creative->prompt, BannerCopySelector::SCENE_OPENING);
         $checkProduct = $asset && ! $composite && config('campaigns.banners.inspect_images') && config('campaigns.banners.check_product');
         try {
             $photo = $asset && ! $composite ? $this->imagePart($asset)['inlineData'] : null;

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\MediaAsset;
+use App\Support\GenerationDeadline;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
@@ -51,7 +52,7 @@ class BannerReferenceImage
         if (! $asset->exists) {
             return $this->make($asset, $product, $timeoutSeconds, $brand);
         }
-        $key = self::key($product);
+        $key = self::key($product, $brand);
         if ($cached = $this->cached($asset, $key)) {
             return $cached;
         }
@@ -80,13 +81,16 @@ class BannerReferenceImage
         }
     }
 
-    /** The copy depends on the product name in the prompt, so a renamed product gets a new one. */
-    public static function key(string $product): string
+    /**
+     * The copy depends on the product name in the prompt, and its marks check exempts the brand's own
+     * mark, so a renamed product or brand gets a new one.
+     */
+    public static function key(string $product, string $brand = ''): string
     {
         // Which checks the cutout passed is part of the key, so turning a check on remakes cutouts made without it.
         $checks = (int) (bool) config('campaigns.banners.inspect_images').(int) (bool) config('campaigns.banners.check_product');
 
-        return substr(sha1(self::PROMPT_VERSION."\n".$product."\n".$checks), 0, 16);
+        return substr(sha1(self::PROMPT_VERSION."\n".$product."\n".$brand."\n".$checks), 0, 16);
     }
 
     /** @return array{inlineData: array{mimeType: string, data: string}, cost: float}|null */
@@ -155,10 +159,14 @@ class BannerReferenceImage
         $model = (string) config('campaigns.google.model');
         $cost = 0.0;
         try {
+            $this->ensureTime();
             $marks = $this->retried(fn () => $this->inspector->inspect($png, 'image/png', $product, $brand));
             $cost += $this->costs->calculate($model, $marks['input_tokens'], 0, $marks['output_tokens']);
             if ($marks['marks'] !== []) {
                 throw new BannerAttemptFailed('banner_reference_rejected', 'The product cutout showed third-party text or marks: '.mb_substr(implode(', ', $marks['marks']), 0, 300), round($spent + $cost, 6), $png);
+            }
+            if (config('campaigns.banners.check_product')) {
+                $this->ensureTime();
             }
             $match = config('campaigns.banners.check_product') ? $this->retried(fn () => $this->inspector->matchesProduct($png, 'image/png', $product, $photo)) : null;
             $cost += $match ? $this->costs->calculate($model, $match['input_tokens'], 0, $match['output_tokens']) : 0.0;
@@ -172,18 +180,36 @@ class BannerReferenceImage
         return $cost;
     }
 
-    /** A check that was rate limited or hung is tried once more, so the paid-for cutout is not thrown away. */
+    /**
+     * A check that was rate limited or hung is tried once more, so the paid-for cutout is not thrown
+     * away, but only while the run's deadline still has room for it.
+     */
     private function retried(callable $call): array
     {
         try {
             return $call();
         } catch (VertexAIResponseException $exception) {
-            if (! in_array($exception->errorCode, ['vertex_http_429', 'vertex_connection_error'], true)) {
+            if (! in_array($exception->errorCode, ['vertex_http_429', 'vertex_connection_error'], true) || ! $this->hasTime(10)) {
                 throw $exception;
             }
             Sleep::for(10)->seconds();
 
             return $call();
+        }
+    }
+
+    /** Whether a full inspection, after $pause seconds, still fits the run's deadline (none: always). */
+    private function hasTime(int $pause = 0): bool
+    {
+        $remaining = app(GenerationDeadline::class)->remaining();
+
+        return $remaining === null || $remaining >= $pause + (int) config('campaigns.banners.inspection_timeout_seconds') + 5;
+    }
+
+    private function ensureTime(): void
+    {
+        if (! $this->hasTime()) {
+            throw new VertexAIResponseException('banner_deadline_in_reference_check', 'Not enough time was left to check the product cutout.', true);
         }
     }
 
@@ -211,11 +237,16 @@ class BannerReferenceImage
             return ['green', '#00FF00'];
         }
         imagepalettetotruecolor($image);
-        $small = imagescale($image, 64);
+        // A sample at most 64px on its longer side; never upscaled, so a very narrow photo stays small.
+        $factor = min(1, 64 / max(imagesx($image), imagesy($image)));
+        $small = imagescale($image, max(1, (int) round(imagesx($image) * $factor)), max(1, (int) round(imagesy($image) * $factor)));
         imagedestroy($image);
+        if (! $small) {
+            return ['green', '#00FF00'];
+        }
         [$green, $magenta] = [0, 0];
         for ($y = 0; $y < imagesy($small); $y++) {
-            for ($x = 0; $x < 64; $x++) {
+            for ($x = 0; $x < imagesx($small); $x++) {
                 $c = imagecolorat($small, $x, $y);
                 $green += self::keyStrength('green', ($c >> 16) & 255, ($c >> 8) & 255, $c & 255) > 0.3 ? 1 : 0;
                 $magenta += self::keyStrength('magenta', ($c >> 16) & 255, ($c >> 8) & 255, $c & 255) > 0.3 ? 1 : 0;
