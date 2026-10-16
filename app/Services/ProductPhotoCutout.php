@@ -110,8 +110,9 @@ class ProductPhotoCutout
     private bool $keyable = false;
 
     /**
-     * After a successful cut without a matte: the photo as cut (scaled, upright) as a JPEG, for the image
-     * model to draw a matte of, when it has an opaque backdrop. A matte must line up with these pixels.
+     * After a successful cut without a matte: the photo as cut (scaled, upright) as a lossless PNG, for
+     * the image model to draw a matte of and for the matted cut to take its pixels from, when it has an
+     * opaque backdrop. A matte must line up with these pixels.
      */
     public ?string $prepared = null;
 
@@ -170,7 +171,7 @@ class ProductPhotoCutout
             $png = $this->cutImage($image, $keyed, $key);
             if ($png !== null && $matte === null && $this->keyable) {
                 ob_start();
-                imagejpeg($image, null, 92);
+                imagepng($image);
                 $this->prepared = (string) ob_get_clean();
             }
 
@@ -489,6 +490,11 @@ class ProductPhotoCutout
                 for ($x = 0; $x < $width; $x++) {
                     $c = imagecolorat($matte, $x, $y);
                     $share = BannerReferenceImage::keyStrength($key, ($c >> 16) & 255, ($c >> 8) & 255, $c & 255);
+                    // A product part already in the key colour (a green button on a stand) was not painted over.
+                    $own = imagecolorat($image, $x, $y);
+                    if (BannerReferenceImage::keyStrength($key, ($own >> 16) & 255, ($own >> 8) & 255, $own & 255) > 0.0) {
+                        $share = 0.0;
+                    }
                     $strength .= chr((int) round(255 * $share));
                     $keyed .= $share >= 0.5 ? "\1" : "\0";
                 }

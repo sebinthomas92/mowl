@@ -435,7 +435,8 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertEqualsWithDelta((330 - 150 + 1) * 2, imagesy($cutout), 4);
         $page = imagecolorat($cutout, (160 - 110) * 2, (200 - 150) * 2);
         $this->assertSame(0, ($page >> 24) & 127);
-        $this->assertEqualsWithDelta(250, ($page >> 16) & 255, 3, 'the photo\'s own page white, not the matte\'s grey');
+        $this->assertSame(250, ($page >> 16) & 255, 'the photo\'s own page white, not the matte\'s grey');
+        $this->assertSame(0, (imagecolorat($cutout, (200 - 110) * 2, (250 - 150) * 2) >> 24) & 127, 'green button kept');
     }
 
     public function test_a_matte_that_moved_the_product_or_changed_the_shape_is_not_used(): void
@@ -463,10 +464,13 @@ class ProductPhotoCutoutTest extends TestCase
         imagefilledrectangle($image, 100, 300, 300, 330, imagecolorallocate($image, 214, 72, 38));
         imagefilledrectangle($image, 110, 150, 290, 299, imagecolorallocate($image, 250, 250, 250));
         imagefilledrectangle($image, 150, 140, 250, 149, imagecolorallocate($image, 226, 214, 198));
+        // A green button on the pages, which the matte leaves as it is.
+        imagefilledrectangle($image, 195, 245, 205, 255, imagecolorallocate($image, 20, 200, 40));
         $matte = imagecreatetruecolor(400, 400);
         imagefill($matte, 0, 0, imagecolorallocate($matte, 0, 255, 0));
         imagefilledrectangle($matte, 100, 300, 300, 330, imagecolorallocate($matte, 200, 80, 50));
         imagefilledrectangle($matte, 110, 150, 290, 299, imagecolorallocate($matte, 128, 128, 128));
+        imagefilledrectangle($matte, 195, 245, 205, 255, imagecolorallocate($matte, 20, 200, 40));
 
         return [self::encode($image), $matte];
     }

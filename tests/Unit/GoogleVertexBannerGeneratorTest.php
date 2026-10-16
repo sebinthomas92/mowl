@@ -752,7 +752,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $vertex = collect(Http::recorded())->map(fn (array $pair) => $pair[0])
             ->filter(fn (Request $request) => str_contains($request->url(), 'aiplatform.googleapis.com'))->values();
         $this->assertStringContainsString('flash-image', $vertex[0]->url());
-        $this->assertSame('image/jpeg', $vertex[0]['contents'][0]['parts'][1]['inlineData']['mimeType']);
+        $this->assertSame('image/png', $vertex[0]['contents'][0]['parts'][1]['inlineData']['mimeType']);
         $this->assertCount(5, $vertex);
         $aligned
             ? Log::shouldNotHaveReceived('warning')
@@ -1169,6 +1169,12 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         config()->set('campaigns.banners.check_product', true);
 
         $this->assertNotSame($unchecked, BannerReferenceImage::key('Kindle Stand'));
+
+        // And studio cutouts made before matting was turned on.
+        config()->set('campaigns.banners.matte_studio_cutouts', false);
+        $unmatted = BannerReferenceImage::key('Kindle Stand');
+        config()->set('campaigns.banners.matte_studio_cutouts', true);
+        $this->assertNotSame($unmatted, BannerReferenceImage::key('Kindle Stand'));
     }
 
     public function test_cutouts_are_remade_for_a_renamed_brand_because_its_own_mark_is_exempt(): void

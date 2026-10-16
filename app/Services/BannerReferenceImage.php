@@ -108,8 +108,10 @@ class BannerReferenceImage
      */
     public static function key(string $product, string $brand = '', string $source = ''): string
     {
-        // Which checks the cutout passed is part of the key, so turning a check on remakes cutouts made without it.
-        $checks = (int) (bool) config('campaigns.banners.inspect_images').(int) (bool) config('campaigns.banners.check_product');
+        // Which checks the cutout passed, and whether studio cutouts are matted, is part of the key, so
+        // turning either on remakes cutouts made without it.
+        $checks = (int) (bool) config('campaigns.banners.inspect_images').(int) (bool) config('campaigns.banners.check_product')
+            .(int) (bool) config('campaigns.banners.matte_studio_cutouts');
 
         return substr(sha1(self::PROMPT_VERSION."\n".$product."\n".$brand."\n".$checks.($source !== '' ? "\n".$source : '')), 0, 16);
     }
@@ -301,7 +303,7 @@ class BannerReferenceImage
                     .'including the product\'s shadow and every gap, opening or V-shaped notch in the product through which the background shows. '
                     .'Leave the product exactly as it is: same position, size, angle and framing, pixel for pixel. Do not move, crop, resize, redraw or retouch it. '
                     .'Keep the image the same shape.',
-                'image/jpeg', $prepared, $timeoutSeconds,
+                'image/png', $prepared, $timeoutSeconds,
             );
         } catch (VertexAIResponseException $exception) {
             report($exception);
