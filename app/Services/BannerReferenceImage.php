@@ -245,8 +245,12 @@ class BannerReferenceImage
         $cost = 0.0;
         try {
             $this->ensureTime();
-            $marks = $this->retried(fn () => $this->inspector->inspect($png, 'image/png', $product, $brand));
+            $marks = $this->retried(fn () => $this->inspector->inspect($png, 'image/png', $product, $brand, cutout: $photo === null));
             $cost += $this->costs->calculate($model, $marks['input_tokens'], 0, $marks['output_tokens']);
+            if ($marks['other_objects'] !== []) {
+                // A studio shot with a vase or candle beside the product, joined to it in the cutout.
+                throw new BannerAttemptFailed('banner_reference_rejected', 'The product photo showed other objects: '.mb_substr(implode(', ', $marks['other_objects']), 0, 300), round($spent + $cost, 6), $png);
+            }
             if ($marks['marks'] !== []) {
                 throw new BannerAttemptFailed('banner_reference_rejected', 'The product cutout showed third-party text or marks: '.mb_substr(implode(', ', $marks['marks']), 0, 300), round($spent + $cost, 6), $png);
             }
