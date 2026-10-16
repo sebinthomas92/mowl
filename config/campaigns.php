@@ -56,6 +56,8 @@ return [
         'inspection_attempts' => (int) env('BANNER_INSPECTION_ATTEMPTS', 2),
         // An inspection normally answers in seconds; a stalled one must not eat the attempt's budget.
         'inspection_timeout_seconds' => 30,
+        // Image checks ask for little reasoning (Gemini 3 thinkingLevel); empty leaves the model's default.
+        'inspection_thinking_level' => env('BANNER_INSPECTION_THINKING', 'LOW'),
         // The product cutout is compared with the store's product photo once, before it is kept (and,
         // with compositing off, every drawn background is, and redrawn if it shows a different object).
         // It runs only while inspect_images is on, which switches every image check off together.

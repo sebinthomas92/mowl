@@ -9,6 +9,7 @@ use App\Models\CampaignPack;
 use App\Models\MediaAsset;
 use App\Models\SourceSnapshot;
 use App\Services\BannerCopySelector;
+use App\Services\BannerImageInspector;
 use App\Services\BannerReferenceImage;
 use App\Services\GoogleVertexBannerGenerator;
 use App\Services\ProviderCostCalculator;
@@ -395,6 +396,42 @@ class GoogleVertexBannerGeneratorTest extends TestCase
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'flash-image') && count($request['contents'][0]['parts']) > 1
             && base64_decode($request['contents'][0]['parts'][1]['inlineData']['data']) === $main);
+    }
+
+    public function test_image_checks_ask_for_low_thinking_and_drop_it_when_the_model_rejects_it(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $levels = [];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$levels) {
+                if (! str_contains($request->url(), 'gemini-3.5-flash:')) {
+                    return Http::response(self::image('banner-background'));
+                }
+                $levels[] = $request['generationConfig']['thinkingConfig']['thinkingLevel'] ?? null;
+
+                return count($levels) === 1
+                    ? Http::response(['error' => ['code' => 400, 'message' => 'Thinking level is not supported for this model.']], 400)
+                    : Http::response(self::inspection([]));
+            },
+        ]);
+        $property = new \ReflectionProperty(BannerImageInspector::class, 'thinkingRejected');
+
+        try {
+            $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png'])]));
+            app(BannerImageInspector::class)->inspect('banner-background', 'image/png', 'Kindle Stand', '');
+        } finally {
+            $property->setValue(null, false);
+        }
+
+        $this->assertSame('banner-background', $result->imageBytes);
+        // Asked with low thinking, refused, asked again without it, and never with it afterwards.
+        $this->assertSame(['LOW', null, null], $levels);
     }
 
     public function test_a_retitled_page_with_the_same_sku_still_gives_its_gallery(): void

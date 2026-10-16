@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\VertexAIResponseException;
+use Illuminate\Http\Client\Response;
 
 /**
  * Looks at a generated banner background for readable third-party text: book covers on a screen,
@@ -11,6 +12,8 @@ use App\Exceptions\VertexAIResponseException;
  */
 class BannerImageInspector
 {
+    private static bool $thinkingRejected = false;
+
     public function __construct(private GoogleVertexAIClient $client) {}
 
     /**
@@ -49,7 +52,7 @@ class BannerImageInspector
             ['text' => $prompt],
             ['inlineData' => ['mimeType' => $mimeType, 'data' => base64_encode($imageBytes)]],
         ];
-        [$response] = $this->client->generateContent([
+        $response = $this->ask([
             'contents' => [['role' => 'user', 'parts' => $parts]],
             'generationConfig' => [
                 'temperature' => 0,
@@ -60,7 +63,7 @@ class BannerImageInspector
                     'required' => array_keys($properties),
                 ],
             ],
-        ], config('campaigns.google.model'), (int) config('campaigns.banners.inspection_timeout_seconds', 30));
+        ]);
 
         $json = $response->json();
         $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
@@ -96,7 +99,7 @@ class BannerImageInspector
         [$mimeType, $imageBytes] = $this->smaller($mimeType, $imageBytes);
         // A store's full-size photo can exceed the model's inline image limit, so it is shrunk too.
         [$photoMime, $photoBytes] = $this->smaller((string) $photo['mimeType'], (string) base64_decode((string) $photo['data']));
-        [$response] = $this->client->generateContent([
+        $response = $this->ask([
             'contents' => [['role' => 'user', 'parts' => [
                 ['text' => $prompt],
                 ['inlineData' => ['mimeType' => $mimeType, 'data' => base64_encode($imageBytes)]],
@@ -111,7 +114,7 @@ class BannerImageInspector
                     'required' => ['matches', 'differences', 'split'],
                 ],
             ],
-        ], config('campaigns.google.model'), (int) config('campaigns.banners.inspection_timeout_seconds', 30));
+        ]);
 
         $json = $response->json();
         $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
@@ -126,6 +129,30 @@ class BannerImageInspector
             'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
             'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0),
         ];
+    }
+
+    /**
+     * A yes/no look at an image needs little reasoning, and long default thinking can run past the
+     * inspection timeout with nothing sent back. A model that rejects the setting is asked without it.
+     */
+    private function ask(array $payload): Response
+    {
+        $level = (string) config('campaigns.banners.inspection_thinking_level');
+        if ($level !== '' && ! self::$thinkingRejected) {
+            $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $level];
+        }
+        try {
+            [$response] = $this->client->generateContent($payload, config('campaigns.google.model'), (int) config('campaigns.banners.inspection_timeout_seconds', 30));
+        } catch (VertexAIResponseException $exception) {
+            if (! isset($payload['generationConfig']['thinkingConfig']) || $exception->errorCode !== 'vertex_http_400' || ! str_contains(strtolower($exception->getMessage()), 'thinking')) {
+                throw $exception;
+            }
+            self::$thinkingRejected = true;
+            unset($payload['generationConfig']['thinkingConfig']);
+            [$response] = $this->client->generateContent($payload, config('campaigns.google.model'), (int) config('campaigns.banners.inspection_timeout_seconds', 30));
+        }
+
+        return $response;
     }
 
     /**
