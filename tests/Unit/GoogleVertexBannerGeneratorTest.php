@@ -10,6 +10,7 @@ use App\Services\GoogleVertexBannerGenerator;
 use App\Services\ProviderCostCalculator;
 use App\Support\GenerationDeadline;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Sleep;
@@ -272,12 +273,68 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         ]);
         $creative = new BannerCreative(['prompt' => 'No text or logos.']);
         $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png', 'derivatives' => ['banner_reference' => 'banner-reference-2.png']]);
+        $asset->id = 2;
+        $asset->exists = true;
 
         app(GoogleVertexBannerGenerator::class)->generate($creative, collect([$asset]));
 
         $this->assertSame(1, collect(Http::recorded())->filter(fn (array $pair) => str_contains($pair[0]->url(), 'gemini-3.1-flash-image:'))->count());
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/models/gemini-3.1-flash-image:generateContent')
             && $request['contents'][0]['parts'][1]['inlineData']['data'] === base64_encode('stored-clean-product'));
+    }
+
+    public function test_a_cleanup_answer_without_an_image_still_records_its_spend(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        config()->set('campaigns.banners.clean_reference', true);
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $filtered = self::image('unused');
+        $filtered['candidates'] = [['finishReason' => 'IMAGE_SAFETY']];
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => Http::response($filtered),
+        ]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
+
+        try {
+            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([$asset]));
+            $this->fail('A cleanup without an image must fail the attempt.');
+        } catch (BannerAttemptFailed $exception) {
+            $this->assertSame('vertex_missing_image', $exception->errorCode);
+            $this->assertEqualsWithDelta(app(ProviderCostCalculator::class)->calculateBanner(400, 10, 1290), $exception->spentCost, 0.000001);
+        }
+    }
+
+    public function test_a_banner_waits_for_another_banners_cleanup_instead_of_paying_for_its_own(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        config()->set('campaigns.banners.clean_reference', true);
+        config()->set('campaigns.banners.reference_timeout_seconds', 1);
+        Http::fake();
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
+        $asset->id = 7;
+        $asset->exists = true;
+        $held = Cache::lock('banner-reference.7', 60);
+        $this->assertTrue($held->get());
+        app(GenerationDeadline::class)->start(72);
+
+        try {
+            app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([$asset]));
+            $this->fail('A banner must not start its own cleanup while another one holds the lock.');
+        } catch (VertexAIResponseException $exception) {
+            $this->assertSame('banner_reference_busy', $exception->errorCode);
+            $this->assertTrue($exception->retryable);
+        } finally {
+            $held->release();
+            app(GenerationDeadline::class)->clear();
+        }
+        Http::assertNothingSent();
     }
 
     private static function image(string $bytes): array

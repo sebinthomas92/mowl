@@ -67,6 +67,7 @@ return [
         // The product photo is re-made once without props (books, magazines, devices) before it is used
         // as the banner reference, since the image model copies everything a reference shows.
         'clean_reference' => env('BANNER_CLEAN_REFERENCE', true),
+        'reference_timeout_seconds' => 60,
         'disk' => env('BANNER_STORAGE_DISK', env('CAMPAIGN_MEDIA_DISK', 'local')),
         'prices_per_million' => [
             'input' => 0.50,

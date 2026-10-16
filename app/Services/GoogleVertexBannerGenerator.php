@@ -53,9 +53,20 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         try {
             $reference = $asset ? $this->imagePart($asset)['inlineData'] : null;
             if ($asset && config('campaigns.banners.clean_reference')) {
-                $clean = $this->rateLimited($deadline, (int) config('campaigns.banners.min_round_seconds'), fn () => $this->references->for($asset, $product));
+                $round = (int) config('campaigns.banners.min_round_seconds');
+                $timeout = (int) config('campaigns.banners.reference_timeout_seconds');
+                $clean = $this->rateLimited($deadline, $round, fn () => $this->references->for(
+                    $asset,
+                    $product,
+                    $deadline->timeout($timeout),
+                    (int) min($timeout + 15, max(1, ($deadline->remaining() ?? INF) - $round)),
+                ));
                 $extraCost += $clean['cost'];
                 $reference = $clean['inlineData'];
+                // The copy is stored, so a retry skips straight to the banner with the full budget.
+                if (($deadline->remaining() ?? INF) < $round) {
+                    throw new VertexAIResponseException('banner_deadline_after_reference', 'Not enough time was left for a banner after preparing the clean product photo.', true);
+                }
             }
         } catch (VertexAIResponseException $exception) {
             throw $this->withSpend($exception, $usage, $extraCost);

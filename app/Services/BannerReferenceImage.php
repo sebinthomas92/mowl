@@ -2,8 +2,11 @@
 
 namespace App\Services;
 
+use App\Exceptions\BannerAttemptFailed;
 use App\Exceptions\VertexAIResponseException;
 use App\Models\MediaAsset;
+use Illuminate\Contracts\Cache\LockTimeoutException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -16,15 +19,51 @@ class BannerReferenceImage
     public function __construct(private GoogleVertexAIClient $client, private ProviderCostCalculator $costs) {}
 
     /**
+     * Banners for one pack run side by side, so the copy is made under a per-photo lock: the others
+     * wait up to $waitSeconds and reuse it instead of paying for their own (possibly different) copy.
+     *
      * @return array{inlineData: array{mimeType: string, data: string}, cost: float}
      */
-    public function for(MediaAsset $asset, string $product): array
+    public function for(MediaAsset $asset, string $product, int $timeoutSeconds, int $waitSeconds): array
     {
-        $cached = data_get($asset->derivatives, 'banner_reference');
-        if (is_string($cached) && Storage::disk($asset->disk)->exists($cached)) {
-            return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode(Storage::disk($asset->disk)->get($cached))], 'cost' => 0.0];
+        if (! $asset->exists) {
+            return $this->make($asset, $product, $timeoutSeconds);
+        }
+        if ($cached = $this->cached($asset)) {
+            return $cached;
         }
 
+        try {
+            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + 30)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds) {
+                if ($cached = $this->cached($asset->refresh())) {
+                    return $cached;
+                }
+                $clean = $this->make($asset, $product, $timeoutSeconds);
+                $path = dirname($asset->path).'/banner-reference-'.$asset->id.'.png';
+                Storage::disk($asset->disk)->put($path, base64_decode($clean['inlineData']['data']));
+                $asset->forceFill(['derivatives' => [...($asset->derivatives ?? []), 'banner_reference' => $path]])->save();
+
+                return $clean;
+            });
+        } catch (LockTimeoutException) {
+            throw new VertexAIResponseException('banner_reference_busy', 'Another banner is still preparing the clean product photo.', true);
+        }
+    }
+
+    /** @return array{inlineData: array{mimeType: string, data: string}, cost: float}|null */
+    private function cached(MediaAsset $asset): ?array
+    {
+        $cached = data_get($asset->derivatives, 'banner_reference');
+        if (! is_string($cached) || ! Storage::disk($asset->disk)->exists($cached)) {
+            return null;
+        }
+
+        return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode(Storage::disk($asset->disk)->get($cached))], 'cost' => 0.0];
+    }
+
+    /** @return array{inlineData: array{mimeType: string, data: string}, cost: float} */
+    private function make(MediaAsset $asset, string $product, int $timeoutSeconds): array
+    {
         [$response] = $this->client->generateContent([
             'contents' => [['role' => 'user', 'parts' => [
                 ['text' => "Product photo of {$product}. Recreate this exact product on its own on a plain, softly lit light-grey background, same angle, form, materials, proportions and colour. "
@@ -33,31 +72,26 @@ class BannerReferenceImage
                 ['inlineData' => ['mimeType' => $asset->mime_type, 'data' => base64_encode(Storage::disk($asset->disk)->get($asset->path))]],
             ]]],
             'generationConfig' => ['responseModalities' => ['TEXT', 'IMAGE']],
-        ], config('campaigns.banners.model'));
+        ], config('campaigns.banners.model'), $timeoutSeconds);
 
         $json = $response->json();
-        $encoded = collect(data_get($json, 'candidates.0.content.parts', []))
-            ->map(fn (array $part) => data_get($part, 'inlineData.data'))
-            ->first(fn (mixed $data) => is_string($data));
-        $bytes = is_string($encoded) ? base64_decode($encoded, true) : false;
-        if (! is_string($bytes) || $bytes === '') {
-            throw new VertexAIResponseException('vertex_missing_image', 'Vertex AI returned no cleaned product reference image.', true);
-        }
         $details = collect(data_get($json, 'usageMetadata.candidatesTokensDetails', []));
         $cost = $this->costs->calculateBanner(
             (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
             (int) $details->filter(fn (array $detail) => strtoupper((string) ($detail['modality'] ?? '')) === 'TEXT')->sum('tokenCount'),
             (int) $details->filter(fn (array $detail) => strtoupper((string) ($detail['modality'] ?? '')) === 'IMAGE')->sum('tokenCount'),
         );
-
-        $png = $this->png($bytes);
-        if ($asset->exists) {
-            $path = dirname($asset->path).'/banner-reference-'.$asset->id.'.png';
-            Storage::disk($asset->disk)->put($path, $png);
-            $asset->forceFill(['derivatives' => [...($asset->derivatives ?? []), 'banner_reference' => $path]])->save();
+        $encoded = collect(data_get($json, 'candidates.0.content.parts', []))
+            ->map(fn (array $part) => data_get($part, 'inlineData.data'))
+            ->first(fn (mixed $data) => is_string($data));
+        $bytes = is_string($encoded) ? base64_decode($encoded, true) : false;
+        if (! is_string($bytes) || $bytes === '') {
+            // A filtered or malformed answer is still billed for its tokens.
+            $message = 'Vertex AI returned no cleaned product reference image.';
+            throw $cost > 0 ? new BannerAttemptFailed('vertex_missing_image', $message, round($cost, 6)) : new VertexAIResponseException('vertex_missing_image', $message, true);
         }
 
-        return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($png)], 'cost' => $cost];
+        return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($this->png($bytes))], 'cost' => $cost];
     }
 
     private function png(string $bytes): string
