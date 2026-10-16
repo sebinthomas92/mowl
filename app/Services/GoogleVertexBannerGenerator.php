@@ -53,8 +53,10 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         $asset = $productImages->first();
         $cutout = null;
         // With compositing, the image model draws only the scene and never sees the product; the cutout
-        // (checked against the store photo when it was made) is placed on the scene by the composer.
-        $composite = $asset && config('campaigns.banners.composite_product');
+        // (checked against the store photo when it was made) is placed on the scene by the composer. The
+        // mode follows the stored prompt, not the current setting, so a banner queued before a switch is
+        // never drawn with a product and then given a second one.
+        $composite = $asset && str_contains((string) $creative->prompt, BannerCopySelector::SCENE_MARKER);
         $checkProduct = $asset && ! $composite && config('campaigns.banners.inspect_images') && config('campaigns.banners.check_product');
         try {
             $photo = $asset && ! $composite ? $this->imagePart($asset)['inlineData'] : null;
@@ -67,6 +69,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                     $deadline->timeout($timeout),
                     // Waiters reuse the cutout another banner is making, including its two checks.
                     (int) min($timeout + 2 * (int) config('campaigns.banners.inspection_timeout_seconds') + 15, max(1, ($deadline->remaining() ?? INF) - $round)),
+                    $brand,
                 ));
                 $extraCost += $made['cost'];
                 $cutout = base64_decode($made['inlineData']['data']);

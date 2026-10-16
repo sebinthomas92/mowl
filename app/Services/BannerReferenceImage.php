@@ -39,10 +39,10 @@ class BannerReferenceImage
      *
      * @return array{inlineData: array{mimeType: string, data: string}, cost: float}
      */
-    public function for(MediaAsset $asset, string $product, int $timeoutSeconds, int $waitSeconds): array
+    public function for(MediaAsset $asset, string $product, int $timeoutSeconds, int $waitSeconds, string $brand = ''): array
     {
         if (! $asset->exists) {
-            return $this->make($asset, $product, $timeoutSeconds);
+            return $this->make($asset, $product, $timeoutSeconds, $brand);
         }
         $key = self::key($product);
         if ($cached = $this->cached($asset, $key)) {
@@ -50,11 +50,11 @@ class BannerReferenceImage
         }
 
         try {
-            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + 2 * (int) config('campaigns.banners.inspection_timeout_seconds') + self::LOCK_EXTRA_SECONDS)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds, $key) {
+            return Cache::lock('banner-reference.'.$asset->id, $timeoutSeconds + 2 * (int) config('campaigns.banners.inspection_timeout_seconds') + self::LOCK_EXTRA_SECONDS)->block(max(1, $waitSeconds), function () use ($asset, $product, $timeoutSeconds, $key, $brand) {
                 if ($cached = $this->cached($asset->refresh(), $key)) {
                     return $cached;
                 }
-                $clean = $this->make($asset, $product, $timeoutSeconds);
+                $clean = $this->make($asset, $product, $timeoutSeconds, $brand);
                 $path = dirname($asset->path).'/banner-reference-'.$asset->id.'.png';
                 // The copy is already paid for: a failed write (false, or a throw on the gcs disk) only
                 // means it is used once and not recorded.
@@ -91,7 +91,7 @@ class BannerReferenceImage
     }
 
     /** @return array{inlineData: array{mimeType: string, data: string}, cost: float} */
-    private function make(MediaAsset $asset, string $product, int $timeoutSeconds): array
+    private function make(MediaAsset $asset, string $product, int $timeoutSeconds, string $brand): array
     {
         $photo = Storage::disk($asset->disk)->get($asset->path);
         [$keyName, $keyHex] = $this->keyColour($photo);
@@ -126,7 +126,7 @@ class BannerReferenceImage
             throw $cost > 0 ? new BannerAttemptFailed('vertex_missing_image', $message, round($cost, 6), is_string($bytes) && $bytes !== '' ? $bytes : null) : new VertexAIResponseException('vertex_missing_image', $message, true);
         }
 
-        $cost += $this->check($png, $product, ['mimeType' => $asset->mime_type, 'data' => base64_encode($photo)], $cost);
+        $cost += $this->check($png, $product, $brand, ['mimeType' => $asset->mime_type, 'data' => base64_encode($photo)], $cost);
 
         return ['inlineData' => ['mimeType' => 'image/png', 'data' => base64_encode($png)], 'cost' => $cost];
     }
@@ -137,25 +137,25 @@ class BannerReferenceImage
      *
      * @param  array{mimeType: string, data: string}  $photo
      */
-    private function check(string $png, string $product, array $photo, float $spent): float
+    private function check(string $png, string $product, string $brand, array $photo, float $spent): float
     {
-        if (! config('campaigns.banners.inspect_images') || ! config('campaigns.banners.check_product')) {
+        if (! config('campaigns.banners.inspect_images')) {
             return 0.0;
         }
         $model = (string) config('campaigns.google.model');
         $cost = 0.0;
         try {
-            $marks = $this->inspector->inspect($png, 'image/png', $product, '');
+            $marks = $this->inspector->inspect($png, 'image/png', $product, $brand);
             $cost += $this->costs->calculate($model, $marks['input_tokens'], 0, $marks['output_tokens']);
             if ($marks['marks'] !== []) {
                 throw new BannerAttemptFailed('banner_reference_rejected', 'The product cutout showed third-party text or marks: '.mb_substr(implode(', ', $marks['marks']), 0, 300), round($spent + $cost, 6), $png);
             }
-            $match = $this->inspector->matchesProduct($png, 'image/png', $product, $photo);
-            $cost += $this->costs->calculate($model, $match['input_tokens'], 0, $match['output_tokens']);
+            $match = config('campaigns.banners.check_product') ? $this->inspector->matchesProduct($png, 'image/png', $product, $photo) : null;
+            $cost += $match ? $this->costs->calculate($model, $match['input_tokens'], 0, $match['output_tokens']) : 0.0;
         } catch (VertexAIResponseException $exception) {
             throw new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), round($spent + $cost, 6));
         }
-        if (! $match['matches']) {
+        if ($match && ! $match['matches']) {
             throw new BannerAttemptFailed('banner_product_mismatch', 'The product cutout did not match the store photo: '.mb_substr($match['differences'], 0, 300), round($spent + $cost, 6), $png);
         }
 
@@ -174,6 +174,7 @@ class BannerReferenceImage
         if (! $image) {
             return ['green', '#00FF00'];
         }
+        imagepalettetotruecolor($image);
         $small = imagescale($image, 64);
         imagedestroy($image);
         [$green, $magenta] = [0, 0];
@@ -207,6 +208,8 @@ class BannerReferenceImage
         if (! $image) {
             return null;
         }
+        // imagecolorat() returns palette indexes, not colours, for an indexed PNG.
+        imagepalettetotruecolor($image);
         $width = imagesx($image);
         $height = imagesy($image);
         $out = imagecreatetruecolor($width, $height);
@@ -218,10 +221,11 @@ class BannerReferenceImage
                 $c = imagecolorat($image, $x, $y);
                 [$r, $g, $b] = [($c >> 16) & 255, ($c >> 8) & 255, $c & 255];
                 $strength = self::keyStrength($key, $r, $g, $b);
-                // Despill: the key colour reflected onto the product's edges is pulled back to neutral.
-                if ($key === 'green') {
+                // Despill: the key colour reflected onto the product's edges is pulled back to neutral. Only
+                // pixels partly classed as key are touched, so the product's own greens or purples stay exact.
+                if ($strength > 0.0 && $key === 'green') {
                     $g = min($g, max($r, $b));
-                } elseif (($spill = min($r, $b) - $g) > 0) {
+                } elseif ($strength > 0.0 && ($spill = min($r, $b) - $g) > 0) {
                     [$r, $b] = [$r - $spill, $b - $spill];
                 }
                 $alpha = (int) round($strength * 127);

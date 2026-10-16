@@ -70,6 +70,20 @@ class BannerComposerTest extends TestCase
         $this->assertNull($references->cutout('not-an-image'));
     }
 
+    public function test_a_palette_image_is_keyed_by_colour_and_the_products_own_green_is_kept(): void
+    {
+        $keyed = imagecreate(40, 40);
+        imagecolorallocate($keyed, 0, 255, 0);
+        imagefilledrectangle($keyed, 10, 10, 29, 29, imagecolorallocate($keyed, 120, 150, 110));
+        ob_start();
+        imagepng($keyed);
+        $cutout = imagecreatefromstring((string) app(BannerReferenceImage::class)->cutout((string) ob_get_clean()));
+
+        $this->assertSame([20, 20], [imagesx($cutout), imagesy($cutout)]);
+        $pixel = imagecolorat($cutout, 10, 10);
+        $this->assertSame([0, 120, 150, 110], [($pixel >> 24) & 127, ($pixel >> 16) & 255, ($pixel >> 8) & 255, $pixel & 255]);
+    }
+
     private function image(int $width, int $height, array $rgb): string
     {
         $image = imagecreatetruecolor($width, $height);

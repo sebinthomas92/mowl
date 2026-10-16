@@ -6,6 +6,9 @@ use App\Models\CampaignPackVersion;
 
 class BannerCopySelector
 {
+    /** Every scene-only prompt carries this, so a stored prompt says which way its banner is rendered. */
+    public const SCENE_MARKER = 'will be placed into this photo afterwards';
+
     /** @var (\Closure(string): bool)|null */
     private ?\Closure $usable = null;
 
@@ -133,7 +136,7 @@ class BannerCopySelector
         };
 
         return trim("Create one premium, photorealistic vertical 4:5 product-photography scene for an ad for {$product}. Brand context: {$brand}; use it only for palette and mood. Direction: {$direction['label']}. Approved benefit context: {$benefit}. Approved audience context: {$audience}. "
-            ."The product itself will be placed into this photo afterwards from its real studio photo, so do NOT show {$product} or anything resembling it anywhere. "
+            .'The product itself '.self::SCENE_MARKER." from its real studio photo, so do NOT show {$product} or anything resembling it anywhere. "
             ."Leave a clear, empty resting spot {$spot}, sized for an object about 40% of the image width, with soft, even, slightly frontal studio light and a camera at a slight high angle, so a placed product looks natural there. "
             ."{$quiet} The quiet area must be a natural, softly lit continuation of the same scene: no flat colour block, no split-screen and no hard vertical or horizontal boundary. Keep the bottom-right corner simple for a small brand mark. "
             .'Keep the set minimal: a surface, a backdrop and at most one or two small, plain, out-of-focus props away from the resting spot. '
