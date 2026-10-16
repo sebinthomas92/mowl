@@ -256,7 +256,7 @@ class ProductPageFetcher
         return $this->cleanImageUrls($candidates, $resolvedUrl);
     }
 
-    /** Product structured data images, then the full-size photos of a WooCommerce product gallery. */
+    /** Product structured data images, then the full-size photos of the store's product gallery. */
     private function galleryImageUrls(DOMXPath $xpath, array $productData, string $resolvedUrl): array
     {
         $candidates = [];
@@ -268,6 +268,10 @@ class ProductPageFetcher
             if ($source) {
                 $candidates[] = $source;
             }
+        }
+        // Custom store themes mark their gallery's full-size photo on the thumbnail (data-full-src).
+        foreach ($xpath->query('//*[@data-full-src or @data-large_image]') as $node) {
+            $candidates[] = $node->getAttribute('data-full-src') ?: $node->getAttribute('data-large_image');
         }
 
         return $this->cleanImageUrls($candidates, $resolvedUrl);

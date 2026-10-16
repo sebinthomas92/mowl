@@ -42,6 +42,7 @@ HTML;
 <div data-thumb="/wp-content/uploads/stand-1-100x100.jpg" class="woocommerce-product-gallery__image"><a href="/wp-content/uploads/stand-1.jpg"><img src="/wp-content/uploads/stand-1-600x600.jpg" data-large_image="/wp-content/uploads/stand-1.jpg"></a></div>
 <div data-thumb="/wp-content/uploads/studio-100x100.jpg" class="woocommerce-product-gallery__image"><a href="/wp-content/uploads/studio.jpg"><img src="/wp-content/uploads/studio-600x600.jpg"></a></div>
 </div>
+<div class="pdp-gallery__thumbs"><button class="pdp-gallery__thumb" data-idx="2" data-full-src="/wp-content/uploads/set-1.jpg"><img src="https://cdn.example/set-1-300x300.jpg"></button></div>
 <section class="related products"><img src="/wp-content/uploads/other-product.jpg"></section>
 </body></html>
 HTML;
@@ -52,12 +53,14 @@ HTML;
         $this->assertSame([
             'https://93.184.216.34/wp-content/uploads/stand-1.jpg',
             'https://93.184.216.34/wp-content/uploads/studio.jpg',
+            'https://93.184.216.34/wp-content/uploads/set-1.jpg',
         ], $page['gallery_images']);
         $this->assertSame([
             'https://93.184.216.34/wp-content/uploads/stand-1.jpg',
             'https://93.184.216.34/wp-content/uploads/studio.jpg',
+            'https://93.184.216.34/wp-content/uploads/set-1.jpg',
             'https://93.184.216.34/wp-content/uploads/styled-scene.webp',
-        ], array_slice($page['images'], 0, 3));
+        ], array_slice($page['images'], 0, 4));
     }
 
     public function test_it_downloads_and_validates_a_product_image(): void
