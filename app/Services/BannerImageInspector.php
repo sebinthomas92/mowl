@@ -70,7 +70,7 @@ class BannerImageInspector
     public function matchesProduct(string $imageBytes, string $mimeType, string $product, array $photo): array
     {
         $prompt = "The first image is an advertising picture. The second image is the store's own photo of the product \"{$product}\". "
-            .'In the second image, books, magazines, phones, tablets, e-readers, plants, cups, hands and any other items on, in or around the product are props, not the product. '
+            .'In the second image, any item on, in or around the product (a book, magazine, phone, tablet, e-reader, plant, cup or hand) is a prop, not the product, unless that item is itself the named product. '
             .'Does the first image show the same product: the same kind of object, shape, proportions, material, surface finish and colour? '
             .'A different kind of object does not match, even if it has a similar outline: for example a real paper book with pages is not a sculpted or moulded stand shaped like a book. '
             .'Ignore the background, lighting, camera angle and props in both images. '
@@ -95,14 +95,14 @@ class BannerImageInspector
 
         $json = $response->json();
         $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
-        if (! is_array($decoded) || ! is_bool($decoded['matches'] ?? null)) {
+        if (! is_array($decoded) || ! is_bool($decoded['matches'] ?? null) || ! is_bool($decoded['split'] ?? null)) {
             throw new VertexAIResponseException('vertex_invalid_inspection', 'Vertex AI returned no product match check.', true);
         }
 
         return [
             'matches' => $decoded['matches'],
             'differences' => trim((string) ($decoded['differences'] ?? '')),
-            'split' => ($decoded['split'] ?? false) === true,
+            'split' => $decoded['split'],
             'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
             'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0),
         ];

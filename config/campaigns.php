@@ -57,7 +57,8 @@ return [
         // An inspection normally answers in seconds; a stalled one must not eat the attempt's budget.
         'inspection_timeout_seconds' => 30,
         // Each background is also compared with the store's product photo, and redrawn if it shows a
-        // different object (pack 20 drew a paper book in place of a book-shaped stand).
+        // different object (pack 20 drew a paper book in place of a book-shaped stand). It runs only
+        // while inspect_images is on, which switches every image check off together.
         'check_product' => env('BANNER_PRODUCT_CHECK', true),
         // One banner attempt (generations plus inspections) stays under the 180s queue worker timeout;
         // a new round starts only with enough time left for a generation and an inspection.

@@ -68,7 +68,12 @@ class BannerReferenceImage
     /** Drops a stored copy that produced the wrong product, so the next attempt makes a new one. */
     public function forget(MediaAsset $asset): void
     {
-        if (! $asset->exists || data_get($asset->derivatives, 'banner_reference') === null) {
+        if (! $asset->exists) {
+            return;
+        }
+        // Another banner may have stored a new copy or other derivatives since this job loaded the asset.
+        $asset->refresh();
+        if (data_get($asset->derivatives, 'banner_reference') === null) {
             return;
         }
         $derivatives = $asset->derivatives;
