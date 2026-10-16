@@ -54,11 +54,12 @@ class ProductPhotoCutout
     private const SHADOW_TINT_SLOPE = 0.12;
 
     /**
-     * Gaps at most this share of the photo's width, with product on both sides of the row and further
-     * from the backdrop colour than its border, are product: the Kindle Stand's page fold is lit to
-     * within the beige backdrop's tolerance and opens onto it through the V above the spine.
+     * Gaps at most this share of the photo's width, with product on both sides of the row and below,
+     * and further from the backdrop colour than its border, are product: the Kindle Stand's page fold
+     * (25-35 px wide at 1000 px) is lit to within the beige backdrop's tolerance and opens onto it
+     * through the V above the spine.
      */
-    private const NOTCH_WIDTH = 0.05;
+    private const NOTCH_WIDTH = 0.04;
 
     /** A product may touch the frame along at most this share of its own extent on that side. */
     private const MAX_EDGE_CONTACT = 0.05;
@@ -333,32 +334,55 @@ class ProductPhotoCutout
         unset($outside);
 
         // A narrow backdrop-coloured gap with product on both sides of the row (a lit page gutter
-        // that opens at the top) is product too.
+        // that opens at the top) is product too, as long as product closes it from below: rows are
+        // filled bottom-up, so a fold below a V-shaped opening fills while the V, wider than a gap
+        // once it opens up and seen through from above, stays clear, with any specks floating in it.
+        // Thin slits between pages, too wide for a row to span, are first filled the same way along
+        // columns (up to a fifth of that height), so they do not cut the fold off from what holds it.
         $notch = (int) round(self::NOTCH_WIDTH * $width);
-        for ($y = 0; $y < $height; $y++) {
-            $last = -1;
-            for ($x = 0; $x < $width; $x++) {
-                $index = $y * $width + $x;
-                if ($mask[$index] === "\1") {
-                    continue;
-                }
-                if ($last >= 0 && $x - $last - 1 > 0 && $x - $last - 1 <= $notch) {
-                    $open = false;
-                    $sum = 0;
-                    for ($gap = $last + 1; $gap < $x; $gap++) {
-                        $open = $open || $openings[$y * $width + $gap] === "\1";
-                        $sum += ord($near[$y * $width + $gap]);
+        $fill = function (int $length, \Closure $at, int $lines, int $widest, \Closure $supported) use (&$mask, $openings, $near, $typical): void {
+            for ($line = $lines - 1; $line >= 0; $line--) {
+                $last = -1;
+                for ($step = 0; $step < $length; $step++) {
+                    if ($mask[$at($line, $step)] === "\1") {
+                        continue;
                     }
-                    // A gap as close to the backdrop as the border is a real slot, not a lit gutter.
-                    if (! $open && $sum / ($x - $last - 1) > $typical + self::HOLE_MATCH) {
-                        for ($gap = $last + 1; $gap < $x; $gap++) {
-                            $mask[$y * $width + $gap] = "\0";
+                    $gap = $step - $last - 1;
+                    if ($last >= 0 && $gap > 0 && $gap <= $widest) {
+                        $open = false;
+                        $sum = 0;
+                        $held = 0;
+                        for ($run = $last + 1; $run < $step; $run++) {
+                            $index = $at($line, $run);
+                            $open = $open || $openings[$index] === "\1";
+                            $sum += ord($near[$index]);
+                            $held += $supported($mask, $line, $run) ? 1 : 0;
+                        }
+                        // A gap as close to the backdrop as the border is a real slot, not a lit gutter.
+                        if (! $open && $held >= 0.9 * $gap && $sum / $gap > $typical + self::HOLE_MATCH) {
+                            for ($run = $last + 1; $run < $step; $run++) {
+                                $mask[$at($line, $run)] = "\0";
+                            }
                         }
                     }
+                    $last = $step;
                 }
-                $last = $x;
             }
-        }
+        };
+        $fill(
+            $height,
+            fn (int $x, int $y) => $y * $width + $x,
+            $width,
+            max(4, intdiv($notch, 5)),
+            fn () => true,
+        );
+        $fill(
+            $width,
+            fn (int $y, int $x) => $y * $width + $x,
+            $height,
+            $notch,
+            fn (string $mask, int $y, int $x) => $y < $height - 1 && $mask[($y + 1) * $width + $x] === "\0",
+        );
         unset($openings);
 
         // Single-pixel spurs on the outline are JPEG ringing, not product.

@@ -339,6 +339,38 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertSame(127, (imagecolorat($cutout, (228 - 120) * 2 + 1, (150 - 100) * 2) >> 24) & 127);
     }
 
+    public function test_a_lit_fold_below_a_v_fills_while_the_v_and_specks_in_it_stay_clear(): void
+    {
+        // The Kindle Stand's open book seen from the front: a V between the page tops runs down into
+        // a fold lit to within the backdrop tolerance, with thin lit slits along the page edges.
+        $image = self::backdrop();
+        imagefilledrectangle($image, 100, 300, 300, 330, imagecolorallocate($image, 214, 72, 38));
+        imagefilledrectangle($image, 110, 150, 290, 299, imagecolorallocate($image, 250, 250, 250));
+        $lit = imagecolorallocate($image, 230, 222, 208);
+        for ($y = 150; $y <= 200; $y++) {
+            $half = (int) round(30 - 28 * ($y - 150) / 50);
+            imageline($image, 200 - $half, $y, 200 + $half, $y, $lit);
+        }
+        // A speck floating in the V.
+        imagefilledrectangle($image, 182, 158, 184, 160, imagecolorallocate($image, 250, 250, 250));
+        imagefilledrectangle($image, 198, 200, 202, 270, $lit);
+        imagefilledrectangle($image, 140, 255, 202, 256, $lit);
+
+        $cutter = new ProductPhotoCutout;
+        $png = $cutter->cut(self::encode($image));
+
+        $this->assertNotNull($png, (string) $cutter->reason);
+        $cutout = imagecreatefromstring($png);
+        $at = fn (int $x, int $y) => (imagecolorat($cutout, ($x - 100) * 2, ($y - 150) * 2) >> 24) & 127;
+        $this->assertSame(127, $at(200, 160), 'V');
+        // Where the V narrows to a little wider than the fold, it is still the V.
+        $this->assertSame(127, $at(200, 188), 'V near the fold');
+        $this->assertSame(127, $at(178, 159), 'beside the speck');
+        $this->assertSame(0, $at(200, 230), 'fold');
+        $this->assertSame(0, $at(200, 205), 'fold top');
+        $this->assertSame(0, $at(160, 255), 'slit');
+    }
+
     public function test_a_corner_grazing_the_frame_is_kept_but_a_cropped_side_is_not(): void
     {
         $graze = self::backdrop();
