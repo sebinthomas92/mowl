@@ -144,6 +144,8 @@ class BannerImageInspector
         if (! $image) {
             return [$mimeType, $bytes];
         }
+        // An indexed PNG's pixels are palette indexes, not colours with their alpha.
+        imagepalettetotruecolor($image);
         $width = imagesx($image);
         if ($width > 768) {
             $scaled = imagescale($image, 768);
