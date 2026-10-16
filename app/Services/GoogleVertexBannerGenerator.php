@@ -52,10 +52,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         $asset = $productImages->first();
         try {
             $clean = $asset && config('campaigns.banners.clean_reference');
-            // The inspector always judges against the real photo, never the AI-made copy, so a mark the
-            // copy invented is not mistaken for one printed on the product.
-            $original = $asset && (! $clean || config('campaigns.banners.inspect_images')) ? $this->imagePart($asset)['inlineData'] : null;
-            $reference = $original;
+            $reference = $asset && ! $clean ? $this->imagePart($asset)['inlineData'] : null;
             if ($clean) {
                 $round = (int) config('campaigns.banners.min_round_seconds');
                 $timeout = (int) config('campaigns.banners.reference_timeout_seconds');
@@ -86,7 +83,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                 if (! config('campaigns.banners.inspect_images')) {
                     return $this->result($result, $usage, $extraCost);
                 }
-                $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand, $original));
+                $inspection = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS + 10, fn () => $this->inspector->inspect($result->imageBytes, $result->mimeType, $product, $brand), retryHang: true);
             } catch (VertexAIResponseException $exception) {
                 throw $this->withSpend($exception, $usage, $extraCost);
             }
@@ -97,7 +94,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             }
         }
 
-        throw new BannerAttemptFailed('banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300), $this->spent($usage, $extraCost));
+        throw new BannerAttemptFailed('banner_third_party_text', 'Every generated background showed readable third-party text or marks: '.mb_substr(implode(', ', $marks), 0, 300), $this->spent($usage, $extraCost), $result->imageBytes ?? null);
     }
 
     private function result(BannerGenerationResult $result, array $usage, float $extraCost): BannerGenerationResult
@@ -128,13 +125,19 @@ class GoogleVertexBannerGenerator implements BannerGenerator
      * Vertex answers 429 when the project's per-minute quota is used up. Retrying at once only burns
      * the job's attempts, so the call waits and tries again while the deadline still leaves $reserveSeconds after the wait.
      */
-    private function rateLimited(GenerationDeadline $deadline, int $reserveSeconds, callable $call): mixed
+    private function rateLimited(GenerationDeadline $deadline, int $reserveSeconds, callable $call, bool $retryHang = false): mixed
     {
         foreach ([...config('campaigns.banners.rate_limit_backoff_seconds'), null] as $wait) {
             try {
                 return $call();
             } catch (VertexAIResponseException $exception) {
                 $remaining = $deadline->remaining() ?? INF;
+                // A text call that hung with no answer (cURL 28, 0 bytes) is retried once at once; it was not billed.
+                if ($retryHang && $exception->errorCode === 'vertex_connection_error' && $remaining >= $reserveSeconds) {
+                    $retryHang = false;
+
+                    continue;
+                }
                 if ($exception->errorCode !== 'vertex_http_429' || $wait === null || $remaining - $wait < $reserveSeconds) {
                     throw $exception;
                 }

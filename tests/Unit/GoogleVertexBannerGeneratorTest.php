@@ -10,6 +10,7 @@ use App\Services\BannerReferenceImage;
 use App\Services\GoogleVertexBannerGenerator;
 use App\Services\ProviderCostCalculator;
 use App\Support\GenerationDeadline;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -63,11 +64,10 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             && $request['generationConfig']['imageConfig'] === ['aspectRatio' => '4:5', 'imageSize' => '1K']
             && count($request['contents'][0]['parts']) === 2
             && $request['contents'][0]['parts'][1]['inlineData']['data'] === base64_encode('product-bytes'));
-        // The inspector sees the real product photo, so text printed on the product itself is not a mark.
+        // The inspector sees only the generated image: given the product photo too, it listed the photo's props.
         Http::assertSent(fn (Request $request): bool => str_contains($request->url(), '/models/gemini-3.5-flash:generateContent')
-            && count($request['contents'][0]['parts']) === 3
-            && $request['contents'][0]['parts'][1]['inlineData']['data'] === $generated
-            && $request['contents'][0]['parts'][2]['inlineData']['data'] === base64_encode('product-bytes'));
+            && count($request['contents'][0]['parts']) === 2
+            && $request['contents'][0]['parts'][1]['inlineData']['data'] === $generated);
     }
 
     public function test_a_background_with_a_real_book_cover_is_regenerated_and_every_attempt_is_costed(): void
@@ -252,8 +252,7 @@ class GoogleVertexBannerGeneratorTest extends TestCase
         $this->assertStringContainsString('/models/gemini-3.1-flash-image:generateContent', $vertex[1]->url());
         $this->assertSame($clean, $vertex[1]['contents'][0]['parts'][1]['inlineData']['data']);
         $this->assertStringContainsString('/models/gemini-3.5-flash:generateContent', $vertex[2]->url());
-        // The inspection is judged against the real photo, not the AI-made copy.
-        $this->assertSame(base64_encode('product-bytes'), $vertex[2]['contents'][0]['parts'][2]['inlineData']['data']);
+        $this->assertCount(2, $vertex[2]['contents'][0]['parts']);
     }
 
     public function test_a_stored_clean_reference_is_reused_without_another_cleanup_call(): void
@@ -386,6 +385,48 @@ class GoogleVertexBannerGeneratorTest extends TestCase
             app(GenerationDeadline::class)->clear();
         }
         Http::assertNothingSent();
+    }
+
+    public function test_an_inspection_that_hangs_is_retried_once_and_large_backgrounds_are_shrunk(): void
+    {
+        Storage::fake('local');
+        Storage::disk('local')->put('product.png', 'product-bytes');
+        $this->configureGoogle();
+        request()->headers->set('x-vercel-oidc-token', 'vercel-production-jwt');
+        $inspections = 0;
+        $big = imagecreatetruecolor(1024, 1280);
+        ob_start();
+        imagepng($big);
+        $bigPng = (string) ob_get_clean();
+        Http::fake([
+            'oidc.vercel.com/~token' => Http::response(['token' => 'vercel-google-audience-jwt']),
+            'sts.googleapis.com/v1/token' => Http::response(['access_token' => 'federated-token', 'expires_in' => 3600]),
+            'iamcredentials.googleapis.com/*' => Http::response(['accessToken' => 'google-access-token', 'expireTime' => now()->addHour()->toIso8601String()]),
+            'aiplatform.googleapis.com/*' => function (Request $request) use (&$inspections, $bigPng) {
+                if (! str_contains($request->url(), 'gemini-3.5-flash:')) {
+                    return Http::response(self::image($bigPng));
+                }
+                if (++$inspections === 1) {
+                    throw new ConnectionException('cURL error 28: Operation timed out after 30002 milliseconds with 0 bytes received');
+                }
+
+                return Http::response(self::inspection([]));
+            },
+        ]);
+        $asset = new MediaAsset(['disk' => 'local', 'path' => 'product.png', 'mime_type' => 'image/png']);
+
+        $result = app(GoogleVertexBannerGenerator::class)->generate(new BannerCreative(['prompt' => 'No text or logos.']), collect([$asset]));
+
+        $this->assertSame($bigPng, $result->imageBytes);
+        $this->assertSame(2, $inspections);
+        Http::assertSent(function (Request $request): bool {
+            if (! str_contains($request->url(), 'gemini-3.5-flash:')) {
+                return false;
+            }
+            $part = $request['contents'][0]['parts'][1]['inlineData'];
+
+            return $part['mimeType'] === 'image/jpeg' && imagesx(imagecreatefromstring(base64_decode($part['data']))) === 768;
+        });
     }
 
     private static function png(?string $bytes = null): string

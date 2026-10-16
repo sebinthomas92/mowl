@@ -326,7 +326,7 @@ class BannerStudioTest extends TestCase
             public function generate(BannerCreative $creative, Collection $productImages): BannerGenerationResult
             {
                 if (++$this->calls === 1) {
-                    throw new BannerAttemptFailed('banner_third_party_text', 'Every generated background showed readable third-party text or marks: The Hobbit', 0.15);
+                    throw new BannerAttemptFailed('banner_third_party_text', 'Every generated background showed readable third-party text or marks: The Hobbit', 0.15, 'rejected-bytes');
                 }
                 $result = $this->mock->generate($creative, $productImages);
 
@@ -342,6 +342,10 @@ class BannerStudioTest extends TestCase
         $this->assertSame('retrying', $creative->fresh()->status);
         $this->assertSame('banner_third_party_text', $creative->fresh()->error_code);
         $this->assertEqualsWithDelta(0.15, (float) $creative->fresh()->estimated_cost, 0.000001);
+        // The rejected background is kept for checking by eye and named in the error.
+        $this->assertMatchesRegularExpression('/rejected background: (\S+rejected-1\.png)/', (string) $creative->fresh()->error_message);
+        preg_match('/rejected background: (\S+\.png)/', (string) $creative->fresh()->error_message, $match);
+        $this->assertSame('rejected-bytes', Storage::disk($creative->disk)->get($match[1]));
 
         app(BannerJobRunner::class)->run($creative->fresh());
 
