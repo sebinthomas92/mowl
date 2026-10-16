@@ -12,7 +12,7 @@ class GoogleVertexAIClient
 {
     public function __construct(private GoogleCloudAccessTokenProvider $tokens) {}
 
-    public function generateContent(array $payload, ?string $model = null): array
+    public function generateContent(array $payload, ?string $model = null, ?int $timeoutSeconds = null): array
     {
         $model ??= config('campaigns.google.model');
         $startedAt = hrtime(true);
@@ -23,7 +23,7 @@ class GoogleVertexAIClient
                 // Bodies over 1MB (a generated banner sent for inspection) made curl send
                 // "Expect: 100-continue", which came back as HTTP 417.
                 ->withOptions(['expect' => false])
-                ->timeout(app(GenerationDeadline::class)->timeout(config('campaigns.google.timeout_seconds')))
+                ->timeout(app(GenerationDeadline::class)->timeout($timeoutSeconds ?? config('campaigns.google.timeout_seconds')))
                 ->post($this->endpoint($model), $payload);
         } catch (ConnectionException $exception) {
             throw new VertexAIResponseException('vertex_connection_error', 'Vertex AI connection failed: '.$exception->getMessage(), true);
