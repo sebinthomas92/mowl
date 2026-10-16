@@ -7,6 +7,7 @@ use App\Services\BannerJobRunner;
 use App\Support\GenerationDeadline;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Sleep;
 use Throwable;
 
 class BannerGenerationController extends Controller
@@ -37,6 +38,16 @@ class BannerGenerationController extends Controller
     {
         if (! in_array($creative->status, ['queued', 'retrying'])) {
             return response()->json(['status' => $creative->status], 202);
+        }
+
+        // A retry right after a failure (often a Vertex 429) would hit the same limit, so it waits out
+        // the rest of the pause here. The page re-runs the banner as soon as the last attempt returns,
+        // and a timer in the page did not survive its 3-second polling.
+        if ($creative->status === 'retrying') {
+            $wait = (int) config('campaigns.banners.retry_pause_seconds') - (int) $creative->updated_at->diffInSeconds(now(), true);
+            if ($wait > 0) {
+                Sleep::for($wait)->seconds();
+            }
         }
 
         app(GenerationDeadline::class)->start(config('campaigns.request_budget_seconds'));

@@ -60,6 +60,8 @@ return [
         'min_round_seconds' => 70,
         // Waits before retrying a call Vertex rejected with 429 (per-minute quota), inside the time budget.
         'rate_limit_backoff_seconds' => [10, 25, 45],
+        // Pause before a failed banner is re-run from the pack page (inside Vercel's 300s with the 240s budget).
+        'retry_pause_seconds' => 30,
         'disk' => env('BANNER_STORAGE_DISK', env('CAMPAIGN_MEDIA_DISK', 'local')),
         'prices_per_million' => [
             'input' => 0.50,
