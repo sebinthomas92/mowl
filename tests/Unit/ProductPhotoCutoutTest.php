@@ -384,6 +384,14 @@ class ProductPhotoCutoutTest extends TestCase
         $cutter = new ProductPhotoCutout;
         $this->assertNull($cutter->cut(self::encode($cropped)));
         $this->assertSame('product cropped by the photo edge', $cutter->reason);
+
+        // A thin cable cut off by the frame halfway along the product's side touches little of it.
+        $cable = self::backdrop();
+        imagefilledrectangle($cable, 100, 150, 340, 260, imagecolorallocate($cable, 214, 72, 38));
+        imagefilledrectangle($cable, 341, 204, 399, 205, imagecolorallocate($cable, 30, 30, 30));
+        $cutter = new ProductPhotoCutout;
+        $this->assertNull($cutter->cut(self::encode($cable)));
+        $this->assertSame('product cropped by the photo edge', $cutter->reason);
     }
 
     /** A low white stand with page lines on a red-orange base, on a cream backdrop with a soft shadow. */

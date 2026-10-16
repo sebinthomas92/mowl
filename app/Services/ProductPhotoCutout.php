@@ -36,7 +36,7 @@ class ProductPhotoCutout
     /** How much further from the backdrop colour than the border's typical pixel an opening may be. */
     private const HOLE_MATCH = 4.0;
 
-    /** An opening is at least this wide on average; a thinner backdrop-coloured sliver is a lit gutter or crest. */
+    /** An opening is at least this wide on average (at MAX_SIDE); a thinner backdrop-coloured sliver is a lit gutter or crest. */
     private const HOLE_WIDTH = 6;
 
     /** Below this opacity an edge pixel's colour is too little product to recover reliably. */
@@ -63,6 +63,9 @@ class ProductPhotoCutout
 
     /** A product may touch the frame along at most this share of its own extent on that side. */
     private const MAX_EDGE_CONTACT = 0.05;
+
+    /** Frame contact must lie within this share of the product's extent from either end of that side. */
+    private const CORNER_SHARE = 0.25;
 
     /** More separate pieces than this is speckle or a busy scene, not one product on a backdrop. */
     private const MAX_PIECES = 2000;
@@ -230,6 +233,8 @@ class ProductPhotoCutout
         $seen = $mask;
         $openings = str_repeat("\0", $count);
         $hole = max(self::HOLE_PIXELS, (int) round(0.0002 * $count));
+        // Measured at MAX_SIDE; a smaller photo's openings are proportionally thinner.
+        $holeWidth = max(2.0, self::HOLE_WIDTH * max($width, $height) / self::MAX_SIDE);
         for ($start = 0; $start < $count; $start++) {
             if ($seen[$start] !== "\0" || ord($near[$start]) > $tolerance) {
                 continue;
@@ -253,7 +258,7 @@ class ProductPhotoCutout
                 }
             }
             $long = max($box[2] - $box[0], $box[3] - $box[1]) + 1;
-            if (count($patch) >= $hole && count($patch) / $long >= self::HOLE_WIDTH && $sum / count($patch) <= $typical + self::HOLE_MATCH) {
+            if (count($patch) >= $hole && count($patch) / $long >= $holeWidth && $sum / count($patch) <= $typical + self::HOLE_MATCH) {
                 foreach ($patch as $index) {
                     $mask[$index] = "\1";
                     $openings[$index] = "\1";
@@ -556,7 +561,8 @@ class ProductPhotoCutout
         }
         [$left, $top, $right, $bottom] = $mainBox;
         // A product touching the frame was cropped by the photographer, so it cannot be shown whole;
-        // only a corner grazing the edge over a small share of the product's own extent is allowed.
+        // only a corner grazing the edge over a small share of the product's own extent, near either end
+        // of that side, is allowed.
         foreach (['left' => $left === 0, 'top' => $top === 0, 'right' => $right === $width - 1, 'bottom' => $bottom === $height - 1] as $side => $touches) {
             if (! $touches) {
                 continue;
@@ -568,11 +574,18 @@ class ProductPhotoCutout
                 'bottom' => $height - 1,
             };
             $contact = 0;
-            for ($at = 0, $length = $vertical ? $height : $width; $at < $length; $at++) {
-                $contact += $labels[$vertical ? $at * $width + $line : $line * $width + $at] === $main ? 1 : 0;
-            }
             $extent = $vertical ? $bottom - $top + 1 : $right - $left + 1;
-            if ($contact > self::MAX_EDGE_CONTACT * $extent) {
+            [$from, $to] = $vertical ? [$top, $bottom] : [$left, $right];
+            $corner = self::MAX_EDGE_CONTACT * $extent;
+            $midway = false;
+            for ($at = 0, $length = $vertical ? $height : $width; $at < $length; $at++) {
+                if ($labels[$vertical ? $at * $width + $line : $line * $width + $at] === $main) {
+                    $contact++;
+                    // A thin part (a cable, an antenna) cut off mid-side touches little of the frame.
+                    $midway = $midway || min($at - $from, $to - $at) > self::CORNER_SHARE * $extent;
+                }
+            }
+            if ($midway || $contact > $corner) {
                 $this->reason = 'product cropped by the photo edge';
 
                 return [null, [0, 0, 0, 0]];
