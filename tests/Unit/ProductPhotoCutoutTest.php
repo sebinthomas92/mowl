@@ -439,6 +439,37 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertSame(0, (imagecolorat($cutout, (200 - 110) * 2, (250 - 150) * 2) >> 24) & 127, 'green button kept');
     }
 
+    public function test_a_shaded_recess_the_matte_painted_over_stays_product_while_a_real_opening_stays_clear(): void
+    {
+        // Pages over a red base, with a dark recess between them open to the left (closed at the back),
+        // and a real gap through the product on the right where the backdrop shows.
+        $image = self::backdrop();
+        imagefilledrectangle($image, 100, 300, 300, 330, imagecolorallocate($image, 214, 72, 38));
+        imagefilledrectangle($image, 110, 150, 290, 287, imagecolorallocate($image, 250, 250, 250));
+        imagefilledrectangle($image, 110, 288, 200, 299, imagecolorallocate($image, 110, 100, 92));
+        imagefilledrectangle($image, 201, 288, 290, 299, imagecolorallocate($image, 250, 250, 250));
+        imagefilledrectangle($image, 240, 200, 260, 299, imagecolorat($image, 5, 250));
+        // The matte keys both: the recess as if it were a gap too.
+        $matte = imagecreatetruecolor(400, 400);
+        imagefill($matte, 0, 0, imagecolorallocate($matte, 0, 255, 0));
+        imagefilledrectangle($matte, 100, 300, 300, 330, imagecolorallocate($matte, 200, 80, 50));
+        imagefilledrectangle($matte, 110, 150, 290, 287, imagecolorallocate($matte, 128, 128, 128));
+        imagefilledrectangle($matte, 201, 288, 290, 299, imagecolorallocate($matte, 128, 128, 128));
+        imagefilledrectangle($matte, 240, 200, 260, 299, imagecolorallocate($matte, 0, 255, 0));
+        $cutter = new ProductPhotoCutout;
+        $cutter->cut(self::encode($image));
+        $this->assertNotNull($cutter->prepared, (string) $cutter->reason);
+
+        $png = $cutter->cut($cutter->prepared, self::encode($matte), 'green');
+
+        $this->assertNotNull($png, (string) $cutter->reason);
+        $cutout = imagecreatefromstring($png);
+        $recess = imagecolorat($cutout, (150 - 100) * 2, (294 - 150) * 2);
+        $this->assertSame(0, ($recess >> 24) & 127, 'the recess stays solid');
+        $this->assertSame(110, ($recess >> 16) & 255, 'with the photo\'s own shading');
+        $this->assertSame(127, (imagecolorat($cutout, (250 - 100) * 2, (240 - 150) * 2) >> 24) & 127, 'the real gap stays clear');
+    }
+
     public function test_a_matte_that_moved_the_product_or_changed_the_shape_is_not_used(): void
     {
         [$photo, $matte] = self::collared();
