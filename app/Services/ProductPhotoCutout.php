@@ -39,6 +39,12 @@ class ProductPhotoCutout
     /** An opening is at least this wide on average (at MAX_SIDE); a thinner backdrop-coloured sliver is a lit gutter or crest. */
     private const HOLE_WIDTH = 6;
 
+    /** Matte-keyed pixels inside the product at least this far from the backdrop are a shaded recess. */
+    private const MIN_RECESS_DISTANCE = 40;
+
+    /** A keyed area between product where more than this share is backdrop-coloured is a real opening. */
+    private const MAX_RECESS_BACKDROP = 0.05;
+
     /** Below this opacity an edge pixel's colour is too little product to recover reliably. */
     private const MIN_UNMIX_ALPHA = 0.25;
 
@@ -505,6 +511,55 @@ class ProductPhotoCutout
                     $keyed .= $share >= 0.5 ? "\1" : "\0";
                 }
             }
+            // A shaded recess (the slot under the pages, closed at the back) can be painted over as if it
+            // were a gap. Where the photo's own cut also keeps it as product, the matte has product above
+            // and below it in that column, and its colour is far from anything the backdrop shows, it is
+            // product: backdrop seen through a real opening is the backdrop's colour, and the photo's cast
+            // shadow lies outside the product's columns and was already taken away above.
+            [$tops, $bottoms] = [array_fill(0, $width, $height), array_fill(0, $width, -1)];
+            for ($index = 0; $index < $count; $index++) {
+                if ($keyed[$index] === "\0") {
+                    $x = $index % $width;
+                    [$tops[$x], $bottoms[$x]] = [min($tops[$x], intdiv($index, $width)), max($bottoms[$x], intdiv($index, $width))];
+                }
+            }
+            // A real opening shows plain backdrop somewhere in it, even with a dark shadow cast inside, so
+            // only keyed areas between product with (almost) none of the backdrop's own colour qualify.
+            $solid = max(self::MIN_RECESS_DISTANCE, 2 * $tolerance);
+            $inside = fn (int $index): bool => $keyed[$index] === "\1"
+                && intdiv($index, $width) > $tops[$index % $width] && intdiv($index, $width) < $bottoms[$index % $width];
+            $seen = str_repeat("\0", $count);
+            for ($start = 0; $start < $count; $start++) {
+                if ($seen[$start] === "\1" || ! $inside($start)) {
+                    continue;
+                }
+                $seen[$start] = "\1";
+                $stack = [$start];
+                $area = [];
+                $plain = 0;
+                while ($stack !== []) {
+                    $index = array_pop($stack);
+                    $area[] = $index;
+                    $plain += ord($near[$index]) <= $tolerance ? 1 : 0;
+                    $x = $index % $width;
+                    foreach ([$x > 0 ? $index - 1 : -1, $x < $width - 1 ? $index + 1 : -1, $index - $width, $index + $width] as $next) {
+                        if ($next >= 0 && $next < $count && $seen[$next] === "\0" && $inside($next)) {
+                            $seen[$next] = "\1";
+                            $stack[] = $next;
+                        }
+                    }
+                }
+                if ($plain > self::MAX_RECESS_BACKDROP * count($area)) {
+                    continue;
+                }
+                foreach ($area as $index) {
+                    if ($keep[$index] === "\1" && ord($near[$index]) >= $solid) {
+                        $keyed[$index] = "\0";
+                        $strength[$index] = "\0";
+                    }
+                }
+            }
+            unset($tops, $bottoms, $seen);
             [$matched, $matchedBox] = $this->mainObject($keyed, $width, $height);
             if ($matched === null) {
                 $this->reason = 'matte: '.$this->reason;
