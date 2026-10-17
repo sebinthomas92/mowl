@@ -449,6 +449,8 @@ class ProductPhotoCutoutTest extends TestCase
         imagefilledrectangle($image, 110, 288, 200, 299, imagecolorallocate($image, 110, 100, 92));
         imagefilledrectangle($image, 201, 288, 290, 299, imagecolorallocate($image, 250, 250, 250));
         imagefilledrectangle($image, 240, 200, 260, 299, imagecolorat($image, 5, 250));
+        // With a hard shadow cast inside the real gap, along its inner edge.
+        imagefilledrectangle($image, 240, 200, 244, 299, imagecolorallocate($image, 150, 143, 132));
         // The matte keys both: the recess as if it were a gap too.
         $matte = imagecreatetruecolor(400, 400);
         imagefill($matte, 0, 0, imagecolorallocate($matte, 0, 255, 0));
@@ -468,6 +470,7 @@ class ProductPhotoCutoutTest extends TestCase
         $this->assertSame(0, ($recess >> 24) & 127, 'the recess stays solid');
         $this->assertSame(110, ($recess >> 16) & 255, 'with the photo\'s own shading');
         $this->assertSame(127, (imagecolorat($cutout, (250 - 100) * 2, (240 - 150) * 2) >> 24) & 127, 'the real gap stays clear');
+        $this->assertSame(127, (imagecolorat($cutout, (242 - 100) * 2, (240 - 150) * 2) >> 24) & 127, 'and so does the shadow inside it');
     }
 
     public function test_a_matte_that_moved_the_product_or_changed_the_shape_is_not_used(): void
