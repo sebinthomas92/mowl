@@ -10,6 +10,7 @@ class StoreClients
     {
         return match ($store->driver) {
             'sandbox' => app(SandboxStore::class),
+            'shopify' => app(ShopifyStore::class),
             default => app(WooCommerceStore::class),
         };
     }

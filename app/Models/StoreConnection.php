@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /** A store that pages publish to: a WooCommerce (WordPress) site, or the built-in sandbox store. */
 class StoreConnection extends Model
 {
-    public const DRIVERS = ['woocommerce' => 'WooCommerce', 'sandbox' => 'Sandbox store'];
+    public const DRIVERS = ['woocommerce' => 'WooCommerce', 'shopify' => 'Shopify', 'sandbox' => 'Sandbox store'];
 
     protected $fillable = [
         'workspace_id', 'brand_id', 'name', 'driver', 'site_url', 'api_base', 'username', 'secret', 'status',
@@ -51,6 +51,10 @@ class StoreConnection extends Model
 
     public function label(): string
     {
-        return $this->driver === 'sandbox' ? 'Sandbox store' : ($this->has_woocommerce ? 'WooCommerce' : 'WordPress');
+        return match ($this->driver) {
+            'sandbox' => 'Sandbox store',
+            'shopify' => 'Shopify',
+            default => $this->has_woocommerce ? 'WooCommerce' : 'WordPress',
+        };
     }
 }
