@@ -27,7 +27,10 @@ class BannerImageInspector
      * With $cutout, the image is a product cut out of a store photo, so it is also asked to name any
      * object that is not the product (a vase or candle beside it in the photo).
      *
-     * @return array{marks: list<string>, product_shown: bool, other_objects: list<string>, input_tokens: int, output_tokens: int}
+     * A scene is also asked where its empty resting spot is, so the composer can stand the product on
+     * the surface the scene actually drew instead of a fixed point that may be mid-air or a table edge.
+     *
+     * @return array{marks: list<string>, product_shown: bool, other_objects: list<string>, spot: array{x: float, y: float, width: float}|null, input_tokens: int, output_tokens: int}
      */
     public function inspect(string $imageBytes, string $mimeType, string $product, string $brand, bool $sceneOnly = false, bool $cutout = false): array
     {
@@ -37,13 +40,20 @@ class BannerImageInspector
             .'and anything shown on a device screen (a phone, tablet or e-reader). '
             .'Do not list the brand or product name above where it is printed on the product itself. '
             .'Do not list blank, blurred or illegible shapes. Only report what is visible in this image. '
-            .($sceneOnly ? "Also set product_shown to true if the image shows {$product} or any object like it. " : '')
+            .($sceneOnly ? "Also set product_shown to true if the image shows {$product} or any object like it. "
+                .'Then find the empty resting spot on a table, shelf or other surface where a product could be stood. Set spot_found to true if there is one, '
+                .'spot_x and spot_y to the point on that surface where the bottom centre of an object standing there would touch it, '
+                .'and spot_width to how wide the free surface is there, all as whole numbers from 0 to 1000 across the image width (x) and height (y). ' : '')
             .($cutout ? "Also list in other_objects every object in this image that is not part of {$product} itself, such as a vase, candle, plant, cup, book or device; leave it empty if only {$product} is shown. " : '')
             .'Return JSON only.';
         [$mimeType, $imageBytes] = $this->smaller($mimeType, $imageBytes);
         $properties = ['marks' => ['type' => 'ARRAY', 'items' => ['type' => 'STRING']]];
         if ($sceneOnly) {
             $properties['product_shown'] = ['type' => 'BOOLEAN'];
+            $properties['spot_found'] = ['type' => 'BOOLEAN'];
+            foreach (['spot_x', 'spot_y', 'spot_width'] as $name) {
+                $properties[$name] = ['type' => 'INTEGER'];
+            }
         }
         if ($cutout) {
             $properties['other_objects'] = ['type' => 'ARRAY', 'items' => ['type' => 'STRING']];
@@ -66,6 +76,17 @@ class BannerImageInspector
         ]);
 
         $json = $response->json();
+        if ($this->cutShort($json)) {
+            // Only an image full of text runs a list of its marks past the cap; it is not a clean one.
+            return [
+                'marks' => ['more readable text than could be listed'],
+                'product_shown' => false,
+                'other_objects' => [],
+                'spot' => null,
+                'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
+                'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0) + (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
+            ];
+        }
         $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
         if (! is_array($decoded) || ! is_array($decoded['marks'] ?? null) || ($sceneOnly && ! is_bool($decoded['product_shown'] ?? null)) || ($cutout && ! is_array($decoded['other_objects'] ?? null))) {
             throw new VertexAIResponseException('vertex_invalid_inspection', 'Vertex AI returned no banner image inspection.', true);
@@ -75,6 +96,7 @@ class BannerImageInspector
             'marks' => array_values(array_filter(array_map(fn ($mark) => is_string($mark) ? trim($mark) : '', $decoded['marks']))),
             'product_shown' => $sceneOnly && $decoded['product_shown'],
             'other_objects' => $cutout ? array_values(array_filter(array_map(fn ($object) => is_string($object) ? trim($object) : '', $decoded['other_objects']))) : [],
+            'spot' => $sceneOnly ? $this->spot($decoded) : null,
             'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
             // Thinking tokens are billed as output too.
             'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0) + (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
@@ -118,6 +140,16 @@ class BannerImageInspector
         ]);
 
         $json = $response->json();
+        if ($this->cutShort($json)) {
+            // A comparison that ran past the cap gave no verdict; the image is redrawn, and the check billed.
+            return [
+                'matches' => false,
+                'differences' => 'The product check ran too long to give an answer.',
+                'split' => false,
+                'input_tokens' => (int) data_get($json, 'usageMetadata.promptTokenCount', 0),
+                'output_tokens' => (int) data_get($json, 'usageMetadata.candidatesTokenCount', 0) + (int) data_get($json, 'usageMetadata.thoughtsTokenCount', 0),
+            ];
+        }
         $decoded = json_decode((string) data_get($json, 'candidates.0.content.parts.0.text'), true);
         if (! is_array($decoded) || ! is_bool($decoded['matches'] ?? null) || ! is_bool($decoded['split'] ?? null)) {
             throw new VertexAIResponseException('vertex_invalid_inspection', 'Vertex AI returned no product match check.', true);
@@ -133,12 +165,36 @@ class BannerImageInspector
         ];
     }
 
+    /** @return array{x: float, y: float, width: float}|null  shares of the image's width and height */
+    private function spot(array $decoded): ?array
+    {
+        if (($decoded['spot_found'] ?? false) !== true) {
+            return null;
+        }
+        $values = [$decoded['spot_x'] ?? null, $decoded['spot_y'] ?? null, $decoded['spot_width'] ?? null];
+        foreach ($values as $value) {
+            if ((! is_int($value) && ! is_float($value)) || $value < 0 || $value > 1000) {
+                return null;
+            }
+        }
+
+        return ['x' => $values[0] / 1000, 'y' => $values[1] / 1000, 'width' => $values[2] / 1000];
+    }
+
+    private function cutShort(?array $json): bool
+    {
+        return strtoupper((string) data_get($json, 'candidates.0.finishReason')) === 'MAX_TOKENS';
+    }
+
     /**
      * A yes/no look at an image needs little reasoning, and long default thinking can run past the
      * inspection timeout with nothing sent back. A model that rejects the setting is asked without it.
      */
     private function ask(array $payload): Response
     {
+        // A short answer is all a check needs. Without a cap, a model listing marks can loop on and on
+        // and hold the connection silently until the timeout, losing an image that was already paid for.
+        $payload['generationConfig']['maxOutputTokens'] = (int) config('campaigns.banners.inspection_max_output_tokens', 2048);
         $level = (string) config('campaigns.banners.inspection_thinking_level');
         if ($level !== '' && ! self::$thinkingRejected) {
             $payload['generationConfig']['thinkingConfig'] = ['thinkingLevel' => $level];

@@ -56,6 +56,10 @@ return [
         'inspection_attempts' => (int) env('BANNER_INSPECTION_ATTEMPTS', 2),
         // An inspection normally answers in seconds; a stalled one must not eat the attempt's budget.
         'inspection_timeout_seconds' => 30,
+        // A check's JSON is short; a cap ends a runaway answer instead of letting it hang to the timeout.
+        'inspection_max_output_tokens' => 2048,
+        // How many times a check that answered nothing in time is asked again, while the deadline allows.
+        'inspection_hang_retries' => 2,
         // Image checks ask for little reasoning (Gemini 3 thinkingLevel); empty leaves the model's default.
         'inspection_thinking_level' => env('BANNER_INSPECTION_THINKING', 'LOW'),
         // The product cutout is compared with the store's product photo once, before it is kept (and,

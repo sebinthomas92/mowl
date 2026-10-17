@@ -114,7 +114,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
                 continue;
             }
             if (! $checkProduct) {
-                return $this->result($result, $usage, $extraCost, $cutout);
+                return $this->result($result, $usage, $extraCost, $cutout, $composite ? $inspection['spot'] : null);
             }
             try {
                 $match = $this->rateLimited($deadline, GenerationDeadline::MIN_ATTEMPT_SECONDS, fn () => $this->inspector->matchesProduct($result->imageBytes, $result->mimeType, $product, $photo), retryHang: true);
@@ -144,7 +144,8 @@ class GoogleVertexBannerGenerator implements BannerGenerator
         throw new BannerAttemptFailed($failure[0] ?? 'banner_third_party_text', $failure[1] ?? 'No generated background passed its checks.', $this->spent($usage, $extraCost), $result->imageBytes ?? null);
     }
 
-    private function result(BannerGenerationResult $result, array $usage, float $extraCost, ?string $cutout): BannerGenerationResult
+    /** @param  array{x: float, y: float, width: float}|null  $spot */
+    private function result(BannerGenerationResult $result, array $usage, float $extraCost, ?string $cutout, ?array $spot = null): BannerGenerationResult
     {
         return new BannerGenerationResult(
             imageBytes: $result->imageBytes,
@@ -158,6 +159,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             providerLatencyMs: $result->providerLatencyMs,
             additionalCost: round($extraCost, 6),
             productCutout: $cutout,
+            productSpot: $cutout === null ? null : $spot,
         );
     }
 
@@ -175,17 +177,21 @@ class GoogleVertexBannerGenerator implements BannerGenerator
      */
     private function rateLimited(GenerationDeadline $deadline, int $reserveSeconds, callable $call, bool $retryHang = false): mixed
     {
-        foreach ([...config('campaigns.banners.rate_limit_backoff_seconds'), null] as $wait) {
+        $hangRetries = $retryHang ? max(0, (int) config('campaigns.banners.inspection_hang_retries', 2)) : 0;
+        $waits = config('campaigns.banners.rate_limit_backoff_seconds');
+        while (true) {
             try {
                 return $call();
             } catch (VertexAIResponseException $exception) {
                 $remaining = $deadline->remaining() ?? INF;
-                // A text call that hung with no answer (cURL 28, 0 bytes) is retried once at once; it was not billed.
-                if ($retryHang && $wait !== null && $exception->errorCode === 'vertex_connection_error' && $remaining >= $reserveSeconds) {
-                    $retryHang = false;
+                // A text call that hung with no answer (cURL 28, 0 bytes) was not billed, and failing here
+                // throws away an image that was, so it is asked again at once while the deadline allows.
+                if ($hangRetries > 0 && $exception->errorCode === 'vertex_connection_error' && $remaining >= $reserveSeconds) {
+                    $hangRetries--;
 
                     continue;
                 }
+                $wait = array_shift($waits);
                 if ($exception->errorCode !== 'vertex_http_429' || $wait === null || $remaining - $wait < $reserveSeconds) {
                     throw $exception;
                 }

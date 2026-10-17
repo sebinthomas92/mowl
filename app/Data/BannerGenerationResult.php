@@ -18,5 +18,7 @@ readonly class BannerGenerationResult
         public float $additionalCost = 0.0,
         // The product cut out of its store photo (PNG with transparency), composited onto the scene.
         public ?string $productCutout = null,
+        // Where the scene's empty surface is (shares of the image's width and height), for the cutout.
+        public ?array $productSpot = null,
     ) {}
 }
