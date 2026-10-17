@@ -8,6 +8,7 @@ use App\Models\PublishAttempt;
 use App\Models\StoreConnection;
 use App\Services\Pages\StoreException;
 use App\Services\Pages\Stores\StoreClients;
+use App\Services\Shopify\ShopifyAuthorization;
 use App\Support\Membership;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -49,7 +50,7 @@ class StoreConnections extends Component
             $this->driver = $store->driver;
             $this->name = $store->name;
             $this->brandId = (string) ($store->brand_id ?? '');
-            $this->siteUrl = $store->driver === 'woocommerce' ? $store->site_url : '';
+            $this->siteUrl = $store->driver !== 'sandbox' ? $store->site_url : '';
             $this->username = (string) $store->username;
         }
         $this->formOpen = true;
@@ -66,6 +67,14 @@ class StoreConnections extends Component
     {
         $this->authorizeOwner();
         $workspace = $this->currentWorkspace();
+        if ($this->editingId) {
+            $this->driver = $this->store($this->editingId)->driver;
+        }
+        if ($this->driver === 'shopify') {
+            $this->connectShopify();
+
+            return;
+        }
         $woo = $this->driver === 'woocommerce';
         $data = $this->validate([
             'driver' => ['required', Rule::in(array_keys(StoreConnection::DRIVERS))],
@@ -120,6 +129,30 @@ class StoreConnections extends Component
         $this->close();
         $this->secret = '';
         $this->flash = "{$store->name} is connected.";
+    }
+
+    private function connectShopify(): void
+    {
+        $workspace = $this->currentWorkspace();
+        $data = $this->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'brandId' => ['nullable', Rule::exists('brands', 'id')->where('workspace_id', $workspace->id)],
+            'siteUrl' => ['required', 'string', 'max:255'],
+        ], [], ['siteUrl' => 'Shopify store address', 'brandId' => 'brand']);
+        if ($this->editingId && $this->store($this->editingId)->pages()->whereIn('publish_state', ['publishing', 'verifying'])->exists()) {
+            $this->addError('siteUrl', 'Wait for publishing to finish before reconnecting this store.');
+
+            return;
+        }
+        try {
+            $url = app(ShopifyAuthorization::class)->begin(request(), [
+                'workspace_id' => $workspace->id, 'brand_id' => $data['brandId'] ?: null,
+                'store_id' => $this->editingId, 'name' => trim($data['name']), 'site_url' => $data['siteUrl'],
+            ]);
+            $this->redirect($url);
+        } catch (StoreException $exception) {
+            $this->addError('siteUrl', $exception->getMessage());
+        }
     }
 
     public function check(int $id, StoreClients $clients): void

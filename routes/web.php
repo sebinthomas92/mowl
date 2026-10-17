@@ -8,6 +8,7 @@ use App\Http\Controllers\ClientPortalController;
 use App\Http\Controllers\ClientReviewController;
 use App\Http\Controllers\ProductHubDeliveryController;
 use App\Http\Controllers\SandboxStoreController;
+use App\Http\Controllers\ShopifyConnectionController;
 use App\Http\Controllers\StripeWebhookController;
 use App\Http\Controllers\WorkflowDownloadController;
 use App\Http\Controllers\WorkflowPreviewController;
@@ -93,6 +94,7 @@ Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::get('/team', TeamIndex::class)->name('team.index');
     Route::get('/usage', UsageIndex::class)->name('usage.index');
     Route::get('/billing', BillingIndex::class)->name('billing.index');
+    Route::get('/integrations/shopify/callback', [ShopifyConnectionController::class, 'callback'])->middleware('throttle:12,1')->name('shopify.callback');
     Route::get('/settings', WorkspaceSettings::class)->name('workspace.settings');
     Route::get('/concierge', ConciergeIndex::class)->name('concierge.index');
     Route::get('/portal', ClientPortal::class)->name('portal.index');

@@ -2,7 +2,7 @@
     @if(! $page)
         <div class="empty">
             <strong>No pages yet</strong>
-            <span class="small muted">A landing page is built from approved content. Start a draft now and bind content as it gets approved. Publishing sends it to your WooCommerce store.</span>
+            <span class="small muted">A landing page is built from approved content. Start a draft now and bind content as it gets approved. Publishing sends it to your connected Shopify or WooCommerce store.</span>
             @if($canEdit)<button type="button" class="pill pri sm" wire:click="startPage" wire:loading.attr="disabled">Start a page draft</button>@endif
         </div>
     @else
