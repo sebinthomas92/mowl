@@ -9,6 +9,7 @@ use App\Models\Page;
 use App\Models\PageGeneration;
 use App\Models\ProcessingCacheEntry;
 use App\Models\Product;
+use App\Models\StoreConnection;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\ContentLibrary;
@@ -275,6 +276,102 @@ class PageEditorTest extends TestCase
         $this->assertSame(['Get yours', 'https://example.com/buy'], [$page->document['sections'][2]['settings']['button_label'], $page->document['sections'][2]['settings']['button_url']]);
         $this->assertSame(0, $page->sections()->count());
         $this->assertSame(1, $page->draft_version, 'Converting is not a new version: nothing on the page changed.');
+    }
+
+    public function test_someone_removed_while_the_editor_is_open_can_no_longer_change_the_page(): void
+    {
+        [$owner, $workspace, $product] = $this->fixture();
+        $member = User::factory()->create();
+        $workspace->users()->attach($member, ['role' => 'member']);
+        $page = app(PageBuilder::class)->start($product, $owner);
+        // One open editor per call: a refused call ends that component's session, as a 404 does in the browser.
+        [$editor, $details] = [$this->editor($member, $page), $this->editor($member, $page)];
+
+        $workspace->users()->detach($member->id);
+        Workspace::create(['name' => 'Their own'])->users()->attach($member, ['role' => 'owner']);
+        $document = $page->document;
+        $hero = array_search('product_hero', array_column($document['sections'], 'type'), true);
+        $document['sections'][$hero]['settings']['title'] = 'Changed after leaving';
+
+        $editor->call('save', $document, 1)->assertNotFound();
+        $details->call('saveDetails', 'Taken over', 'taken-over')->assertNotFound();
+        $page->refresh();
+        $this->assertSame(1, $page->document_revision);
+        $this->assertSame('Desk Lamp', Document::first($page->document, 'product_hero')['settings']['title']);
+        $this->assertSame('Launch page', $page->name);
+    }
+
+    public function test_a_page_only_holds_its_own_products_images(): void
+    {
+        [$owner, $workspace, $product] = $this->fixture();
+        $otherBrand = $workspace->brands()->create(['name' => 'Private brand']);
+        $private = $otherBrand->products()->create(['name' => 'Private', 'summary' => 'Not for this page.'])->mediaAssets()->create([
+            'workspace_id' => $workspace->id, 'type' => 'image', 'disk' => 'local', 'path' => 'private.png', 'original_name' => 'private.png',
+            'mime_type' => 'image/png', 'size_bytes' => 1, 'content_hash' => 'private', 'status' => 'ready',
+        ]);
+        $scoped = User::factory()->create();
+        $workspace->users()->attach($scoped, ['role' => 'member', 'brand_id' => $product->brand_id]);
+        $page = app(PageBuilder::class)->start($product, $owner);
+
+        $document = $page->document;
+        $document['sections'][] = Document::section('image', ['image' => ['kind' => 'media', 'id' => $private->id, 'alt' => 'Not ours']]);
+        $this->assertTrue($this->returned($this->editor($scoped, $page)->call('save', $document, 1))['ok']);
+
+        $this->assertNull(collect($page->fresh()->document['sections'])->last()['settings']['image'], "Another brand's image is dropped, even inside one workspace.");
+    }
+
+    public function test_a_page_holds_up_to_forty_sections(): void
+    {
+        [$owner, , $product] = $this->fixture();
+        $page = app(PageBuilder::class)->start($product, $owner);
+        $document = $page->document;
+        while (count($document['sections']) <= Document::MAX_SECTIONS) {
+            $document['sections'][] = Document::section('rich_text', ['heading' => 'More', 'text' => 'More text.']);
+        }
+
+        $refused = $this->returned($this->editor($owner, $page)->call('save', $document, 1));
+
+        $this->assertFalse($refused['ok']);
+        $this->assertFalse($refused['conflict']);
+        $this->assertSame('A page can have up to 40 sections. Remove one to save your changes.', $refused['message']);
+        $this->assertSame(1, $page->fresh()->document_revision, 'Nothing is cut off silently.');
+        $this->assertStringContainsString('"limits":{"sections":40}', $this->actingAs($owner)->get(route('pages.edit', [$product, $page]))->getContent());
+    }
+
+    public function test_publishing_from_a_tab_that_has_not_seen_the_latest_changes_is_refused(): void
+    {
+        [$owner, , $product] = $this->fixture();
+        $page = app(PageBuilder::class)->start($product, $owner);
+        $page->update(['store_connection_id' => StoreConnection::create([
+            'workspace_id' => $product->brand->workspace_id, 'name' => 'Sandbox', 'driver' => 'sandbox', 'site_url' => 'https://sandbox.test', 'status' => 'connected',
+        ])->id]);
+        $editor = $this->editor($owner, $page)->call('openDrawer');
+        $document = $page->document;
+        $hero = array_search('product_hero', array_column($document['sections'], 'type'), true);
+        $document['sections'][$hero]['settings']['title'] = 'Changed in another tab';
+        app(PageBuilder::class)->saveDocument($page, $document, 1);
+
+        $editor->call('publish', 1)->assertHasErrors('publish')
+            ->assertSee('This page changed in another tab or by the AI since you opened it. Reload to see the latest version, then publish.');
+        $this->assertSame(0, $page->attempts()->count());
+    }
+
+    public function test_opening_the_editor_returns_the_credit_of_an_ai_run_that_was_cut_off(): void
+    {
+        [$owner, $workspace, $product] = $this->fixture();
+        $workspace->credits()->create(['amount' => 1, 'event' => 'test_allocation', 'description' => 'Test credits']);
+        $page = app(PageBuilder::class)->start($product, $owner);
+        $run = PageGeneration::create([
+            'workspace_id' => $workspace->id, 'page_id' => $page->id, 'user_id' => $owner->id, 'kind' => 'page', 'status' => 'running', 'base_revision' => 1, 'credit_cost' => 1,
+        ]);
+        $workspace->credits()->create(['amount' => -1, 'event' => 'page_writing', 'description' => 'AI page writing', 'idempotency_key' => 'page-generation:'.$run->id]);
+        PageGeneration::query()->whereKey($run->id)->update(['created_at' => now()->subMinutes(10)]);
+        $this->assertSame(0, $workspace->creditBalance());
+
+        $this->actingAs($owner)->get(route('pages.edit', [$product, $page]))->assertOk();
+
+        $this->assertSame('failed', $run->fresh()->status);
+        $this->assertSame(1, $workspace->creditBalance());
     }
 
     private function editor(User $user, Page $page): Testable

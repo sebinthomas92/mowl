@@ -138,8 +138,13 @@ class WooCommerceStore implements StoreClient
         if (! $response->successful() || ! $response->json('id') || ! $response->json('link')) {
             throw $this->failure($response, 'save the page');
         }
+        $link = (string) $response->json('link');
+        if (! preg_match('#^https?://#i', $link)) {
+            // The app shows this address as a link, so only a web address is kept.
+            throw new StoreException('The store saved the page but gave an address that is not a web link. Check the page in WordPress.');
+        }
 
-        return ['id' => (string) $response->json('id'), 'url' => (string) $response->json('link'), 'warning' => $this->strippedLayout($html, $response)];
+        return ['id' => (string) $response->json('id'), 'url' => $link, 'warning' => $this->strippedLayout($html, $response)];
     }
 
     /** WordPress answers an unknown template with a 400 that names the template parameter. */

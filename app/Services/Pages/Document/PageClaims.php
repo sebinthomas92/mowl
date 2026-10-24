@@ -8,8 +8,8 @@ use App\Services\ContentLibrary;
 /**
  * What a page says that its sources do not back up. Pages go to a real store, so before one is
  * published:
- *  - a price that differs from the product's price blocks publishing, and so do buttons with
- *    nowhere to go;
+ *  - a price that differs from the product's price (amount or currency) blocks publishing, and so
+ *    do buttons with nowhere to go and images the page may not use (a banner not approved yet);
  *  - any other claim that the product page, confirmed Knowledge and approved launch copy do not
  *    contain (claim words, numbers, amounts, a former price) needs a workspace owner to confirm it;
  *  - proof sections (reviews, numbers, logos, a guarantee, a comparison) always need that
@@ -40,8 +40,6 @@ final class PageClaims
         'comparison' => 'Confirm every row is true, for your product and for the alternative.',
     ];
 
-    private const PRICE_FIELDS = ['price', 'compare_price'];
-
     /** Amounts with a currency, as in the launch pack checks: "₹699", "Rs. 1,499", "INR 899", "500 rupees". */
     private const AMOUNT = '/(?:[₹$€£¥]|(?<![\p{L}\p{N}])(?:rs\.?|inr|usd|eur|gbp|aud|cad|sgd|aed))\s?\d(?:[\d.,]*\d)?|\d(?:[\d.,]*\d)?\s?(?:rupees|inr|usd|eur|gbp)(?![\p{L}])/iu';
 
@@ -67,6 +65,7 @@ final class PageClaims
             $supported[] = '* '.$own;
         }
         $terms = array_values(array_unique([...ContentLibrary::CLAIM_TERMS, ...self::PAGE_TERMS]));
+        $usable = array_flip(array_column($brief->images, 'key'));
         $missingLink = [];
 
         foreach ($visible as $section) {
@@ -83,6 +82,7 @@ final class PageClaims
             if (trim((string) ($settings['button_label'] ?? '')) !== '' && Document::url($settings['button_url'] ?? '') === '' && Document::url($document['buy_url'] ?? '') === '') {
                 $missingLink[] = $label;
             }
+            array_push($issues, ...$this->imageIssues($section, $label, $usable, $brief, $document));
 
             if (isset(self::PROOF[$type])) {
                 if ($proof = $this->proofContent($section)) {
@@ -97,8 +97,12 @@ final class PageClaims
                 if (! in_array($field['type'], ['text', 'textarea'], true) || ! is_string($value) || trim($value) === '') {
                     return;
                 }
-                if ($type === 'product_hero' && in_array($path, self::PRICE_FIELDS, true)) {
-                    return;
+                if ($type === 'product_hero' && in_array($path, ['price', 'compare_price'], true)) {
+                    // The amount has its own check (priceIssues); anything written beside it is checked here.
+                    $value = $this->withoutFirstAmount($value);
+                    if (trim($value, " \t\n\r\0\x0B,.;:·-–—/|()") === '') {
+                        return;
+                    }
                 }
                 $text = $this->normalize($value);
                 $found = [];
@@ -143,29 +147,100 @@ final class PageClaims
         ));
     }
 
-    /** @return list<array> */
+    /**
+     * The hero's price must be the product's own price, in its currency, and nothing else: a former
+     * price belongs in the compare-at field, where the product page has to show it as one.
+     *
+     * @return list<array>
+     */
     private function priceIssues(array $section, ProductBrief $brief, array $document): array
     {
         $settings = $section['settings'] ?? [];
         $price = trim((string) ($settings['price'] ?? ''));
         $compare = trim((string) ($settings['compare_price'] ?? ''));
+        $own = $this->ownPrice($brief);
         $issues = [];
         if ($price !== '') {
-            $own = $this->amount((string) $brief->price);
-            if ($own !== null && $this->amount($price) !== $own) {
-                $issues[] = $this->issue(null, 'blocker', $section['id'], 'price', 'Product hero · Price',
-                    "The page shows {$price}, but the product's price is {$brief->price}. Show the price your store charges, or correct it in Knowledge.", $price, $document);
-            } elseif ($own === null) {
+            if ($own === null) {
                 $issues[] = $this->issue(sha1('price|'.$this->normalize($price)), 'confirm', $section['id'], 'price', 'Product hero · Price',
                     'No product page or confirmed Knowledge gives a price. Confirm the store charges exactly this.', $price, $document);
+            } elseif ($this->prices->unsupportedPrices($price, [$own], true) !== [] || $this->amount($price) !== explode(' ', $own, 2)[1]) {
+                $issues[] = $this->issue(null, 'blocker', $section['id'], 'price', 'Product hero · Price',
+                    "The page shows {$price}, but the product's price is {$brief->price}. Show only the price your store charges (a former price goes in Compare-at price), or correct it in Knowledge.", $price, $document);
             }
         }
-        if ($price !== '' && $compare !== '' && app(DocumentRenderer::class)->saving($price, $compare) !== null && ! $this->wasPrice($compare, $brief)) {
-            $issues[] = $this->issue(sha1('compare|'.$this->normalize($compare).'|'.$this->normalize($price)), 'confirm', $section['id'], 'compare_price', 'Product hero · Compare-at price',
-                "The product page does not show {$compare} as a former price. Confirm the product really sold at it: a former price that was never charged misleads buyers.", $compare, $document);
+        if ($price !== '' && $compare !== '' && app(DocumentRenderer::class)->saving($price, $compare) !== null) {
+            $currency = $own === null ? '*' : explode(' ', $own, 2)[0];
+            if ($this->prices->unsupportedPrices($compare, [$currency.' '.$this->amount($compare)], true) !== []) {
+                $issues[] = $this->issue(null, 'blocker', $section['id'], 'compare_price', 'Product hero · Compare-at price',
+                    "Compare-at price shows {$compare}. Show one former price, in the same currency as the price. The page works out the saving.", $compare, $document);
+            } elseif (! $this->wasPrice($compare, $brief)) {
+                $issues[] = $this->issue(sha1('compare|'.$this->normalize($compare).'|'.$this->normalize($price)), 'confirm', $section['id'], 'compare_price', 'Product hero · Compare-at price',
+                    "The product page does not show {$compare} as a former price. Confirm the product really sold at it: a former price that was never charged misleads buyers.", $compare, $document);
+            }
         }
 
         return $issues;
+    }
+
+    /**
+     * The product's price as "CUR amount" ("INR 699"): in the currency it names, else the product
+     * page's currency, else the currency the product page writes that amount in, else "*" for unknown.
+     * Null when there is no price.
+     */
+    private function ownPrice(ProductBrief $brief): ?string
+    {
+        $own = $this->prices->labelPrice((string) $brief->price, $this->prices->pageCurrency($brief->source));
+        if ($own === null) {
+            return null;
+        }
+        [$currency, $amount] = explode(' ', $own, 2);
+        if ($currency === '*') {
+            $written = collect($this->prices->supportedPrices($brief->source) ?? [])
+                ->map(fn (string $price) => explode(' ', $price, 2))
+                ->first(fn (array $price) => $price[1] === $amount && $price[0] !== '*');
+            $currency = $written[0] ?? '*';
+        }
+
+        return $currency.' '.$amount;
+    }
+
+    /** The text with its first amount ("₹1,999", or the first number) taken out. */
+    private function withoutFirstAmount(string $text): string
+    {
+        $count = 0;
+        $out = (string) preg_replace(self::AMOUNT, ' ', $text, 1, $count);
+
+        return $count > 0 ? $out : (string) preg_replace('/\d(?:[\d.,]*\d)?/u', ' ', $text, 1);
+    }
+
+    /**
+     * Images in the section that the page may not use: a banner not approved yet, one showing a price
+     * the product page does not, or an image that is not this product's.
+     *
+     * @param  array<string, int>  $usable  keys of the images the page may use
+     * @return list<array>
+     */
+    private function imageIssues(array $section, string $label, array $usable, ProductBrief $brief, array $document): array
+    {
+        $issues = [];
+        Document::walk(Sections::get($section['type'])['fields'] ?? [], $section['settings'] ?? [], function (array $field, mixed $value, string $path) use (&$issues, $section, $label, $usable, $brief, $document): void {
+            $refs = match ($field['type']) {
+                'image' => is_array($value) ? [$value] : [],
+                'images' => array_values(array_filter((array) $value, 'is_array')),
+                default => [],
+            };
+            foreach ($refs as $ref) {
+                $key = (string) ($ref['key'] ?? '');
+                if ($key === '' || isset($usable[$key])) {
+                    continue;
+                }
+                $message = $brief->withheld[$key] ?? 'An image here is not one of this product\'s images any more. Choose another image.';
+                $issues[$key] = $this->issue(null, 'blocker', $section['id'], $path, $label, $message, '', $document);
+            }
+        });
+
+        return array_values($issues);
     }
 
     /** The product page shows the amount as the product's old price ("was", MRP, struck out). */
@@ -207,21 +282,30 @@ final class PageClaims
                 $parts[] = $path.'='.implode(',', array_column((array) $value, 'key'));
             }
         });
-        $content = array_filter($parts, fn (string $part) => ! preg_match('/^(heading|subheading)=/', $part));
+        // Reviews, numbers, logos and comparisons publish nothing until they have items, so a heading
+        // alone needs no confirmation. A guarantee's heading is the promise itself.
+        $content = $section['type'] === 'guarantee' ? $parts : array_filter($parts, fn (string $part) => ! preg_match('/^(heading|subheading)=/', $part));
 
         return $content ? implode("\n", $parts) : '';
     }
 
+    /** The first item's text (a review, a number), else the first text the section shows (a guarantee's heading). */
     private function firstText(array $section): string
     {
-        $first = '';
+        $first = ['item' => '', 'any' => ''];
         Document::walk(Sections::get($section['type'])['fields'] ?? [], $section['settings'] ?? [], function (array $field, mixed $value, string $path) use (&$first): void {
-            if ($first === '' && str_contains($path, '.') && in_array($field['type'], ['text', 'textarea'], true) && is_string($value)) {
-                $first = trim($value);
+            if (! in_array($field['type'], ['text', 'textarea'], true) || ! is_string($value) || trim($value) === '') {
+                return;
+            }
+            if ($first['item'] === '' && str_contains($path, '.')) {
+                $first['item'] = trim($value);
+            }
+            if ($first['any'] === '') {
+                $first['any'] = trim($value);
             }
         });
 
-        return $first;
+        return $first['item'] !== '' ? $first['item'] : $first['any'];
     }
 
     /** @return list<string> how many items each list of the section shows */

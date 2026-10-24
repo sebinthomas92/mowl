@@ -683,8 +683,17 @@ export function pageEditor() {
             if (fromList && id) this.sectionEl(id)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
         },
 
+        /** A page holds up to the server's limit of sections; says so instead of adding one more. */
+        roomForSection() {
+            const max = this.config.limits?.sections || 40;
+            if (this.doc.sections.length < max) return true;
+            this.toast(`A page can have up to ${max} sections. Remove one to add another.`, 'bad');
+
+            return false;
+        },
+
         async addSection(type) {
-            if (this.library.busy) return;
+            if (this.library.busy || !this.roomForSection()) return;
             this.library.busy = true;
             let starter = null;
             try {
@@ -711,7 +720,7 @@ export function pageEditor() {
 
         duplicate(id) {
             const index = this.indexOf(id);
-            if (index < 0) return;
+            if (index < 0 || !this.roomForSection()) return;
             const copy = clone(this.doc.sections[index]);
             copy.id = newId('s');
             for (const value of Object.values(copy.settings || {})) {
@@ -933,8 +942,11 @@ export function pageEditor() {
                     this.conflict = result.message;
                     this.saveState = 'conflict';
                 } else {
-                    this.saveState = 'error';
-                    this.toast(result.message || 'The page could not be saved.', 'bad');
+                    // Refused for a reason the message gives (publishing is running, too many sections).
+                    // Tried again a little later; the next edit tries at once.
+                    if (this.saveState !== 'refused') this.toast(result.message || 'The page could not be saved.', 'bad');
+                    this.saveState = 'refused';
+                    this.scheduleSave(5000);
                 }
 
                 return;
@@ -975,7 +987,7 @@ export function pageEditor() {
         },
 
         saveLabel() {
-            return { saved: 'Saved', saving: 'Saving…', unsaved: 'Unsaved changes', error: 'Not saved yet. Retrying…', conflict: 'Changed elsewhere' }[this.saveState] || '';
+            return { saved: 'Saved', saving: 'Saving…', unsaved: 'Unsaved changes', error: 'Not saved yet. Retrying…', refused: 'Not saved', conflict: 'Changed elsewhere' }[this.saveState] || '';
         },
 
         reload() {
@@ -1187,7 +1199,7 @@ export function pageEditor() {
         /* ------------------------------------------------------------ library */
 
         openLibrary(at = null) {
-            if (this.ai.busy) return;
+            if (this.ai.busy || !this.roomForSection()) return;
             this.endInline();
             this.library.at = at;
             this.library.open = true;
@@ -1266,7 +1278,7 @@ export function pageEditor() {
 
                 return;
             }
-            await this.$wire.publish();
+            await this.$wire.publish(this.revision);
         },
 
         async confirmClaim(key) {

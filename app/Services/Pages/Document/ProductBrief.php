@@ -7,6 +7,8 @@ use App\Models\ContentItem;
 use App\Models\MediaAsset;
 use App\Models\Product;
 use App\Models\SourceSnapshot;
+use App\Services\CampaignPackSafetyValidator;
+use App\Services\ContentLibrary;
 use App\Services\ProductKnowledge;
 use Illuminate\Support\Collection;
 
@@ -20,7 +22,8 @@ final class ProductBrief
     /**
      * @param  array<string, string>  $facts  confirmed Knowledge, by fact key
      * @param  array<string, array>  $approved  approved launch pack copy, by section
-     * @param  list<array>  $images  product image references, product page photos first
+     * @param  list<array>  $images  images a page may use, product page photos first
+     * @param  array<string, string>  $withheld  why each of the product's other banners may not be used yet, by image key
      */
     public function __construct(
         public readonly Product $product,
@@ -34,6 +37,7 @@ final class ProductBrief
         public readonly array $team,
         public readonly array $brand,
         public readonly ?SourceSnapshot $source,
+        public readonly array $withheld = [],
     ) {}
 
     public static function for(Product $product): self
@@ -59,12 +63,14 @@ final class ProductBrief
             $price = app(ProductKnowledge::class)->sourceValues($truth)['price'] ?? null;
         }
 
+        [$images, $withheld] = self::imageSets($product);
+
         return new self(
             product: $product,
             facts: $facts,
             price: $price ? trim($price) : null,
             buyUrl: (string) ($source?->canonical_url ?: $source?->url ?: ''),
-            images: self::images($product),
+            images: $images,
             approved: self::approved($product),
             sourceText: mb_substr(trim((string) ($page['content'] ?? '')), 0, 40_000),
             truth: $truth,
@@ -75,6 +81,7 @@ final class ProductBrief
                 'palette' => $product->brand?->colors() ?: null,
             ]),
             source: $source,
+            withheld: $withheld,
         );
     }
 
@@ -127,11 +134,21 @@ final class ProductBrief
     }
 
     /**
-     * Product photos (product page ones first, then uploads) and finished banners, newest last.
+     * Images a page may use: product photos (product page ones first, then uploads), then banners.
+     * A banner goes on a page only once it is approved on its own and shows no price the product page
+     * does not, the same rule the client hub and banner downloads follow.
      *
      * @return list<array{kind: string, id: int, key: string, alt: string, label: string, width: ?int, height: ?int}>
      */
     public static function images(Product $product): array
+    {
+        return self::imageSets($product)[0];
+    }
+
+    /**
+     * @return array{0: list<array>, 1: array<string, string>} usable images, and by image key why each other banner is held back
+     */
+    private static function imageSets(Product $product): array
     {
         $media = $product->mediaAssets()->where('type', 'image')->where('mime_type', 'like', 'image/%')->where('status', '!=', 'failed')->orderBy('id')->get()
             ->sortBy(fn (MediaAsset $asset) => ($asset->metadata['origin'] ?? '') === 'product_page' ? 0 : 1)
@@ -141,15 +158,31 @@ final class ProductBrief
                 'width' => isset($asset->metadata['width']) ? (int) $asset->metadata['width'] : null,
                 'height' => isset($asset->metadata['height']) ? (int) $asset->metadata['height'] : null,
             ]);
-        $banners = BannerCreative::query()
+        $creatives = BannerCreative::query()
             ->whereHas('campaignPack', fn ($query) => $query->where('product_id', $product->id))
-            ->where('status', 'completed')->whereNotNull('output_path')->orderBy('id')->get()
-            ->map(fn (BannerCreative $banner) => [
-                'kind' => 'banner', 'id' => $banner->id, 'key' => "banner-{$banner->id}", 'alt' => (string) ($banner->headline ?: $product->name),
-                'label' => 'Banner'.($banner->headline ? ': '.$banner->headline : ''), 'width' => $banner->width ? (int) $banner->width : null, 'height' => $banner->height ? (int) $banner->height : null,
-            ]);
+            ->where('status', 'completed')->whereNotNull('output_path')->with('campaignPack.sourceSnapshot')->orderBy('id')->get();
+        $approved = $creatives->isNotEmpty() && ContentLibrary::available()
+            ? ContentItem::query()->whereIn('banner_creative_id', $creatives->modelKeys())->where('status', 'approved')->pluck('banner_creative_id')->flip()
+            : collect();
+        $validator = app(CampaignPackSafetyValidator::class);
+        $banners = [];
+        $withheld = [];
+        foreach ($creatives as $banner) {
+            $key = "banner-{$banner->id}";
+            $name = filled($banner->headline) ? 'banner “'.mb_strimwidth((string) $banner->headline, 0, 60, '…').'”' : 'banner';
+            if (! $approved->has($banner->id)) {
+                $withheld[$key] = "The {$name} is not approved yet. Approve it in Review, or choose another image.";
+            } elseif ($prices = $validator->bannerPrices($banner)) {
+                $withheld[$key] = "The {$name} shows a price the product page does not (".implode(', ', $prices).'). Choose another image.';
+            } else {
+                $banners[] = [
+                    'kind' => 'banner', 'id' => $banner->id, 'key' => $key, 'alt' => (string) ($banner->headline ?: $product->name),
+                    'label' => 'Banner'.($banner->headline ? ': '.$banner->headline : ''), 'width' => $banner->width ? (int) $banner->width : null, 'height' => $banner->height ? (int) $banner->height : null,
+                ];
+            }
+        }
 
-        return $media->values()->concat($banners)->values()->all();
+        return [$media->values()->concat($banners)->values()->all(), $withheld];
     }
 
     /** @return list<array> product photos only, as section image references */

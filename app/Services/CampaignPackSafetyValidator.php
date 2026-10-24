@@ -296,14 +296,35 @@ class CampaignPackSafetyValidator
         return null;
     }
 
+    /** The currency code the product page gives with its structured price, "*" when it gives none. */
+    public function pageCurrency(?SourceSnapshot $source): string
+    {
+        $code = strtoupper(trim((string) data_get($source?->extracted_truth ?? [], 'currency', '')));
+
+        return $this->currency($code) ?? (preg_match('/^[A-Z]{3}$/', $code) ? $code : '*');
+    }
+
+    /**
+     * A price as "CUR amount": "₹699" is "INR 699". A bare amount takes $currency ("*" for unknown).
+     * Null when the text holds no number.
+     */
+    public function labelPrice(string $price, string $currency = '*'): ?string
+    {
+        $labelled = $this->currencyAmounts($price, $currency === '*' ? [] : [$currency]);
+        if ($labelled !== []) {
+            return $labelled[0];
+        }
+
+        return preg_match('/\\d(?:[\\d.,]*\\d)?/u', $price, $number) ? $currency.' '.$this->amount($number[0]) : null;
+    }
+
     /**
      * @return array{0: list<array{0: string, 1: int}>, 1: list<array{0: string, 1: int}>|null, 2: list<string>}
      */
     private function pagePrices(SourceSnapshot $source): array
     {
         $truth = $source->extracted_truth ?? [];
-        $code = strtoupper(trim((string) data_get($truth, 'currency', '')));
-        $currency = $this->currency($code) ?? (preg_match('/^[A-Z]{3}$/', $code) ? $code : '*');
+        $currency = $this->pageCurrency($source);
         $explicit = [(string) data_get($truth, 'price', '')];
         if (ProductKnowledge::available() && $source->product_id) {
             // A price the team confirmed, or one they saved that no page supplied. A value only ever

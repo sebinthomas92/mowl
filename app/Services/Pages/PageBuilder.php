@@ -132,6 +132,9 @@ class PageBuilder
             if ($locked->document_revision !== $baseRevision) {
                 throw ValidationException::withMessages(['revision' => 'This page changed in another tab or by the AI. Reload to get the latest version.']);
             }
+            if (is_array($document) && count(array_filter((array) ($document['sections'] ?? []), 'is_array')) > Document::MAX_SECTIONS) {
+                throw ValidationException::withMessages(['page' => 'A page can have up to '.Document::MAX_SECTIONS.' sections. Remove one to save your changes.']);
+            }
             $clean = Document::sanitize($document, $this->imageCheck($locked));
             $clean['confirmations'] = (array) ($locked->document['confirmations'] ?? []);
             if ($locked->hasDocument() && $this->same($clean, $locked->document)) {
@@ -168,11 +171,19 @@ class PageBuilder
         $page->loadMissing('product');
         $brief = ProductBrief::for($page->product);
         $issue = $this->edit($page, function (Page $locked) use ($key, $actor, $brief): array {
-            $issue = collect($this->claims->check((array) $locked->document, $brief))->first(fn (array $issue) => $issue['key'] === $key && $issue['kind'] === 'confirm');
+            $issues = collect($this->claims->check((array) $locked->document, $brief));
+            $issue = $issues->first(fn (array $issue) => $issue['key'] === $key && $issue['kind'] === 'confirm');
             if (! $issue) {
                 throw ValidationException::withMessages(['confirm' => 'That text changed since it was checked. Look at it again.']);
             }
             $document = (array) $locked->document;
+            $confirmations = (array) ($document['confirmations'] ?? []);
+            if (count($confirmations) >= Document::MAX_CONFIRMATIONS) {
+                // Old wording leaves confirmations behind. At the limit, keep only those for what the page says now.
+                $confirmations = array_intersect_key($confirmations, $issues->pluck('key')->filter()->flip()->all());
+            }
+            unset($confirmations[$key]);
+            $document['confirmations'] = $confirmations;
             $document['confirmations'][$key] = [
                 'by' => $actor->id, 'name' => mb_substr((string) $actor->name, 0, 120), 'at' => now()->toIso8601String(),
                 'text' => mb_substr($issue['where'].($issue['text'] !== '' ? ': '.$issue['text'] : ''), 0, 300),
@@ -313,13 +324,16 @@ class PageBuilder
         $locked->save();
     }
 
-    /** Images a page may use: ones in its own workspace. */
+    /**
+     * Images a page may hold: its own product's. A banner that is not approved yet may stay, so the
+     * publish checks can say why it cannot go out yet.
+     */
     private function imageCheck(Page $page): callable
     {
         $known = [];
 
         return function (array $ref) use (&$known, $page): bool {
-            return $known[$ref['key']] ??= $this->images->find($ref, $page->workspace_id) !== null;
+            return $known[$ref['key']] ??= $this->images->find($ref, $page->workspace_id, (int) $page->product_id) !== null;
         };
     }
 

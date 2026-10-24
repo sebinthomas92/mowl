@@ -32,9 +32,14 @@ class PagePublisher
         private StoreClients $clients,
     ) {}
 
-    public function publish(Page $page, User $actor): PublishAttempt
+    /**
+     * Publishes the saved draft. $revision is the document revision the person is looking at: when
+     * the page changed since (another tab, a teammate, the AI), nothing is published, so no one
+     * publishes text they have not seen.
+     */
+    public function publish(Page $page, User $actor, ?int $revision = null): PublishAttempt
     {
-        return $this->send($page, $actor, null);
+        return $this->send($page, $actor, null, $revision);
     }
 
     /** Re-publishes an earlier version that was live before. The draft is kept as it is. */
@@ -117,13 +122,16 @@ class PagePublisher
         });
     }
 
-    private function send(Page $page, User $actor, ?int $rollbackTo): PublishAttempt
+    private function send(Page $page, User $actor, ?int $rollbackTo, ?int $revision = null): PublishAttempt
     {
         $this->authorize($page, $actor);
-        [$page, $attempt] = DB::transaction(function () use ($page, $actor, $rollbackTo): array {
+        [$page, $attempt] = DB::transaction(function () use ($page, $actor, $rollbackTo, $revision): array {
             $page = Page::query()->lockForUpdate()->findOrFail($page->id);
             if ($page->isBusy()) {
                 throw ValidationException::withMessages(['publish' => 'A publish is already running for this page.']);
+            }
+            if ($revision !== null && $page->hasDocument() && $page->document_revision !== $revision) {
+                throw ValidationException::withMessages(['publish' => 'This page changed in another tab or by the AI since you opened it. Reload to see the latest version, then publish.']);
             }
             $store = $page->storeConnection;
             if (! $store) {

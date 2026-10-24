@@ -23,8 +23,9 @@ use Throwable;
  * direction. Each run is recorded with what it cost. The first whole-page write of a page is included;
  * later ones cost a credit, returned if the run fails. Section rewrites are included.
  *
- * The run happens inside the request. The editor waits for it with the page locked, so nothing the
- * person types can be overwritten by the AI's answer.
+ * The run happens inside the request, and the editor waits for it with its page locked. The answer
+ * is written only into the revision the run started from: if anyone saved the page meanwhile (another
+ * tab, a teammate), the answer is dropped and the credit returned, so it never overwrites their edits.
  */
 class PageGenerator
 {
@@ -119,8 +120,12 @@ class PageGenerator
             if ($kind === 'section' && ! is_array($writing->sections[$sectionId] ?? null)) {
                 throw ValidationException::withMessages(['ai' => 'The AI returned nothing for this section. Try again.']);
             }
-            $result = $this->builder->edit($page, function (Page $locked) use ($writing, $targets, $kind): array {
-                // Written into the page as it is now: only the AI fields of the target sections change.
+            $result = $this->builder->edit($page, function (Page $locked) use ($writing, $targets, $kind, $generation): array {
+                if ($locked->document_revision !== $generation->base_revision) {
+                    throw ValidationException::withMessages(['revision' => 'This page was saved elsewhere while the AI was writing, so its text was not added and those edits are kept.'
+                        .($generation->credit_cost > 0 ? ' Your credit was returned.' : '').' Reload to see the latest version, then try again.']);
+                }
+                // Only the AI fields of the target sections change.
                 $locked->document = PageCopy::merge((array) $locked->document, $writing->sections, $targets, $kind === 'page');
                 $locked->document_revision++;
                 $locked->save();
@@ -167,8 +172,11 @@ class PageGenerator
         return [$sectionId];
     }
 
-    /** Runs cut off before they finished (the function hit its time limit) are failed and refunded. */
-    private function settleStale(Page $page): void
+    /**
+     * Runs cut off before they finished (the function hit its time limit or the server stopped) are
+     * failed and refunded. Runs when the AI writes and when the editor opens.
+     */
+    public function settleStale(Page $page): void
     {
         $page->generations()->where('status', 'running')->where('created_at', '<', now()->subMinutes(self::STALE_MINUTES))->get()
             ->each(function (PageGeneration $generation): void {

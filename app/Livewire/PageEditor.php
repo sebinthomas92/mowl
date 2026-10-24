@@ -75,6 +75,8 @@ class PageEditor extends Component
                 return $this->redirectRoute('pages.preview', [$product, $page]);
             }
         }
+        // An AI run the server cut off gets its credit back when the page is next opened.
+        app(PageGenerator::class)->settleStale($page);
         $this->config = $this->startingConfig($page);
     }
 
@@ -242,9 +244,10 @@ class PageEditor extends Component
         }
     }
 
-    public function publish(PagePublisher $publisher): void
+    /** $revision is the one the editor shows: a page changed since is not published. */
+    public function publish(int $revision, PagePublisher $publisher): void
     {
-        $attempt = $publisher->publish($this->page(), auth()->user());
+        $attempt = $publisher->publish($this->page(), auth()->user(), $revision);
         $this->flash = match ($attempt->status) {
             'live' => "v{$attempt->pageVersion->version} is live. The page address serves it.",
             'verifying' => "The store accepted v{$attempt->pageVersion->version}. Checking the page address…",
@@ -318,6 +321,8 @@ class PageEditor extends Component
             ],
             'templates' => array_map(fn (array $template) => $template + ['theme' => Templates::theme($template['key'], $brief)], Templates::choices()),
             'images' => $this->imageList(),
+            'withheldBanners' => count($brief->withheld),
+            'limits' => ['sections' => Document::MAX_SECTIONS],
             'ai' => $this->aiState($page),
             'state' => $this->state($page),
             'checks' => $this->checks($page),
@@ -354,7 +359,7 @@ class PageEditor extends Component
 
         return [
             'publish' => $page->publish_state, 'tone' => $tone, 'label' => $label, 'draft' => $page->draft_version, 'live' => $page->live_version,
-            'frozen' => $page->draftIsFrozen(), 'url' => $page->remote_url, 'name' => $page->name, 'slug' => $page->slug,
+            'frozen' => $page->draftIsFrozen(), 'url' => app(PageBuilder::class)->safeUrl($page->remote_url) ? $page->remote_url : null, 'name' => $page->name, 'slug' => $page->slug,
         ];
     }
 
@@ -400,7 +405,7 @@ class PageEditor extends Component
             $this->imageList();
         }
 
-        return $this->imageChecks[$ref['key']] ??= isset($this->imageMap[$ref['key']]) || app(PageImages::class)->find($ref, $this->page()->workspace_id) !== null;
+        return $this->imageChecks[$ref['key']] ??= isset($this->imageMap[$ref['key']]) || app(PageImages::class)->find($ref, $this->product()->brand->workspace_id, $this->productId) !== null;
     }
 
     private function resolveImage(array $ref): ?array
@@ -442,9 +447,13 @@ class PageEditor extends Component
         return $this->productModel = $product;
     }
 
+    /**
+     * The page, found through product() so every action checks again that the person is still a
+     * member of the workspace with this product in their brand scope.
+     */
     private function page(): Page
     {
-        $page = Page::query()->where('product_id', $this->productId)->find($this->pageId);
+        $page = $this->product()->pages()->find($this->pageId);
         abort_unless($page, 404);
 
         return $page;

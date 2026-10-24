@@ -29,7 +29,7 @@
 
             <div class="pe-top-right">
                 <span class="pe-save" :class="'is-' + saveState" role="status" aria-live="polite">
-                    <i class="ti" :class="{ saved: 'ti-cloud-check', saving: 'ti-loader-2', unsaved: 'ti-pencil', error: 'ti-cloud-off', conflict: 'ti-alert-triangle' }[saveState]" aria-hidden="true"></i>
+                    <i class="ti" :class="{ saved: 'ti-cloud-check', saving: 'ti-loader-2', unsaved: 'ti-pencil', error: 'ti-cloud-off', refused: 'ti-cloud-off', conflict: 'ti-alert-triangle' }[saveState]" aria-hidden="true"></i>
                     <span class="pe-wide-only" x-text="saveLabel()"></span>
                 </span>
                 <button type="button" class="pe-tb pe-ai-btn" :class="rightTab === 'ai' && 'is-on'" @click="rightTab = 'ai'" aria-label="Write with AI" title="Write with AI"><i class="ti ti-sparkles" aria-hidden="true"></i></button>
@@ -438,6 +438,7 @@
                 <template x-if="!images.length">
                     <p class="pe-empty-note">No images yet. Upload one, or get the photos from the product page.</p>
                 </template>
+                <p class="pe-empty-note" x-show="config.withheldBanners > 0" x-cloak x-text="(config.withheldBanners === 1 ? '1 banner of this product is not shown.' : config.withheldBanners + ' banners of this product are not shown.') + ' A banner can go on a page once it is approved in Review and shows no price the product page does not.'"></p>
                 <footer class="pe-dialog-foot" x-show="picker.multiple">
                     <span class="small muted" x-text="picker.chosen.length ? picker.chosen.length + ' selected, added in this order' : 'Select images in the order you want them'"></span>
                     <span class="sp"></span>
@@ -499,7 +500,7 @@
                 @if($store)
                     <div class="kv"><span>Connection</span><span>@if($store->isConnected())<span class="tag ok"><span class="dot"></span>Connected</span>@else<span class="tag warn"><span class="dot"></span>Needs attention</span>@endif</span></div>
                 @endif
-                <div class="kv"><span>Address</span><span class="pe-break">@if($page->remote_url)<a href="{{ $page->remote_url }}" target="_blank" rel="noopener">{{ $page->remote_url }}</a>@else{{ '/'.$page->slug }}@endif</span></div>
+                <div class="kv"><span>Address</span><span class="pe-break">@if($state['url'])<a href="{{ $state['url'] }}" target="_blank" rel="noopener">{{ $state['url'] }}</a>@else{{ '/'.$page->slug }}@endif</span></div>
                 <div class="kv"><span>Version</span><span>v{{ $page->draft_version }}@if($page->live_version && $page->live_version !== $page->draft_version) replaces live v{{ $page->live_version }}@endif</span></div>
             </section>
 

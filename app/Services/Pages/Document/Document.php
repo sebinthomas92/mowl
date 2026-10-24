@@ -16,6 +16,8 @@ final class Document
 
     public const MAX_SECTIONS = 40;
 
+    public const MAX_CONFIRMATIONS = 200;
+
     /** A new, empty document with the default theme. */
     public static function blank(array $theme = []): array
     {
@@ -79,7 +81,7 @@ final class Document
             'theme' => Theme::sanitize($document['theme'] ?? null),
             'buy_url' => self::url($document['buy_url'] ?? ''),
             'sections' => $sections,
-            'confirmations' => array_slice($confirmations, 0, 200, true),
+            'confirmations' => array_slice($confirmations, 0, self::MAX_CONFIRMATIONS, true),
         ];
     }
 

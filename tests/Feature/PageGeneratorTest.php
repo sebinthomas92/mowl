@@ -251,6 +251,39 @@ class PageGeneratorTest extends TestCase
         $this->assertEqualsWithDelta((4000 * 2.70 + 900 * 16.20) / 1_000_000, (float) $generation->cost_usd, 0.00001);
     }
 
+    public function test_the_answer_is_dropped_and_the_credit_returned_when_the_page_was_saved_while_the_ai_wrote(): void
+    {
+        [$owner, $workspace, $page] = $this->fixture();
+        $workspace->credits()->create(['amount' => 1, 'event' => 'test_allocation', 'description' => 'Test credits']);
+        PageGeneration::create(['workspace_id' => $workspace->id, 'page_id' => $page->id, 'user_id' => $owner->id, 'kind' => 'page', 'status' => 'completed', 'base_revision' => 1, 'credit_cost' => 0]);
+        $heroId = Document::first($page->document, 'product_hero')['id'];
+        $this->useWriter(new class($page, $heroId) implements PageWriter
+        {
+            public function __construct(private Page $page, private string $heroId) {}
+
+            public function write(ProductBrief $brief, array $document, array $targets, string $instruction): PageWriting
+            {
+                // A teammate saves the hero while the AI is still writing.
+                $fresh = $this->page->fresh();
+                $document = $fresh->document;
+                $hero = array_search($this->heroId, array_column($document['sections'], 'id'), true);
+                $document['sections'][$hero]['settings']['subtitle'] = 'Typed by a teammate';
+                app(PageBuilder::class)->saveDocument($fresh, $document, $fresh->document_revision);
+
+                return new PageWriting([$this->heroId => ['subtitle' => 'Written by the AI']], 'mock');
+            }
+        });
+
+        $this->assertWriteFails(fn () => app(PageGenerator::class)->write($page, $owner, null, '', 1),
+            'This page was saved elsewhere while the AI was writing, so its text was not added and those edits are kept. Your credit was returned. Reload to see the latest version, then try again.');
+
+        $page->refresh();
+        $this->assertSame('Typed by a teammate', Document::first($page->document, 'product_hero')['settings']['subtitle']);
+        $this->assertSame(2, $page->document_revision);
+        $this->assertSame(1, $workspace->creditBalance());
+        $this->assertSame('failed', $page->generations()->latest('id')->value('status'));
+    }
+
     private function assertWriteFails(callable $write, string $message): void
     {
         try {

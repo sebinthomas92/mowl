@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Livewire\PageEditor;
 use App\Livewire\ProductPages;
 use App\Livewire\StoreConnections;
+use App\Models\BannerCreative;
 use App\Models\CampaignPack;
+use App\Models\ContentItem;
 use App\Models\Page;
 use App\Models\StoreConnection;
 use App\Models\User;
@@ -14,6 +16,7 @@ use App\Notifications\PageActivity;
 use App\Services\ContentLibrary;
 use App\Services\MockCampaignPackGenerator;
 use App\Services\Pages\Document\Document;
+use App\Services\Pages\Document\ProductBrief;
 use App\Services\Pages\PageBuilder;
 use App\Services\Pages\PagePublisher;
 use App\Services\Pages\StoreException;
@@ -23,6 +26,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -32,7 +36,7 @@ class PagesTest extends TestCase
     use RefreshDatabase;
 
     /** A minimal WordPress with WooCommerce: pages and media in memory, served at their links. */
-    private array $wp = ['pages' => [], 'media' => 0, 'stale' => false, 'fail' => null, 'timeout' => false, 'filtered' => false, 'templates' => ['page-no-title'], 'requests' => []];
+    private array $wp = ['pages' => [], 'media' => 0, 'stale' => false, 'fail' => null, 'timeout' => false, 'filtered' => false, 'templates' => ['page-no-title'], 'link' => null, 'requests' => []];
 
     public function test_a_new_page_is_filled_from_the_product_and_claims_its_sources_do_not_back_hold_publishing(): void
     {
@@ -98,7 +102,7 @@ class PagesTest extends TestCase
         $this->assertSame(["Customer reviews needs an owner's confirmation before publishing."], $builder->blockers($page));
         $pack->product->facts()->updateOrCreate(['key' => 'price'], ['workspace_id' => $workspace->id, 'confirmed_value' => '₹699', 'status' => 'ok']);
         $page = $this->editDocument($page, fn (array $document) => data_set($document, "sections.{$hero}.settings.price", '₹599'));
-        $this->assertContains("The page shows ₹599, but the product's price is ₹699. Show the price your store charges, or correct it in Knowledge.", $builder->blockers($page));
+        $this->assertContains("The page shows ₹599, but the product's price is ₹699. Show only the price your store charges (a former price goes in Compare-at price), or correct it in Knowledge.", $builder->blockers($page));
         $page = $this->editDocument($page, fn (array $document) => data_set($document, "sections.{$hero}.settings.price", 'Rs. 699'));
         $this->assertSame(["Customer reviews needs an owner's confirmation before publishing."], $builder->blockers($page), 'The same amount written another way matches.');
     }
@@ -121,7 +125,7 @@ class PagesTest extends TestCase
         $this->editor($owner, $page)
             ->call('openDrawer')
             ->assertSee("Everything the page claims is backed by the product's sources.", false)
-            ->call('publish')
+            ->call('publish', $page->fresh()->document_revision)
             ->assertHasNoErrors()
             ->assertSee('v1 is live')
             ->assertDispatched('page-state');
@@ -156,7 +160,7 @@ class PagesTest extends TestCase
         $this->wp['templates'] = [];
         $page->update(['store_connection_id' => $this->connectStore($owner)->id]);
 
-        $this->editor($owner, $page)->call('openDrawer')->call('publish')->assertHasNoErrors()
+        $this->editor($owner, $page)->call('openDrawer')->call('publish', $page->fresh()->document_revision)->assertHasNoErrors()
             ->assertSee('removed its layout styles');
         $this->assertStringContainsString('Administrator account', (string) $page->attempts()->sole()->warning);
         $creates = collect($this->wp['requests'])->filter(fn (Request $request) => $request->method() === 'POST' && str_ends_with($request->url(), '/wp-json/wp/v2/pages'))->values();
@@ -316,7 +320,7 @@ class PagesTest extends TestCase
         $this->editor($owner, $page)
             ->call('chooseStore', (string) $store->id)
             ->call('openDrawer')
-            ->call('publish')
+            ->call('publish', $page->fresh()->document_revision)
             ->assertHasNoErrors()
             ->assertSee('v1 is live');
 
@@ -422,7 +426,7 @@ class PagesTest extends TestCase
         $this->wp['stale'] = true;
         $this->editor($owner, $page)
             ->call('chooseStore', (string) $second->id)
-            ->call('publish')
+            ->call('publish', $page->fresh()->document_revision)
             ->assertHasNoErrors();
         $this->assertCount(2, $this->wp['pages'], 'The second store gets its own page, not an update of the first one.');
         $this->assertSame('verifying', $page->fresh()->publish_state);
@@ -492,6 +496,122 @@ class PagesTest extends TestCase
         $this->actingAs($stranger)->get(route('pages.template-preview', [$pack->product, 'studio']))->assertNotFound();
         $this->actingAs($owner)->get(route('products.show', [$pack->product, 'tab' => 'pages']))
             ->assertOk()->assertSee('Landing pages')->assertSee($page->name)->assertSee('Open editor');
+    }
+
+    public function test_a_page_uses_a_banner_only_once_it_is_approved_and_shows_no_price_the_product_page_does_not(): void
+    {
+        Storage::fake('local');
+        [$owner, , $pack] = $this->fixture();
+        $draft = $this->banner($pack, $owner, 'Read in comfort');
+        $approved = $this->banner($pack, $owner, 'Read in comfort, all night', approved: true);
+        // Approved before its price stopped matching the product page.
+        $priced = $this->banner($pack, $owner, 'INR 399 today only', approved: true);
+        $page = $this->approvedPage($owner, $pack);
+        $builder = app(PageBuilder::class);
+
+        $keys = array_column(ProductBrief::images($pack->product), 'key');
+        $this->assertContains("banner-{$approved->id}", $keys);
+        $this->assertNotContains("banner-{$draft->id}", $keys, 'The image picker leaves out banners not approved yet.');
+        $this->assertNotContains("banner-{$priced->id}", $keys);
+        $this->editor($owner, $page)->assertSee('"withheldBanners":2', false);
+
+        $hero = $this->index($page, 'product_hero');
+        $use = fn (int $id) => $this->editDocument($page, fn (array $document) => data_set($document, "sections.{$hero}.settings.images", [['kind' => 'banner', 'id' => $id, 'alt' => 'Banner']]));
+        $page = $use($draft->id);
+        $this->assertSame("banner-{$draft->id}", $page->document['sections'][$hero]['settings']['images'][0]['key'], 'The page keeps the banner so it can say why it cannot go out.');
+        $this->assertSame(['The banner “Read in comfort” is not approved yet. Approve it in Review, or choose another image.'], $builder->blockers($page));
+        $page = $use($priced->id);
+        $this->assertSame(['The banner “INR 399 today only” shows a price the product page does not (399). Choose another image.'], $builder->blockers($page));
+        $page = $use($approved->id);
+        $this->assertSame([], $builder->blockers($page));
+
+        $this->fakeWordPress();
+        $page->update(['store_connection_id' => $this->connectStore($owner)->id]);
+        $this->assertSame('live', app(PagePublisher::class)->publish($page->fresh(), $owner)->status);
+        $this->assertSame(1, $this->wp['media'], 'The approved banner is uploaded with the page.');
+    }
+
+    public function test_the_hero_price_is_the_products_price_in_its_currency_and_a_former_price_goes_in_compare_at(): void
+    {
+        [$owner, $workspace, $pack] = $this->fixture();
+        $pack->product->facts()->updateOrCreate(['key' => 'price'], ['workspace_id' => $workspace->id, 'confirmed_value' => '₹699', 'status' => 'ok']);
+        $page = $this->approvedPage($owner, $pack);
+        $builder = app(PageBuilder::class);
+        $hero = $this->index($page, 'product_hero');
+        $price = function (string $price, string $compare = '') use (&$page, $hero, $builder): array {
+            $page = $this->editDocument($page, function (array $document) use ($hero, $price, $compare): array {
+                $document['sections'][$hero]['settings']['price'] = $price;
+                $document['sections'][$hero]['settings']['compare_price'] = $compare;
+
+                return $document;
+            });
+
+            return collect($builder->issues($page))->where('section', $page->document['sections'][$hero]['id'])->map(fn (array $issue) => [$issue['kind'], $issue['path']])->values()->all();
+        };
+
+        foreach (['₹699', 'Rs. 699', 'INR 699.00', '699'] as $same) {
+            $this->assertSame([], $price($same), "{$same} is the product's price.");
+        }
+        foreach (['$699', '699 USD', '₹599', '₹699 · was ₹1,999', 'Now ₹699 (was ₹999)'] as $wrong) {
+            $this->assertContains(['blocker', 'price'], $price($wrong), "{$wrong} is not the product's price alone.");
+        }
+        $this->assertSame([['confirm', 'price']], $price('₹699, 65% off today'), 'Words beside the price are claims to confirm.');
+        $this->assertSame([['blocker', 'compare_price']], $price('₹699', '$1,999'), 'A former price in another currency would make the saving wrong.');
+        $this->assertContains(['blocker', 'compare_price'], $price('₹699', '₹1,999 ₹2,499'));
+        $this->assertSame([['confirm', 'compare_price']], $price('₹699', '₹1,999'), 'A former price the product page does not show needs an owner.');
+    }
+
+    public function test_a_guarantee_heading_on_its_own_still_needs_an_owner(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $page = $this->approvedPage($owner, $pack);
+        $page = $this->editDocument($page, function (array $document): array {
+            $document['sections'][] = Document::section('guarantee', ['heading' => '30-day money-back guarantee, no questions asked', 'text' => '']);
+
+            return $document;
+        });
+
+        $issue = collect(app(PageBuilder::class)->issues($page))->firstWhere('where', 'Guarantee');
+        $this->assertSame('confirm', $issue['kind']);
+        $this->assertSame('30-day money-back guarantee, no questions asked', $issue['text']);
+        $this->assertSame(["Guarantee needs an owner's confirmation before publishing."], app(PageBuilder::class)->blockers($page));
+    }
+
+    public function test_confirming_a_claim_works_when_old_confirmations_have_filled_the_limit(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $builder = app(PageBuilder::class);
+        $page = $this->approvedPage($owner, $pack);
+        $hero = $this->index($page, 'product_hero');
+        $page = $this->editDocument($page, fn (array $document) => data_set($document, "sections.{$hero}.settings.subtitle", 'Loved by 12,000 readers'));
+        $document = $page->document;
+        for ($i = 0; $i < Document::MAX_CONFIRMATIONS; $i++) {
+            $document['confirmations'][sha1("old wording {$i}")] = ['by' => $owner->id, 'name' => $owner->name, 'at' => now()->toIso8601String(), 'text' => 'Old wording'];
+        }
+        Page::query()->whereKey($page->id)->update(['document' => json_encode($document)]);
+        $page->refresh();
+        $key = collect($builder->issues($page))->firstWhere('kind', 'confirm')['key'];
+
+        $builder->confirm($page, $key, $owner);
+
+        $page->refresh();
+        $this->assertSame([], $builder->blockers($page));
+        $this->assertSame([$key], array_keys($page->document['confirmations']), 'Confirmations of wording the page no longer has are dropped at the limit.');
+    }
+
+    public function test_a_store_address_that_is_not_a_web_link_is_not_kept(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $page = $this->approvedPage($owner, $pack);
+        $this->fakeWordPress();
+        $this->wp['link'] = 'javascript:alert(document.domain)';
+        $page->update(['store_connection_id' => $this->connectStore($owner)->id]);
+
+        $attempt = app(PagePublisher::class)->publish($page->fresh(), $owner);
+
+        $this->assertSame('failed', $attempt->status);
+        $this->assertStringContainsString('gave an address that is not a web link', (string) $attempt->error);
+        $this->assertNull($page->fresh()->remote_url);
     }
 
     private function editor(User $user, Page $page)
@@ -580,7 +700,7 @@ class PagesTest extends TestCase
                 $this->wp['pages'][$id] = ['slug' => $request['slug'], 'content' => $content, 'previous' => $previous['content'] ?? ''];
 
                 return Http::response([
-                    'id' => $id, 'link' => 'https://shop.test/'.$request['slug'].'/', 'content' => ['raw' => $content],
+                    'id' => $id, 'link' => $this->wp['link'] ?? 'https://shop.test/'.$request['slug'].'/', 'content' => ['raw' => $content],
                     '_links' => $this->wp['filtered'] ? [] : ['https://api.w.org/action-unfiltered-html' => [['href' => $url]]],
                 ], isset($match[1]) ? 200 : 201);
             }
@@ -618,6 +738,29 @@ class PagesTest extends TestCase
         $page->update(['slug' => 'pages-launch']);
 
         return $page->fresh();
+    }
+
+    /** A finished banner of the pack, with its content item approved when $approved. */
+    private function banner(CampaignPack $pack, User $owner, string $headline, bool $approved = false): BannerCreative
+    {
+        $version = $pack->versions()->firstOrFail();
+        $batch = $pack->product->brand->workspace->bannerGenerationBatches()->create([
+            'campaign_pack_id' => $pack->id, 'campaign_pack_version_id' => $version->id,
+            'requested_by_user_id' => $owner->id, 'kind' => 'included', 'requested_count' => 1, 'status' => 'completed',
+        ]);
+        $path = 'creatives/'.Str::random(8).'.png';
+        Storage::disk('local')->put($path, 'png');
+        $creative = $batch->creatives()->create([
+            'campaign_pack_id' => $pack->id, 'campaign_pack_version_id' => $version->id, 'sequence' => 1, 'direction' => 'Product first',
+            'layout' => 'bottom_panel', 'headline' => $headline, 'cta' => 'Shop now', 'prompt' => 'Banner', 'status' => 'completed',
+            'disk' => 'local', 'output_path' => $path, 'width' => 1080, 'height' => 1350,
+        ]);
+        app(ContentLibrary::class)->syncPack($pack);
+        if ($approved) {
+            ContentItem::query()->where('banner_creative_id', $creative->id)->update(['status' => 'approved']);
+        }
+
+        return $creative;
     }
 
     private function fixture(string $name = 'Pages'): array

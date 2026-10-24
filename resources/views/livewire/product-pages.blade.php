@@ -82,7 +82,7 @@
                                 {{ $page->hasDocument() ? ($labels[$page->template] ?? 'Custom').' template' : 'Made before the editor; opening it converts it' }}
                                 · draft v{{ $page->draft_version }} · edited {{ $page->updated_at?->diffForHumans() }}
                             </span>
-                            @if($page->remote_url)
+                            @if(preg_match('#^https?://#i', (string) $page->remote_url))
                                 <a class="small pages-card-url" href="{{ $page->remote_url }}" target="_blank" rel="noopener">{{ $page->remote_url }}</a>
                             @else
                                 <span class="small muted">Not published yet · /{{ $page->slug }}</span>
