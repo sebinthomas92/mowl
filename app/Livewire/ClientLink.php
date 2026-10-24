@@ -150,17 +150,25 @@ class ClientLink extends Component
      */
     private function canDecide(ContentClientLink|ProductHubShare $link): bool
     {
-        if (! ContentLibrary::available() || ! $link->created_by_user_id) {
-            return false;
-        }
-        $creator = User::find($link->created_by_user_id);
+        return ContentLibrary::available() && self::makerCanApprove($link->created_by_user_id ? User::find($link->created_by_user_id) : null, $link->product);
+    }
 
-        return (bool) ($creator ? Membership::of($creator, $link->workspace_id)?->canReview() : false);
+    /** Whether someone could approve this product's work themselves: a reviewing role with the product's brand in scope. */
+    public static function makerCanApprove(?User $maker, Product $product): bool
+    {
+        $membership = $maker ? Membership::of($maker, $product->brand->workspace_id) : null;
+
+        return (bool) ($membership?->canReview() && $membership->allowsBrand($product->brand_id));
     }
 
     private function decider(): string
     {
-        abort_unless($this->canDecide($this->link()), 403);
+        $link = $this->link();
+        abort_unless($this->canDecide($link), 403);
+        // A named review link always decides as the person it was made for.
+        if ($link instanceof ContentClientLink) {
+            return $link->client_name;
+        }
         $this->validate(['reviewerName' => ['required', 'string', 'max:120']], ['reviewerName.required' => 'Add your name so the team knows who decided.']);
 
         return trim($this->reviewerName);

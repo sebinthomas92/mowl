@@ -232,7 +232,8 @@ class ContentItemsTest extends TestCase
             ->assertSee('Approve version 1')->assertDontSee('Ranked angles')->assertDontSee('Your name');
 
         $page = Livewire::test(ClientLink::class, ['token' => $token])->assertSet('kind', 'review')->assertSet('reviewerName', 'Priya at Northline');
-        $page->call('approve', $positioning->id)->assertHasNoErrors()
+        // The name comes from the link, not from anything the page sends back.
+        $page->set('reviewerName', 'Someone Else')->call('approve', $positioning->id)->assertHasNoErrors()
             ->call('requestChanges', $offers->id)->assertHasErrors(['comments.'.$offers->id => 'required'])
             ->set('comments.'.$offers->id, 'Please drop the bundle line.')
             ->call('requestChanges', $offers->id)->assertHasNoErrors();
@@ -273,9 +274,27 @@ class ContentItemsTest extends TestCase
         $this->assertSame('approved', $positioning->fresh()->status);
         $this->assertSame('Dana from Northline', $positioning->fresh()->latestVersion->reviewed_by_name);
 
-        // A contributor can share, but cannot approve work, so a link they make is view only.
+        // A signed-in person (here a client account of another workspace) can decide through the link too.
         $offers = $pack->contentItems()->where('section', 'offers')->firstOrFail();
         $library->submit($offers->latestVersion, $owner);
+        $signedIn = User::factory()->create();
+        Workspace::create(['name' => 'Elsewhere'])->users()->attach($signedIn, ['role' => 'client']);
+        Livewire::actingAs($signedIn)->test(ClientLink::class, ['token' => $share->token])
+            ->set('reviewerName', 'Dana')->call('requestChanges', $offers->id)->assertHasErrors(['comments.'.$offers->id])
+            ->set('comments.'.$offers->id, 'Shorter please.')->call('requestChanges', $offers->id)->assertHasNoErrors();
+        $this->assertSame('changes', $offers->fresh()->status);
+        auth()->logout();
+
+        // A reviewer whose brand scope excludes this product cannot make an approving link.
+        $scoped = User::factory()->create();
+        $otherBrand = $workspace->brands()->create(['name' => 'Elsewhere Brand']);
+        $workspace->users()->attach($scoped, ['role' => 'reviewer', 'brand_id' => $otherBrand->id]);
+        $share->update(['created_by_user_id' => $scoped->id]);
+        $this->get(route('product-hubs.share', $share->token))->assertOk()->assertSee('View only');
+
+        // A contributor can share, but cannot approve work, so a link they make is view only.
+        $library->submit($library->revise($offers->fresh(), $owner), $owner);
+        $offers->refresh();
         $contributor = User::factory()->create();
         $workspace->users()->attach($contributor, ['role' => 'member']);
         $share->update(['created_by_user_id' => $contributor->id]);

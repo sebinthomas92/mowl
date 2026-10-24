@@ -9,7 +9,7 @@
         ->sortByDesc(fn ($row) => $row['version']->reviewed_at ?? $row['version']->updated_at)->values();
     // A client can approve through the link only when the person who made it can approve work themselves.
     $linkMaker = $share ? \App\Models\User::find($share->created_by_user_id) : auth()->user();
-    $clientCanDecide = $linkMaker && (bool) \App\Support\Membership::of($linkMaker, $product->brand->workspace_id)?->canReview();
+    $clientCanDecide = \App\Livewire\ClientLink::makerCanApprove($linkMaker, $product);
 @endphp
 
 @if($latestPack || $version)
