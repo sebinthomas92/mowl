@@ -32,6 +32,10 @@ class StoreApprovalController extends Controller
             return $this->back('WordPress did not send a password back. Click Connect with WordPress to try again.');
         }
 
+        if (! $connector->claimApproval($pending)) {
+            return $this->back('That WordPress approval was already used. If the store is not listed below, click Connect with WordPress again.');
+        }
+
         $store = $pending['store']
             ? StoreConnection::query()->where('workspace_id', $workspace->id)->findOrFail($pending['store'])
             : new StoreConnection(['workspace_id' => $workspace->id, 'driver' => 'woocommerce', 'created_by_user_id' => $user->id]);

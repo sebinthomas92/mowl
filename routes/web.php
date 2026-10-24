@@ -71,6 +71,10 @@ Route::get('/shared/products/{token}/google-ads/{campaignType}.csv', [ProductHub
 Route::get('/shared/products/{token}/media/{mediaAsset}', [ProductHubDeliveryController::class, 'sharedMedia'])->name('product-hubs.shared-media');
 Route::get('/shared/products/{token}/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'sharedCreative'])->name('product-hubs.shared-creative');
 
+// WordPress sends the owner back here with a new application password. Outside the workspace role gate:
+// the workspace comes from the encrypted state and the controller checks ownership of that one.
+Route::get('/settings/stores/wordpress', StoreApprovalController::class)->middleware(['auth', 'throttle:20,1', NoIndex::class])->name('stores.wordpress.return');
+
 Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::post('/workspaces/{workspace}/select', function (Workspace $workspace, Request $request) {
         abort_unless($request->user()->workspaces()->whereKey($workspace->id)->exists(), 404);
@@ -104,8 +108,6 @@ Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::get('/usage', UsageIndex::class)->name('usage.index');
     Route::get('/billing', BillingIndex::class)->name('billing.index');
     Route::get('/settings', WorkspaceSettings::class)->name('workspace.settings');
-    // WordPress sends the owner back here with a new application password; the throttle limits guessing.
-    Route::get('/settings/stores/wordpress', StoreApprovalController::class)->middleware(['throttle:20,1', NoIndex::class])->name('stores.wordpress.return');
     Route::get('/concierge', ConciergeIndex::class)->name('concierge.index');
     Route::get('/portal', ClientPortal::class)->name('portal.index');
     Route::get('/portal/items/{contentItem}/image', [ClientPortalController::class, 'image'])->name('portal.image');

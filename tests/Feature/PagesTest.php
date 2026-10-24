@@ -277,6 +277,9 @@ class PagesTest extends TestCase
         $store = StoreConnection::query()->sole();
         $this->assertSame(['https://shop.test', 'editor', 'abcdabcdabcdabcd', 'connected'], [$store->site_url, $store->username, $store->secret, $store->status]);
         $this->assertSame('store_connection_added', $workspace->auditEvents()->latest('id')->value('event'));
+        $this->actingAs($owner)->get($query['success_url'].'&user_login=editor&password=abcd+abcd+abcd+abcd')
+            ->assertSessionHas('stores.problem', fn ($problem) => str_contains($problem, 'already used'));
+        $this->assertSame(1, StoreConnection::query()->count(), 'Replaying the return trip adds nothing.');
 
         Livewire::actingAs($owner)->test(StoreConnections::class)->call('open')
             ->set('name', 'Locked')->set('siteUrl', 'https://locked.test')

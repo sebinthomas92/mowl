@@ -6,6 +6,7 @@ use App\Models\StoreConnection;
 use App\Models\User;
 use App\Services\Pages\Stores\StoreClients;
 use App\Services\Pages\Stores\WooCommerceStore;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 
@@ -57,7 +58,7 @@ class StoreConnector
     {
         $endpoint = $this->wordpress->authorization($store);
         $state = Crypt::encrypt([
-            'user' => $actor->id, 'workspace' => $store->workspace_id, 'store' => $store->id, 'name' => $store->name,
+            'nonce' => bin2hex(random_bytes(16)), 'user' => $actor->id, 'workspace' => $store->workspace_id, 'store' => $store->id, 'name' => $store->name,
             'brand' => $store->brand_id, 'site' => $store->site_url, 'api' => $endpoint['api_base'],
             'expires' => now()->addMinutes(self::APPROVAL_MINUTES)->timestamp,
         ]);
@@ -86,5 +87,11 @@ class StoreConnector
         }
 
         return is_array($pending) && ($pending['user'] ?? null) === $actor->id && ($pending['expires'] ?? 0) >= now()->timestamp ? $pending : null;
+    }
+
+    /** Marks an approval as used. False when it already was, so a replayed return trip changes nothing. */
+    public function claimApproval(array $pending): bool
+    {
+        return Cache::add('store-approval:'.($pending['nonce'] ?? ''), true, now()->addMinutes(self::APPROVAL_MINUTES + 1));
     }
 }
