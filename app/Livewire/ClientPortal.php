@@ -6,7 +6,9 @@ use App\Concerns\InteractsWithWorkspace;
 use App\Models\Brand;
 use App\Models\ContentItem;
 use App\Models\Page;
+use App\Models\Product;
 use App\Services\ContentLibrary;
+use App\Support\ClientHub;
 use App\Support\Membership;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Schema;
@@ -26,6 +28,10 @@ class ClientPortal extends Component
     /** Brand a team member previews. Ignored for clients, who only ever see their own brand. */
     #[Url(as: 'brand')]
     public ?int $previewBrand = null;
+
+    /** Product whose client hub is open. */
+    #[Url(as: 'product')]
+    public ?int $hubProduct = null;
 
     /** @var array<int, string> item id => comment */
     public array $comments = [];
@@ -70,6 +76,13 @@ class ClientPortal extends Component
         $brands = $membership->isClient() ? collect() : $membership->scopeBrands($workspace->brands()->getQuery(), 'id')->orderBy('name')->get(['id', 'name']);
         $brand = $this->brand($membership, $brands);
         $items = $brand ? $this->items($brand) : collect();
+        $hubProducts = $brand ? $this->hubProducts($brand) : collect();
+        $openProduct = $this->hubProduct ? $hubProducts->firstWhere('id', $this->hubProduct) : null;
+        $hub = $openProduct ? ClientHub::build($openProduct, ClientHub::latestApprovedVersion($openProduct), [
+            'media' => fn ($asset) => route('portal.hub-media', [$openProduct->id, $asset]),
+            'creative' => fn ($creative) => route('portal.hub-creative', [$openProduct->id, $creative]),
+            'export' => fn ($type) => route('portal.hub-export', [$openProduct->id, $type]),
+        ]) : null;
 
         return view('livewire.client-portal', [
             'membership' => $membership,
@@ -82,6 +95,9 @@ class ClientPortal extends Component
             'pages' => $brand ? $this->livePages($brand) : collect(),
             'workspaces' => auth()->user()->workspaces()->orderBy('name')->get(),
             'available' => ContentLibrary::available(),
+            'hubProducts' => $hubProducts,
+            'openProduct' => $openProduct,
+            'hub' => $hub,
         ])->layout('components.layouts.app');
     }
 
@@ -117,6 +133,17 @@ class ClientPortal extends Component
             // Clients see what clients wrote, never the team's internal notes.
             ->with(['latestVersion', 'product', 'variationOf', 'versions.comments' => fn ($query) => $query->where('author_role', 'client')->orderBy('id')])
             ->orderBy('product_id')->orderBy('id')
+            ->get();
+    }
+
+    /** @return Collection<int, Product> products of the brand that have an approved launch pack, so a client hub to open */
+    private function hubProducts(Brand $brand): Collection
+    {
+        return Product::query()
+            ->where('brand_id', $brand->id)
+            ->whereHas('campaignPacks.versions', fn ($query) => $query->where('review_status', 'approved'))
+            ->with(['brand', 'resourceLinks', 'mediaAssets'])
+            ->orderBy('name')
             ->get();
     }
 

@@ -26,7 +26,7 @@ class Login extends Component
         }
 
         request()->session()->regenerate();
-        $this->redirectIntended(route('campaign-packs.index'), navigate: true);
+        $this->redirectIntended(route('products.index'), navigate: true);
     }
 
     public function render()

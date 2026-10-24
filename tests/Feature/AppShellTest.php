@@ -45,7 +45,7 @@ class AppShellTest extends TestCase
         $other = $this->packFor($workspace, 'Quiet Product');
 
         Livewire::actingAs($owner)->withQueryParams(['status' => 'review'])->test(CampaignPackIndex::class)
-            ->assertSee('Showing packs waiting for review')
+            ->assertSee('Showing launch packs waiting for review')
             ->assertSee($pack->product->name)
             ->assertDontSee($other->product->name);
     }

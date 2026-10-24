@@ -40,6 +40,13 @@
             </div>
         @endif
 
+        @if($openProduct && $hub)
+            <div class="row">
+                <a class="pill ghost sm" href="{{ route('portal.index', array_filter(['brand' => $preview ? $brand?->id : null])) }}" wire:navigate><i class="ti ti-arrow-left" aria-hidden="true"></i> All work for {{ $brand->name }}</a>
+            </div>
+            <p class="muted">Everything here is approved and ready to use. Copy any line, download the images, or open the linked files.</p>
+            @include('client-hub.body', ['product' => $openProduct, 'hub' => $hub, 'heading' => 'h1'])
+        @else
         <div>
             <div class="eyebrow">Client view</div>
             <h1 class="display">Hello, {{ $preview ? 'client' : \Illuminate\Support\Str::before(auth()->user()->name, ' ') }}.</h1>
@@ -98,6 +105,19 @@
                 </section>
             @endforeach
 
+            @if($hubProducts->isNotEmpty())
+                <section class="card col portal-hubs" aria-labelledby="portal-hubs">
+                    <h2 id="portal-hubs" class="eyebrow">Ready-to-use copy and images</h2>
+                    @foreach($hubProducts as $hubItem)
+                        <div class="li" wire:key="portal-hub-{{ $hubItem->id }}">
+                            <span class="ic neu"><i class="ti ti-layout-grid" aria-hidden="true"></i></span>
+                            <span class="grow small"><strong class="medium">{{ $hubItem->name }}</strong><br><span class="muted xs">Client hub · every approved line for Meta, Google, email and social, plus images</span></span>
+                            <a class="pill ghost sm" href="{{ route('portal.index', array_filter(['product' => $hubItem->id, 'brand' => $preview ? $brand->id : null])) }}" wire:navigate>Open hub</a>
+                        </div>
+                    @endforeach
+                </section>
+            @endif
+
             <section class="card col" aria-labelledby="portal-approved">
                 <h2 id="portal-approved" class="eyebrow">Approved deliverables</h2>
                 @forelse($approved as $item)
@@ -121,6 +141,7 @@
                     </div>
                 @endforeach
             </section>
+        @endif
         @endif
         <p class="muted xs">Clients never see generation costs, drafts, internal knowledge or other brands.</p>
     </main>

@@ -1,0 +1,73 @@
+/*
+ * Client hub: approved work for one product, in the app's own cards, tags and pills.
+ * Used by the Client hub tab, the shared client link and the client view.
+ */
+.hub{gap:20px}
+.hub .eyebrow{font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--eyebrow);margin:0}
+.hub h4{margin:0}
+.hub-h{font-size:30px;line-height:1.1;font-weight:350}
+.hub-tight{gap:6px}
+.hub-intro{display:flex;gap:24px;align-items:center;flex-wrap:wrap}
+.hub-photo{position:relative;width:148px;height:148px;border-radius:var(--radius-thumb);background:linear-gradient(140deg,#FFD9CC,#FFC2D9 55%,#E3D2FF);flex:none;overflow:hidden;display:grid;place-items:center}
+.hub-photo::before{content:attr(data-initials);font-family:var(--display);font-size:56px;font-weight:300;color:rgba(15,15,15,.55)}
+.hub-photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:var(--surface)}
+.hub-intro-text{flex:1 1 320px;gap:6px}
+.hub-name{font-size:36px;line-height:1.05;margin:2px 0 0}
+.hub-summary{max-width:68ch;color:var(--ink-2)}
+.hub-links{gap:8px;margin-top:6px}
+.hub-meta{gap:10px}
+.hub-jump{position:sticky;top:12px;z-index:3;align-self:flex-start;padding:6px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--canvas) 86%,transparent);backdrop-filter:blur(10px)}
+.hub-jump .chip{display:inline-flex;align-items:center;text-decoration:none}
+.hub-quote{font-size:26px;line-height:1.2;font-weight:350;text-wrap:balance}
+.hub-tags{gap:6px}
+.hub .dtabs button{display:inline-flex;align-items:center;gap:6px}
+.hub-panel{gap:18px;padding-top:6px}
+.hub-fields{gap:18px}
+.hub-field{gap:0}
+.hub-field-head{padding-bottom:6px;gap:8px}
+.copy-row{display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.hub-field .copy-row:last-child{border-bottom:1px solid var(--line)}
+.copy-text{flex:1 1 auto;min-width:0;white-space:pre-line;overflow-wrap:anywhere}
+.copy-meta{display:inline-flex;gap:10px;align-items:center;flex:none}
+.copy-btn{min-width:92px}
+.hub-images{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
+.hub-image{margin:0;display:flex;flex-direction:column;gap:10px}
+.hub-image img{width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:var(--radius-thumb);background:var(--surface-2);display:block}
+.hub-image figcaption{gap:8px;flex-wrap:nowrap}
+/* Team side of the tab */
+.hub-share,.hub-setup{gap:14px}
+.hub-share-head{align-items:flex-start;gap:16px}
+.hub-actions{gap:8px}
+.hub-status .kv>span:last-child{max-width:70ch}
+.hub-edit>summary{list-style:none;align-self:flex-start;display:inline-flex}
+.hub-edit>summary::-webkit-details-marker{display:none}
+.hub-form{margin-top:14px;padding:18px;border-radius:16px;background:var(--surface-2)}
+.hub-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.hub-preview-label{margin-top:8px}
+.hub-history{position:relative}
+.hub-history>summary{list-style:none}
+.hub-history>summary::-webkit-details-marker{display:none}
+.hub-history .menu a{display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:10px;color:var(--ink);text-decoration:none}
+.hub-history .menu a:hover{background:var(--surface-2)}
+.hub-steps{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column}
+.hub-steps li{display:flex;gap:14px;align-items:center;padding:14px 0;border-top:1px solid var(--line);flex-wrap:wrap}
+.hub-step-n{width:32px;height:32px;border-radius:50%;display:inline-grid;place-items:center;flex:none;box-shadow:inset 0 0 0 1.5px var(--line-strong);font-size:13px;font-weight:600;color:var(--muted)}
+.hub-steps li.cur .hub-step-n{background:var(--ink);color:var(--canvas);box-shadow:none}
+.hub-steps li.done .hub-step-n{background:var(--ok-bg);color:var(--ok-fg);box-shadow:none}
+.hub-steps li.done .hub-step-n::before{content:'✓'}
+/* Client view list of hubs */
+.portal-hubs .li a.pill{flex:none}
+@media(max-width:720px){
+    .hub-photo{width:96px;height:96px}
+    .hub-photo::before{font-size:40px}
+    .hub-name{font-size:28px}
+    .hub-quote{font-size:21px}
+    .hub-form-grid{grid-template-columns:1fr}
+    .copy-row{flex-wrap:wrap}
+    .copy-meta{margin-left:auto}
+    .hub-jump{position:static}
+}
+.hub-status .kv{justify-content:flex-start}
+.hub-status .kv>span:first-child{width:120px}
+.hub-status .kv>span:last-child{text-align:left;flex:1}
+.client-main .hub-name{font-size:40px;margin:0}

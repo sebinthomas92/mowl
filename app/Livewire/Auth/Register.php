@@ -91,7 +91,7 @@ class Register extends Component
         Auth::login($user);
         session()->regenerate();
         session(['current_workspace_id' => $invitation?->workspace_id ?? $user->workspaces()->firstOrFail()->id]);
-        $this->redirect(route($invitation?->role === 'client' ? 'portal.index' : 'campaign-packs.index'), navigate: true);
+        $this->redirect(route($invitation?->role === 'client' ? 'portal.index' : 'products.index'), navigate: true);
     }
 
     public function render()

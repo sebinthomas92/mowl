@@ -26,7 +26,7 @@ class ProductHubTest extends TestCase
         $other->users()->attach($outsider, ['role' => 'owner']);
 
         $this->actingAs($owner)->get(route('products.index'))->assertOk()->assertSee(route('products.show', $product), false);
-        $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'hub']))->assertOk()->assertSee('Google Ads copy');
+        $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'hub']))->assertOk()->assertSee('Ready-to-use copy')->assertSee('Download Search CSV');
         $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'content']))->assertOk()->assertSee('Channel copy');
         $this->actingAs($outsider)->get(route('products.show', $product))->assertNotFound();
     }
@@ -60,7 +60,7 @@ class ProductHubTest extends TestCase
             ->call('createShare')->assertSet('shareUrl', fn ($url) => str_contains($url, '/shared/products/'));
 
         $share = $product->hubShares()->firstOrFail();
-        $this->get(route('product-hubs.share', $share->token))->assertOk()->assertSee('Read-only client view');
+        $this->get(route('product-hubs.share', $share->token))->assertOk()->assertSee('View only')->assertSee('Ready-to-use copy')->assertHeader('X-Robots-Tag', 'noindex, nofollow');
 
         Livewire::actingAs($owner)->test(ProductHub::class, ['product' => $product])->call('revokeShare');
         $this->get(route('product-hubs.share', $share->token))->assertNotFound();
@@ -156,9 +156,61 @@ class ProductHubTest extends TestCase
     public function test_empty_state_and_campaign_history_are_honest(): void
     {
         [$owner, , $product, $pack] = $this->fixture();
-        $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'hub']))->assertOk()->assertSee('No approved marketing pack yet');
+        $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'hub']))->assertOk()
+            ->assertSee('Nothing to share yet')->assertSee('Approve each output')->assertDontSee('Create client link');
         $pack->versions()->firstOrFail()->update(['review_status' => 'approved', 'reviewed_at' => now()]);
-        $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'hub']))->assertSee($pack->name)->assertSee('Campaign history');
+        $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'hub']))
+            ->assertSee($pack->name.' · version 1')->assertSee('Create client link')->assertSee('Preview · what your client sees');
+    }
+
+    public function test_client_account_opens_the_hub_in_the_client_view_within_its_brand_only(): void
+    {
+        Storage::fake('local');
+        [$owner, $workspace, $product, $pack] = $this->fixture();
+        $pack->versions()->firstOrFail()->update(['review_status' => 'approved', 'reviewed_at' => now()]);
+        Storage::disk('local')->put('products/photo.jpg', 'image-bytes');
+        $asset = $product->mediaAssets()->create([
+            'workspace_id' => $workspace->id, 'type' => 'product_image', 'disk' => 'local', 'path' => 'products/photo.jpg',
+            'original_name' => 'photo.jpg', 'mime_type' => 'image/jpeg', 'size_bytes' => 11,
+            'content_hash' => hash('sha256', 'image-bytes'), 'status' => 'ready',
+        ]);
+        $other = $workspace->brands()->create(['name' => 'Other Brand'])->products()->create(['name' => 'Other Product']);
+        $client = User::factory()->create();
+        $workspace->users()->attach($client, ['role' => 'client', 'brand_id' => $product->brand_id]);
+        $outsider = User::factory()->create();
+        $workspace->users()->attach($outsider, ['role' => 'client', 'brand_id' => $other->brand_id]);
+
+        $this->actingAs($client)->get(route('portal.index'))->assertOk()->assertSee('Open hub');
+        $this->actingAs($client)->get(route('portal.index', ['product' => $product->id]))->assertOk()
+            ->assertSee('Ready-to-use copy')->assertSee(route('portal.hub-media', [$product->id, $asset]), false);
+        $this->actingAs($client)->get(route('portal.hub-media', [$product->id, $asset]))->assertOk();
+        $this->actingAs($client)->get(route('portal.hub-export', [$product->id, 'search']))->assertOk();
+        // The product page itself stays closed to clients.
+        $this->actingAs($client)->get(route('products.hub-media', [$product, $asset]))->assertNotFound();
+
+        $this->actingAs($outsider)->get(route('portal.index', ['product' => $product->id]))->assertOk()->assertDontSee('Ready-to-use copy');
+        $this->actingAs($outsider)->get(route('portal.hub-media', [$product->id, $asset]))->assertNotFound();
+        $this->actingAs($outsider)->get(route('portal.hub-export', [$product->id, 'search']))->assertNotFound();
+    }
+
+    public function test_hub_skips_a_missing_product_photo_instead_of_showing_a_broken_image(): void
+    {
+        Storage::fake('local');
+        [$owner, $workspace, $product, $pack] = $this->fixture();
+        $pack->versions()->firstOrFail()->update(['review_status' => 'approved', 'reviewed_at' => now()]);
+        $gone = $product->mediaAssets()->create([
+            'workspace_id' => $workspace->id, 'type' => 'product_image', 'disk' => 'local', 'path' => 'products/gone.jpg',
+            'original_name' => 'gone.jpg', 'mime_type' => 'image/jpeg', 'size_bytes' => 11, 'content_hash' => 'x', 'status' => 'ready',
+        ]);
+        Storage::disk('local')->put('products/here.jpg', 'image-bytes');
+        $here = $product->mediaAssets()->create([
+            'workspace_id' => $workspace->id, 'type' => 'product_image', 'disk' => 'local', 'path' => 'products/here.jpg',
+            'original_name' => 'here.jpg', 'mime_type' => 'image/jpeg', 'size_bytes' => 11, 'content_hash' => 'y', 'status' => 'ready',
+        ]);
+
+        $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'hub']))->assertOk()
+            ->assertSee(route('products.hub-media', [$product, $here]), false)
+            ->assertDontSee(route('products.hub-media', [$product, $gone]), false);
     }
 
     private function fixture(string $name = 'Everyday Upgrade'): array

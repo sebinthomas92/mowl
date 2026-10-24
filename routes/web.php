@@ -38,7 +38,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 
-Route::redirect('/', '/campaign-packs');
+Route::redirect('/', '/products');
 
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', Login::class)->name('login');
@@ -97,6 +97,10 @@ Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::get('/concierge', ConciergeIndex::class)->name('concierge.index');
     Route::get('/portal', ClientPortal::class)->name('portal.index');
     Route::get('/portal/items/{contentItem}/image', [ClientPortalController::class, 'image'])->name('portal.image');
+    // {productId}, not {product}: the role middleware turns clients away from every {product} route.
+    Route::get('/portal/products/{productId}/google-ads/{campaignType}.csv', [ProductHubDeliveryController::class, 'portalExport'])->whereNumber('productId')->name('portal.hub-export');
+    Route::get('/portal/products/{productId}/media/{mediaAsset}', [ProductHubDeliveryController::class, 'portalMedia'])->whereNumber('productId')->name('portal.hub-media');
+    Route::get('/portal/products/{productId}/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'portalCreative'])->whereNumber('productId')->name('portal.hub-creative');
     Route::post('/internal/campaign-jobs/{generationJob}/process', [CampaignJobController::class, 'process'])
         ->middleware(['signed', 'throttle:6,1'])
         ->name('campaign-jobs.process');
