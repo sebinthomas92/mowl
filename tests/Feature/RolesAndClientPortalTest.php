@@ -80,17 +80,20 @@ class RolesAndClientPortalTest extends TestCase
     {
         [$owner, $workspace, $north, $kettle] = $this->workspace();
         $reviewer = $this->member($workspace, 'reviewer', $north->product->brand_id);
+        $page = $north->product->pages()->create(['workspace_id' => $workspace->id, 'name' => 'North page', 'slug' => 'north', 'headline' => 'North', 'draft_version' => 1]);
+
+        // Page requests go first. Livewire 4.3 keeps its own redirector bound after a Livewire action fails,
+        // so a later redirect in the same test application would break. Each real request starts clean.
+        $this->actingAs($reviewer)->get(route('pages.edit', [$north->product, $page]))->assertRedirect(route('pages.preview', [$north->product, $page]));
+        $this->actingAs($reviewer)->get(route('pages.preview', [$north->product, $page]))->assertOk()->assertSee('Back to the product');
 
         Livewire::actingAs($reviewer)->test(CampaignWorkspace::class, ['pack' => $north])->call('approveVersion')->assertStatus(422);
         $this->assertSame('draft', $north->versions()->first()->review_status);
 
-        $page = $north->product->pages()->create(['workspace_id' => $workspace->id, 'name' => 'North page', 'slug' => 'north', 'headline' => 'North', 'draft_version' => 1]);
         Livewire::actingAs($reviewer)->test(ProductPages::class, ['productId' => $north->product_id])
             ->assertSee('North page')->assertSee('View draft')->assertDontSee('New page')->assertDontSee('Open editor')
             ->call('create', 'studio', false)->assertForbidden();
         $this->assertSame(1, $north->product->pages()->count());
-        $this->actingAs($reviewer)->get(route('pages.edit', [$north->product, $page]))->assertRedirect(route('pages.preview', [$north->product, $page]));
-        $this->actingAs($reviewer)->get(route('pages.preview', [$north->product, $page]))->assertOk()->assertSee('Back to the product');
 
         StoreConnection::create(['workspace_id' => $workspace->id, 'brand_id' => $kettle->product->brand_id, 'name' => 'Kettle store', 'driver' => 'sandbox', 'site_url' => 'https://kettle.test', 'status' => 'connected']);
         StoreConnection::create(['workspace_id' => $workspace->id, 'brand_id' => $north->product->brand_id, 'name' => 'North store', 'driver' => 'sandbox', 'site_url' => 'https://north.test', 'status' => 'connected']);
