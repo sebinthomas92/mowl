@@ -80,13 +80,13 @@
     </section>
 
     <section class="card col c6">
-        <div class="row"><span class="eyebrow">Client hub</span><span class="sp"></span><a class="small" href="{{ route('products.show', [$product, 'tab' => 'hub']) }}" wire:navigate>Open client hub</a></div>
+        <div class="row"><span class="eyebrow">{{ $agency ? 'Client hub' : 'Ready to use' }}</span><span class="sp"></span><a class="small" href="{{ route('products.show', [$product, 'tab' => 'hub']) }}" wire:navigate>{{ $agency ? 'Open client hub' : 'Open' }}</a></div>
         @if($version)
-            <p class="small">The hub shows approved launch pack v{{ $version->version }}, approved {{ ($version->reviewed_at ?? $version->updated_at)->diffForHumans() }}.</p>
-            <div class="kv"><span>Client link</span><span>{{ $shareUrl ? 'Active' : 'Not shared' }}</span></div>
+            <p class="small">Shows approved launch pack v{{ $version->version }}, approved {{ ($version->reviewed_at ?? $version->updated_at)->diffForHumans() }}.</p>
+            <div class="kv"><span>{{ $agency ? 'Client link' : 'Share link' }}</span><span>{{ $shareUrl ? 'Active' : 'Not shared' }}</span></div>
             <div class="kv"><span>Resource links</span><span>{{ $product->resourceLinks->count() }}</span></div>
         @else
-            <p class="small muted">The hub publishes automatically when a launch pack version is approved. Drafts never appear here.</p>
+            <p class="small muted">Fills in automatically when a launch pack is approved. Drafts never appear here.</p>
         @endif
     </section>
 

@@ -10,7 +10,21 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Workspace extends Model
 {
-    protected $fillable = ['name'];
+    protected $fillable = ['name', 'kind'];
+
+    public const KINDS = [
+        'store' => 'I sell my own products',
+        'agency' => 'I manage brands for clients',
+    ];
+
+    /**
+     * Agencies get client features: the client hub, client accounts and the client portal.
+     * A workspace without the column yet (before the migration) counts as an agency, as before.
+     */
+    public function isAgency(): bool
+    {
+        return ($this->getAttribute('kind') ?? 'agency') !== 'store';
+    }
 
     public function brands(): HasMany
     {

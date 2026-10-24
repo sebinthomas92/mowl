@@ -26,7 +26,7 @@
                                 @if($isOwner && $memberRole !== 'owner')
                                     <td>
                                         <select class="input input-sm" aria-label="Role for {{ $member->name }}" wire:model="access.{{ $member->id }}.role">
-                                            @foreach($roles as $value => $label)<option value="{{ $value }}">{{ $label }}</option>@endforeach
+                                            @foreach($memberRoles as $value => $label)<option value="{{ $value }}">{{ $label }}</option>@endforeach
                                         </select>
                                         @error('access.'.$member->id.'.role')<span class="err xs" role="alert">{{ $message }}</span>@enderror
                                     </td>

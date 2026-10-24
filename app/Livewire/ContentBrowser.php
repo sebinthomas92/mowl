@@ -12,7 +12,6 @@ use App\Services\Pages\PageBuilder;
 use App\Services\SectionRegenerator;
 use App\Support\Membership;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Str;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use Livewire\Component;
@@ -56,13 +55,6 @@ class ContentBrowser extends Component
     public string $commentBody = '';
 
     public ?string $flash = null;
-
-    public string $clientName = '';
-
-    public string $clientEmail = '';
-
-    /** Shown once, right after the link is created; only its hash is stored. */
-    public ?string $newLinkUrl = null;
 
     public function mount(?int $productId = null): void
     {
@@ -177,30 +169,11 @@ class ContentBrowser extends Component
         $this->flash = trans_choice(':count item submitted for review|:count items submitted for review', $submitted).($skipped ? ", {$skipped} skipped because they are not drafts." : '.');
     }
 
-    public function createClientLink(): void
-    {
-        $product = $this->product();
-        abort_unless($product && $this->isOwner(), 403);
-        $this->validate([
-            'clientName' => ['required', 'string', 'max:120'],
-            'clientEmail' => ['nullable', 'email', 'max:190'],
-        ], [], ['clientName' => 'client name', 'clientEmail' => 'client email']);
-        $token = Str::random(48);
-        ContentClientLink::create([
-            'workspace_id' => $this->currentWorkspace()->id, 'product_id' => $product->id, 'created_by_user_id' => auth()->id(),
-            'client_name' => trim($this->clientName), 'client_email' => $this->clientEmail ?: null,
-            'token_hash' => hash('sha256', $token), 'expires_at' => now()->addDays(14),
-        ]);
-        $this->newLinkUrl = route('client.review', $token);
-        $this->clientName = '';
-        $this->clientEmail = '';
-    }
-
+    /** Older named review links stay listed until they expire, so an owner can still turn one off. New links are made in the Client hub tab. */
     public function revokeClientLink(int $id): void
     {
         abort_unless($this->product() && $this->isOwner(), 403);
         ContentClientLink::query()->where('workspace_id', $this->currentWorkspace()->id)->where('product_id', $this->productId)->whereKey($id)->update(['revoked_at' => now()]);
-        $this->newLinkUrl = null;
     }
 
     public function render(ContentLibrary $library)

@@ -186,8 +186,8 @@
                     <section class="run-page" aria-labelledby="pack-outputs-title">
                         <div class="row">
                             <div class="grow"><span class="eyebrow">Outputs</span><h2 id="pack-outputs-title" class="display run-title">{{ $contentItems->count() }} {{ \Illuminate\Support\Str::plural('item', $contentItems->count()) }}, each reviewed on its own</h2></div>
-                            <a class="pill ghost sm" href="{{ route('products.show', [$pack->product, 'tab' => 'content']) }}" wire:navigate>Open outputs in Content</a>
-                            @if($contentItems->where('status', 'review')->isNotEmpty())<a class="pill dark sm" href="{{ route('review.index') }}" wire:navigate>Review queue · {{ $contentItems->where('status', 'review')->count() }}</a>@endif
+                            <a class="pill ghost sm" href="{{ route('products.show', [$pack->product, 'tab' => 'content']) }}" wire:navigate>Open all outputs</a>
+                            @if($contentItems->where('status', 'review')->isNotEmpty())<a class="pill dark sm" href="{{ route('review.index') }}" wire:navigate>Review · {{ $contentItems->where('status', 'review')->count() }}</a>@endif
                         </div>
                         @php
                             $approvedCount = $contentItems->where('status', 'approved')->count();

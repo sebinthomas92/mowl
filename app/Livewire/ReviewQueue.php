@@ -91,7 +91,7 @@ class ReviewQueue extends Component
             'recent' => $this->scoped()->whereIn('status', ['approved', 'changes'])->latest('updated_at')->limit(5)->get(),
             'canReview' => (bool) $this->membership()?->canReview(),
             'roleLabel' => $this->membership()?->roleLabel(),
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Review');
     }
 
     private function item(): ContentItem

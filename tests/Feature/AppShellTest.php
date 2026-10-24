@@ -32,7 +32,7 @@ class AppShellTest extends TestCase
             ->assertOk()
             ->assertSee('Launch packs')
             ->assertDontSee('Campaign packs')
-            ->assertSee('Review queue, 1 waiting')
+            ->assertSee('Review, 1 waiting')
             ->assertSee(route('review.index'), false)
             ->assertSee('Search products and content')
             ->assertSee('Inbox, 0 unread');

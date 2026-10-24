@@ -29,7 +29,7 @@ class ProductHub extends Component
 
     public ?string $shareUrl = null;
 
-    public const TABS = ['overview' => 'Overview', 'knowledge' => 'Knowledge', 'content' => 'Content', 'pages' => 'Pages', 'campaigns' => 'Campaigns', 'results' => 'Results', 'packs' => 'Launch packs', 'hub' => 'Client hub'];
+    public const TABS = ['overview' => 'Overview', 'knowledge' => 'Knowledge', 'content' => 'Outputs', 'pages' => 'Pages', 'campaigns' => 'Campaigns', 'results' => 'Results', 'packs' => 'Launch packs', 'hub' => 'Client hub'];
 
     #[Url]
     public string $tab = 'overview';
@@ -92,7 +92,8 @@ class ProductHub extends Component
     public function createShare(): void
     {
         $this->authorizeManager();
-        abort_unless($this->latestApprovedVersion(), 422);
+        // The link shows work in review as well as the client hub, so it only needs a launch pack to exist.
+        abort_unless($this->product->campaignPacks()->exists(), 422);
         $this->product->hubShares()->whereNull('revoked_at')->update(['revoked_at' => now()]);
         $share = $this->product->hubShares()->create([
             'workspace_id' => $this->product->brand->workspace_id,
@@ -221,6 +222,11 @@ class ProductHub extends Component
         $brandAudience = $knowledgeReady ? (app(ProductKnowledge::class)->brandProfile($this->product)['default_audience'] ?? null) : null;
         $packs = $this->product->campaignPacks->sortByDesc('id')->values();
         $tabs = self::TABS;
+        $agency = $workspace->isAgency();
+        if (! $agency) {
+            // A store has no clients: the same page is its share link for teammates and freelancers.
+            $tabs['hub'] = 'Share';
+        }
         $contentItems = ContentLibrary::available() ? $this->product->contentItems()->get(['id', 'title', 'status', 'current_version', 'type', 'campaign_pack_id', 'section']) : null;
         $livePage = PageBuilder::available() ? $this->product->pages()->whereNotNull('live_version')->latest('verified_at')->first() : null;
         $campaigns = CampaignPlanner::available() ? $this->product->campaigns()->withCount('results')->orderByDesc('id')->get() : null;
@@ -232,8 +238,8 @@ class ProductHub extends Component
         $share = $this->product->hubShares()->whereNull('revoked_at')->latest()->first();
         $share = $share?->isActive() ? $share : null;
 
-        return view('livewire.product-hub', compact('workspace', 'version', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience', 'contentItems', 'livePage', 'campaigns', 'hub', 'share'))
-            ->layout('components.layouts.app');
+        return view('livewire.product-hub', compact('workspace', 'version', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience', 'contentItems', 'livePage', 'campaigns', 'hub', 'share', 'agency'))
+            ->layout('components.layouts.app')->title($this->product->name.' · '.($tabs[$this->tab] ?? 'Overview'));
     }
 
     private function latestApprovedVersion(): ?CampaignPackVersion

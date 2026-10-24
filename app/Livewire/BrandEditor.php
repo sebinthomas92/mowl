@@ -196,6 +196,6 @@ class BrandEditor extends Component
             'brand' => $brand,
             'profileAvailable' => Brand::profileAvailable(),
             'validPalette' => array_values(array_filter($this->palette(), fn ($color) => preg_match('/^#[0-9A-F]{6}$/', $color))),
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Brand');
     }
 }

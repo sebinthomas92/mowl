@@ -50,6 +50,6 @@ class WorkflowIndex extends Component
             'workflows' => $list,
             'current' => $current,
             'promptCount' => $all->sum(fn (array $workflow) => count($workflow['prompts'])),
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Workflows');
     }
 }

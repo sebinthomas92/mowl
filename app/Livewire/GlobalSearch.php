@@ -47,7 +47,7 @@ class GlobalSearch extends Component
                     ->map(fn (CampaignPack $pack) => ['label' => $pack->name ?: $pack->product->name, 'meta' => str($pack->status)->title(), 'url' => route('campaign-packs.show', $pack), 'icon' => 'stack-2']),
             ];
             if (ContentLibrary::available()) {
-                $results['Content'] = $membership->scopeThroughProduct(ContentItem::query())
+                $results['Outputs'] = $membership->scopeThroughProduct(ContentItem::query())
                     ->where('workspace_id', $workspace->id)
                     ->where(fn ($query) => $matches($query, 'content_items.title'))
                     ->with('product')->latest('updated_at')->limit(5)->get()

@@ -226,7 +226,7 @@ class ProductCreate extends Component
             'canCreateBrands' => (bool) $this->membership()?->canCreateBrands(),
             'duplicate' => $this->duplicateId ? Product::query()->whereKey($this->duplicateId)->whereIn('brand_id', $brands->pluck('id'))->with('brand')->first() : null,
             'profileAvailable' => Brand::profileAvailable(),
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Add product');
     }
 
     private function resolveBrand(): Brand

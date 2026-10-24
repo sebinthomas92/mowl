@@ -15,6 +15,6 @@ class LibraryIndex extends Component
         return view('livewire.library-index', [
             'workspace' => $this->currentWorkspace(),
             'available' => ContentLibrary::available(),
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Library');
     }
 }

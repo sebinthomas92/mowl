@@ -1,7 +1,7 @@
 {{-- Where a QA issue sits in the pack and how to fix it. Expects $issue from CampaignWorkspace. --}}
 @if(! empty($issue['where']))<small class="qa-where">In {{ $issue['where'] }}</small>@endif
 @if($issue['type'] === 'source')
-    <small>Approve the product source in the <a href="{{ route('review.index') }}" wire:navigate>Review queue</a>.</small>
+    <small>Approve the product source in the <a href="{{ route('review.index') }}" wire:navigate>Review</a>.</small>
 @elseif(! empty($issue['fixed']) || ! empty($issue['edit_url']))
     <span class="qa-fix">
         @if(! empty($issue['fixed']))

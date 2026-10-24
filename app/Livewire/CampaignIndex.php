@@ -40,6 +40,6 @@ class CampaignIndex extends Component
             'campaigns' => $campaigns,
             'counts' => $counts,
             'summaries' => $campaigns->mapWithKeys(fn (Campaign $campaign) => [$campaign->id => $results->summary($campaign, $campaign->results)]),
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Campaigns');
     }
 }

@@ -2,8 +2,9 @@
 
 namespace Tests\Feature;
 
-use App\Livewire\ClientReview;
+use App\Livewire\ClientLink;
 use App\Livewire\ContentBrowser;
+use App\Livewire\ProductHub;
 use App\Livewire\ReviewQueue;
 use App\Models\CampaignPack;
 use App\Models\ContentClientLink;
@@ -209,7 +210,7 @@ class ContentItemsTest extends TestCase
         $this->assertSame('Price 899 differs from confirmed Knowledge (INR 699.00)', $priceCheck()['label']);
     }
 
-    public function test_a_named_client_link_shows_only_review_items_and_records_decisions(): void
+    public function test_an_older_named_review_link_opens_the_client_page_and_records_decisions(): void
     {
         [$owner, $workspace, $pack] = $this->fixture();
         $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
@@ -220,25 +221,22 @@ class ContentItemsTest extends TestCase
         $library->submit($positioning->latestVersion, $owner);
         $library->submit($offers->latestVersion, $owner);
 
-        $url = Livewire::actingAs($owner)->test(ContentBrowser::class, ['productId' => $pack->product_id])
-            ->set('clientName', 'Priya at Northline')
-            ->call('createClientLink')
-            ->assertHasNoErrors()
-            ->get('newLinkUrl');
-        $token = basename((string) $url);
-        $this->assertDatabaseHas('content_client_links', ['client_name' => 'Priya at Northline', 'token_hash' => hash('sha256', $token)]);
-        auth()->logout();
+        $token = 'older-review-link-token';
+        ContentClientLink::create([
+            'workspace_id' => $workspace->id, 'product_id' => $pack->product_id, 'created_by_user_id' => $owner->id,
+            'client_name' => 'Priya at Northline', 'token_hash' => hash('sha256', $token), 'expires_at' => now()->addDays(14),
+        ]);
+        $url = route('client.review', $token);
 
-        $this->get($url)->assertOk()->assertSee('Review for Priya at Northline')->assertSee('Approve v1')->assertDontSee('Ranked angles');
+        $this->get($url)->assertOk()->assertSee('with Priya at Northline')->assertSee('Waiting for your decision')
+            ->assertSee('Approve version 1')->assertDontSee('Ranked angles')->assertDontSee('Your name');
 
-        Livewire::test(ClientReview::class, ['token' => $token])
-            ->call('approve', $positioning->id)
-            ->assertHasNoErrors()
-            ->call('requestChanges', $offers->id)
-            ->assertHasErrors(['comments.'.$offers->id => 'required'])
+        $page = Livewire::test(ClientLink::class, ['token' => $token])->assertSet('kind', 'review')->assertSet('reviewerName', 'Priya at Northline');
+        // The name comes from the link, not from anything the page sends back.
+        $page->set('reviewerName', 'Someone Else')->call('approve', $positioning->id)->assertHasNoErrors()
+            ->call('requestChanges', $offers->id)->assertHasErrors(['comments.'.$offers->id => 'required'])
             ->set('comments.'.$offers->id, 'Please drop the bundle line.')
-            ->call('requestChanges', $offers->id)
-            ->assertHasNoErrors();
+            ->call('requestChanges', $offers->id)->assertHasNoErrors();
 
         $this->assertSame('approved', $positioning->fresh()->status);
         $this->assertSame('Priya at Northline', $positioning->fresh()->latestVersion->reviewed_by_name);
@@ -251,17 +249,69 @@ class ContentItemsTest extends TestCase
         $this->get($url)->assertNotFound();
     }
 
-    public function test_only_owners_create_client_links(): void
+    public function test_the_client_link_lets_a_client_decide_only_when_its_maker_can_approve(): void
     {
-        [, $workspace, $pack] = $this->fixture();
-        $member = User::factory()->create();
-        $workspace->users()->attach($member, ['role' => 'member']);
+        [$owner, $workspace, $pack] = $this->fixture();
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        $library = app(ContentLibrary::class);
+        $library->syncPack($pack);
+        $positioning = $pack->contentItems()->where('section', 'positioning')->firstOrFail();
+        $library->submit($positioning->latestVersion, $owner);
 
-        Livewire::actingAs($member)->test(ContentBrowser::class, ['productId' => $pack->product_id])
-            ->assertDontSee('Client review links')
-            ->set('clientName', 'Someone')
-            ->call('createClientLink')
-            ->assertForbidden();
+        Livewire::actingAs($owner)->test(ProductHub::class, ['product' => $pack->product, 'tab' => 'hub'])
+            ->assertSee('Create client link')->call('createShare')->assertHasNoErrors();
+        $share = $pack->product->hubShares()->firstOrFail();
+        auth()->logout();
+
+        $this->get(route('product-hubs.share', $share->token))->assertOk()
+            ->assertSee('Waiting for your decision · 1')->assertSee('Your name')->assertSee('Approve version 1')
+            ->assertHeader('X-Robots-Tag', 'noindex, nofollow');
+
+        Livewire::test(ClientLink::class, ['token' => $share->token])
+            ->call('approve', $positioning->id)->assertHasErrors(['reviewerName' => 'required'])
+            ->set('reviewerName', 'Dana from Northline')
+            ->call('approve', $positioning->id)->assertHasNoErrors();
+        $this->assertSame('approved', $positioning->fresh()->status);
+        $this->assertSame('Dana from Northline', $positioning->fresh()->latestVersion->reviewed_by_name);
+
+        // A signed-in person (here a client account of another workspace) can decide through the link too.
+        $offers = $pack->contentItems()->where('section', 'offers')->firstOrFail();
+        $library->submit($offers->latestVersion, $owner);
+        $signedIn = User::factory()->create();
+        Workspace::create(['name' => 'Elsewhere'])->users()->attach($signedIn, ['role' => 'client']);
+        Livewire::actingAs($signedIn)->test(ClientLink::class, ['token' => $share->token])
+            ->set('reviewerName', 'Dana')->call('requestChanges', $offers->id)->assertHasErrors(['comments.'.$offers->id])
+            ->set('comments.'.$offers->id, 'Shorter please.')->call('requestChanges', $offers->id)->assertHasNoErrors();
+        $this->assertSame('changes', $offers->fresh()->status);
+        auth()->logout();
+
+        // A reviewer whose brand scope excludes this product cannot make an approving link.
+        $scoped = User::factory()->create();
+        $otherBrand = $workspace->brands()->create(['name' => 'Elsewhere Brand']);
+        $workspace->users()->attach($scoped, ['role' => 'reviewer', 'brand_id' => $otherBrand->id]);
+        $share->update(['created_by_user_id' => $scoped->id]);
+        $this->get(route('product-hubs.share', $share->token))->assertOk()->assertSee('View only');
+
+        // A contributor can share, but cannot approve work, so a link they make is view only.
+        $library->submit($library->revise($offers->fresh(), $owner), $owner);
+        $offers->refresh();
+        $contributor = User::factory()->create();
+        $workspace->users()->attach($contributor, ['role' => 'member']);
+        $share->update(['created_by_user_id' => $contributor->id]);
+
+        $this->get(route('product-hubs.share', $share->token))->assertOk()->assertSee('View only')->assertDontSee('Approve version 1');
+        Livewire::test(ClientLink::class, ['token' => $share->token])
+            ->set('reviewerName', 'Dana')->call('approve', $offers->id)->assertForbidden();
+        $this->assertSame('review', $offers->fresh()->status);
+    }
+
+    public function test_new_review_links_are_made_from_the_client_hub_tab(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+
+        Livewire::actingAs($owner)->test(ContentBrowser::class, ['productId' => $pack->product_id])
+            ->assertDontSee('Older review links')
+            ->assertDontSee('Create review link');
     }
 
     public function test_library_review_and_content_pages_render_and_fall_back_before_the_migration(): void

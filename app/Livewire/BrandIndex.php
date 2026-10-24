@@ -23,6 +23,6 @@ class BrandIndex extends Component
             'canCreateBrands' => $membership->canCreateBrands(),
             'brandLimit' => (int) config('campaigns.brand_limit'),
             'profileAvailable' => Brand::profileAvailable(),
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Brands');
     }
 }

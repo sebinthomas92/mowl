@@ -33,6 +33,6 @@ class UsageIndex extends Component
             'completedJobs' => (clone $jobsQuery)->where('status', 'completed')->count() + ($bannerBatchesQuery ? (clone $bannerBatchesQuery)->where('status', 'completed')->count() : 0),
             'cogsTarget' => config('campaigns.cogs_target'),
             'cogsAlert' => config('campaigns.cogs_alert'),
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Usage');
     }
 }

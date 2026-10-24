@@ -3,8 +3,8 @@
 namespace App\Livewire\Hooks;
 
 use App\Livewire\CampaignWorkspace;
+use App\Livewire\ClientLink;
 use App\Livewire\ClientPortal;
-use App\Livewire\ClientReview;
 use App\Livewire\ConciergeIndex;
 use App\Livewire\ContentBrowser;
 use App\Livewire\InboxDrawer;
@@ -26,7 +26,7 @@ use Livewire\ComponentHook;
 class EnforceRoleOnActions extends ComponentHook
 {
     /** Components that authorize every action themselves (owner checks, review tokens, concierge emails). */
-    private const SELF_GUARDED = [ClientPortal::class, ClientReview::class, ConciergeIndex::class, StoreConnections::class, TeamIndex::class, WorkspaceSettings::class];
+    private const SELF_GUARDED = [ClientLink::class, ClientPortal::class, ConciergeIndex::class, StoreConnections::class, TeamIndex::class, WorkspaceSettings::class];
 
     private const REVIEWER = [
         ReviewQueue::class => ['select', 'approve', 'requestChanges', 'approveSource'],
