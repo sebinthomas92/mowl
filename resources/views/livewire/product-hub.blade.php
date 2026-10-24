@@ -1,5 +1,3 @@
-@php($isPublic = false)
-@php($shareToken = null)
 <div class="app-shell">
     <a class="skip-link" href="#main-content">Skip to product</a>
     @include('partials.workspace-sidebar')
@@ -46,9 +44,7 @@
                     @endif
                     @break
                 @case('hub')
-                    <div class="product-hub-shell hub-embed" x-data="productHub()">
-                        @include('product-hubs.surface')
-                    </div>
+                    @include('product-hubs.tab-hub')
                     @break
                 @case('packs')
                     @include('product-hubs.tab-packs')
@@ -59,16 +55,3 @@
         </main>
     </div>
 </div>
-
-@script
-<script>
-    Alpine.data('productHub', () => ({
-        section: 'overview', campaign: 'search', copied: null, mobileNav: false,
-        async copy(value, key) {
-            await navigator.clipboard.writeText(value);
-            this.copied = key;
-            setTimeout(() => { if (this.copied === key) this.copied = null }, 1600);
-        }
-    }))
-</script>
-@endscript

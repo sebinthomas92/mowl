@@ -10,9 +10,9 @@ use App\Models\SourceSnapshot;
 use App\Services\Campaigns\CampaignPlanner;
 use App\Services\ContentLibrary;
 use App\Services\Pages\PageBuilder;
-use App\Services\ProductHubContentAdapter;
 use App\Services\ProductKnowledge;
 use App\Services\ProductPageFetcher;
+use App\Support\ClientHub;
 use App\Support\Membership;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Url;
@@ -204,7 +204,7 @@ class ProductHub extends Component
             : 'Source checked. Nothing changed.');
     }
 
-    public function render(ProductHubContentAdapter $adapter)
+    public function render()
     {
         if (! array_key_exists($this->tab, self::TABS)) {
             $this->tab = 'overview';
@@ -212,8 +212,6 @@ class ProductHub extends Component
         $workspace = $this->currentWorkspace();
         $this->product->load(['brand', 'resourceLinks', 'mediaAssets', 'campaignPacks.versions']);
         $version = $this->latestApprovedVersion();
-        $content = $version ? $adapter->adapt($this->product, $version) : null;
-        $sections = $this->sections();
         $resourceLabels = self::RESOURCE_LABELS;
         $canManage = $this->canManage();
 
@@ -223,30 +221,24 @@ class ProductHub extends Component
         $brandAudience = $knowledgeReady ? (app(ProductKnowledge::class)->brandProfile($this->product)['default_audience'] ?? null) : null;
         $packs = $this->product->campaignPacks->sortByDesc('id')->values();
         $tabs = self::TABS;
-        $contentItems = ContentLibrary::available() ? $this->product->contentItems()->get(['id', 'title', 'status', 'current_version', 'type']) : null;
+        $contentItems = ContentLibrary::available() ? $this->product->contentItems()->get(['id', 'title', 'status', 'current_version', 'type', 'campaign_pack_id', 'section']) : null;
         $livePage = PageBuilder::available() ? $this->product->pages()->whereNotNull('live_version')->latest('verified_at')->first() : null;
         $campaigns = CampaignPlanner::available() ? $this->product->campaigns()->withCount('results')->orderByDesc('id')->get() : null;
+        $hub = $this->tab === 'hub' && $version ? ClientHub::build($this->product, $version, [
+            'media' => fn ($asset) => route('products.hub-media', [$this->product, $asset]),
+            'creative' => fn ($creative) => route('products.hub-creative', [$this->product, $creative]),
+            'export' => fn ($type) => route('products.hub-export', [$this->product, $type]),
+        ]) : null;
+        $share = $this->product->hubShares()->whereNull('revoked_at')->latest()->first();
+        $share = $share?->isActive() ? $share : null;
 
-        return view('livewire.product-hub', compact('workspace', 'version', 'content', 'sections', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience', 'contentItems', 'livePage', 'campaigns'))
+        return view('livewire.product-hub', compact('workspace', 'version', 'resourceLabels', 'canManage', 'knowledgeReady', 'facts', 'source', 'packs', 'tabs', 'brandAudience', 'contentItems', 'livePage', 'campaigns', 'hub', 'share'))
             ->layout('components.layouts.app');
     }
 
     private function latestApprovedVersion(): ?CampaignPackVersion
     {
-        return CampaignPackVersion::query()
-            ->whereHas('campaignPack', fn ($query) => $query->where('product_id', $this->product->id))
-            ->where('review_status', 'approved')
-            ->with(['campaignPack.sourceSnapshot', 'bannerCreatives'])
-            ->orderByDesc('reviewed_at')->orderByDesc('id')->first();
-    }
-
-    private function sections(): array
-    {
-        return [
-            'overview' => 'Overview', 'product_details' => 'Product details', 'key_messaging' => 'Key messaging',
-            'meta_ads' => 'Meta Ads', 'google_ads' => 'Google Ads', 'email_sms' => 'Email & SMS',
-            'organic_social' => 'Organic social', 'asset_links' => 'Asset links', 'campaign_history' => 'Campaign history',
-        ];
+        return ClientHub::latestApprovedVersion($this->product);
     }
 
     private function fact(string $key): ProductFact

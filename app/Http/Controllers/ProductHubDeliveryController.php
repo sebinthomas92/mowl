@@ -10,6 +10,8 @@ use App\Models\ProductHubShare;
 use App\Services\CampaignPackSafetyValidator;
 use App\Services\ProductHubContentAdapter;
 use App\Services\ProductHubCsvExporter;
+use App\Support\ClientHub;
+use App\Support\Membership;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Storage;
@@ -17,14 +19,43 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProductHubDeliveryController extends Controller
 {
-    public function share(string $token, ProductHubContentAdapter $adapter): Response
+    public function share(string $token): Response
     {
         $share = $this->activeShare($token);
-        $product = $share->product->load(['brand', 'resourceLinks', 'mediaAssets', 'campaignPacks.versions']);
-        $version = $this->approvedVersion($product);
-        $content = $adapter->adapt($product, $version);
+        $product = $share->product->load(['brand.workspace', 'resourceLinks', 'mediaAssets']);
+        $hub = ClientHub::build($product, $this->approvedVersion($product), [
+            'media' => fn ($asset) => route('product-hubs.shared-media', [$token, $asset]),
+            'creative' => fn ($creative) => route('product-hubs.shared-creative', [$token, $creative]),
+            'export' => fn ($type) => route('product-hubs.shared-export', [$token, $type]),
+        ]);
 
-        return response()->view('product-hubs.share', compact('share', 'product', 'version', 'content'));
+        return response()->view('product-hubs.share', compact('share', 'product', 'hub'))
+            ->header('X-Robots-Tag', 'noindex, nofollow');
+    }
+
+    /** The client portal's copy of the hub: same files, authorised by the viewer's brand scope instead of a link. */
+    public function portalExport(Request $request, int $productId, string $campaignType, ProductHubContentAdapter $adapter, ProductHubCsvExporter $exporter): Response
+    {
+        return $this->csvResponse($this->portalProduct($request, $productId), $campaignType, $adapter, $exporter);
+    }
+
+    public function portalMedia(Request $request, int $productId, MediaAsset $mediaAsset): StreamedResponse
+    {
+        return $this->mediaResponse($this->portalProduct($request, $productId), $mediaAsset);
+    }
+
+    public function portalCreative(Request $request, int $productId, BannerCreative $bannerCreative): StreamedResponse
+    {
+        return $this->creativeResponse($this->portalProduct($request, $productId), $bannerCreative);
+    }
+
+    private function portalProduct(Request $request, int $productId): Product
+    {
+        $product = Product::query()->with('brand')->find($productId);
+        $membership = $product ? Membership::of($request->user(), $product->brand->workspace_id) : null;
+        abort_unless($membership && $membership->allowsBrand($product->brand_id), 404);
+
+        return $product;
     }
 
     public function export(Request $request, Product $product, string $campaignType, ProductHubContentAdapter $adapter, ProductHubCsvExporter $exporter): Response
@@ -80,10 +111,10 @@ class ProductHubDeliveryController extends Controller
 
     private function approvedVersion(Product $product): CampaignPackVersion
     {
-        return CampaignPackVersion::query()
-            ->whereHas('campaignPack', fn ($query) => $query->where('product_id', $product->id))
-            ->where('review_status', 'approved')->with(['campaignPack.sourceSnapshot', 'bannerCreatives'])
-            ->orderByDesc('reviewed_at')->orderByDesc('id')->firstOrFail();
+        $version = ClientHub::latestApprovedVersion($product);
+        abort_unless($version, 404);
+
+        return $version;
     }
 
     private function activeShare(string $token): ProductHubShare

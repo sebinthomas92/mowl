@@ -3,21 +3,45 @@
     @include('partials.workspace-sidebar')
     <div class="app-main">
         @include('partials.top-bar')
-        <main id="main-content">
-        <section class="library-page packs-library">
-            <header class="library-header"><div><p class="kicker">PRODUCT LAUNCHES</p><h1>Launch packs</h1><p>Approved, copy-ready campaign intelligence for your media buying team.</p></div>@if($canCreate)<a class="primary-link" href="{{ route('campaign-packs.create') }}">＋ New launch pack</a>@endif</header>
-            <div class="stat-strip"><div><small>PACKS CREATED</small><strong>{{ $packs->count() }}</strong></div>@if($canSeeCosts)<div><small>CREDITS REMAINING</small><strong>{{ $workspace->spendableCredits() }}</strong></div><div><small>COGS STATUS</small><strong @class(['healthy' => $packs->every(fn($pack) => $pack->estimated_cost < config('campaigns.cogs_alert'))])>{{ $packs->contains(fn($pack) => $pack->estimated_cost >= config('campaigns.cogs_alert')) ? 'Needs attention' : 'On target' }}</strong></div>@endif</div>
+        <main id="main-content" class="lib-page">
+            <div class="pagehead">
+                <div>
+                    <div class="eyebrow">All products</div>
+                    <h1 class="display">Launch packs</h1>
+                    <p class="muted">A launch pack writes positioning, video scripts and channel copy for one product from its confirmed facts. Each output is reviewed on its own; once all are approved, the product's client hub fills in.</p>
+                </div>
+                @if($canCreate)<a class="pill pri" href="{{ route('campaign-packs.create') }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> New launch pack</a>@endif
+            </div>
             @if($status === 'review')
-                <p class="queue-filter" role="status"><span>Showing packs waiting for review</span><a class="pill ghost sm" href="{{ route('campaign-packs.index') }}" wire:navigate>Show all packs</a></p>
+                <div class="banner rev small" role="status"><span class="grow">Showing launch packs waiting for review.</span><a class="pill ghost sm" href="{{ route('campaign-packs.index') }}" wire:navigate>Show all</a></div>
             @endif
             @if($packs->isEmpty() && $status === 'review')
-                <div class="library-empty"><span>✓</span><h2>The review queue is clear</h2><p>Packs appear here when someone asks for a review of a version.</p></div>
+                <div class="empty"><strong>Nothing is waiting for review</strong><span class="small muted">Launch packs appear here when someone asks for a review.</span></div>
             @elseif($packs->isEmpty())
-                <div class="library-empty"><span>▤</span><h2>Your launch pack library is empty</h2><p>Turn an approved product page into your first structured, source-linked pack.</p>@if($canCreate)<a href="{{ route('campaign-packs.create') }}">Build first pack →</a>@endif</div>
+                <div class="empty">
+                    <strong>No launch packs yet</strong>
+                    <span class="small muted">Pick a product and we write its launch copy from the facts you confirmed. Nothing is generated until you press start, and you see the credit cost first.</span>
+                    @if($canCreate)<a class="pill pri sm" href="{{ route('campaign-packs.create') }}" wire:navigate>Create your first launch pack</a>@endif
+                </div>
             @else
-                <div class="pack-list">@foreach($packs as $pack)<a href="{{ route('campaign-packs.show', $pack) }}" class="pack-row"><div class="pack-row-mark">{{ strtoupper(substr($pack->product->name, 0, 2)) }}</div><div class="pack-row-main"><small>{{ $pack->product->brand->name }}</small><h2>{{ $pack->product->name }}</h2><p>{{ $pack->current_version ? 'Launch pack v'.$pack->current_version : 'Generation job #'.$pack->latestGenerationJob?->id }} · Updated {{ $pack->updated_at->diffForHumans() }}</p></div><span @class(['approved-badge', 'job-status-failed' => $pack->status === 'failed', 'job-status-working' => in_array($pack->status, ['queued','processing'])])>{{ $pack->status === 'approved' ? '✓' : '●' }} {{ ucfirst($pack->status) }}</span><strong>Open {{ $pack->status === 'approved' ? 'pack' : 'job' }} →</strong></a>@endforeach</div>
+                <div class="tw">
+                    <table class="tbl">
+                        <thead><tr><th scope="col">Product</th><th scope="col">Version</th><th scope="col">Status</th><th scope="col">Updated</th><th scope="col"><span class="sr-only">Open</span></th></tr></thead>
+                        <tbody>
+                            @foreach($packs as $pack)
+                                @php([$tone, $label] = ['approved' => ['ok', 'Approved'], 'review' => ['rev', 'In review'], 'rejected' => ['warn', 'Changes requested'], 'failed' => ['bad', 'Failed'], 'queued' => ['rev', 'Waiting to start'], 'processing' => ['rev', 'Writing'], 'draft' => ['', 'Draft']][$pack->status] ?? ['', str($pack->status)->headline()])
+                                <tr wire:key="pack-{{ $pack->id }}">
+                                    <td><a class="medium" href="{{ route('campaign-packs.show', $pack) }}" wire:navigate>{{ $pack->product->name }}</a><br><span class="muted xs">{{ $pack->product->brand->name }}</span></td>
+                                    <td>{{ $pack->current_version ? 'Version '.$pack->current_version : '—' }}</td>
+                                    <td><span class="tag {{ $tone }}"><span class="dot"></span>{{ $label }}</span></td>
+                                    <td class="muted">{{ $pack->updated_at->diffForHumans() }}</td>
+                                    <td><a class="pill ghost sm" href="{{ route('campaign-packs.show', $pack) }}" wire:navigate>Open</a></td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
             @endif
-        </section>
         </main>
     </div>
 </div>

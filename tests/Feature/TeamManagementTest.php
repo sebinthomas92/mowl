@@ -106,7 +106,7 @@ class TeamManagementTest extends TestCase
             ->set('password_confirmation', 'campaign123')
             ->call('register')
             ->assertHasNoErrors()
-            ->assertRedirect(route('campaign-packs.index'));
+            ->assertRedirect(route('products.index'));
 
         $user = User::where('email', 'new@agency.com')->firstOrFail();
         $this->assertDatabaseCount('workspaces', 1);

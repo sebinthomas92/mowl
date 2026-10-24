@@ -57,7 +57,7 @@ class RolesAndClientPortalTest extends TestCase
         $this->actingAs($reviewer)->get(route('campaign-packs.index'))->assertOk()->assertDontSee('CREDITS REMAINING')->assertDontSee('COGS STATUS');
         $this->actingAs($reviewer)->get(route('campaign-packs.show', $north))->assertOk()->assertDontSee('tracked cost');
         $this->actingAs($reviewer)->get(route('workspace.settings'))->assertOk()->assertDontSee('overage credit');
-        $this->actingAs($owner)->get(route('campaign-packs.index'))->assertOk()->assertSee('CREDITS REMAINING');
+        $this->actingAs($owner)->get(route('campaign-packs.index'))->assertOk()->assertSee('Pack credits');
     }
 
     public function test_a_reviewer_cannot_decide_on_a_draft_through_the_url(): void

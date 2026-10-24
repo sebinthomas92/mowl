@@ -1,5 +1,5 @@
 @php
-    $heroImage = $product->mediaAssets->first(fn ($asset) => str_starts_with((string) $asset->mime_type, 'image/') && $asset->status !== 'failed');
+    $heroImage = $product->coverImage();
     $needsDecision = $facts->whereIn('status', ['conflict', 'missing'])->reject(fn ($item) => $item->key === 'audience' && $item->status === 'missing' && ($brandAudience ?? null))->count();
     $inReview = $contentItems !== null ? $contentItems->where('status', 'review')->count() : $packs->where('status', 'review')->count();
     $checkedAt = $source?->fetched_at ?? $source?->created_at;
@@ -13,8 +13,8 @@
     <div class="hero-bg" aria-hidden="true"><span class="blob blob-a"></span><span class="blob blob-b"></span></div>
     <div class="crumb"><a href="{{ route('products.index') }}" wire:navigate>Products</a> / {{ $product->brand->name }} / <span>{{ $product->name }}</span></div>
     <div class="hero-row">
-        <div class="pimg">
-            @if($heroImage)<img src="{{ route('products.hub-media', [$product, $heroImage]) }}" alt="{{ $product->name }}">@endif
+        <div class="pimg" data-initials="{{ mb_strtoupper(mb_substr($product->name, 0, 1)) }}">
+            @if($heroImage)<img src="{{ route('products.hub-media', [$product, $heroImage]) }}" alt="" onerror="this.remove()">@endif
         </div>
         <div class="hero-title">
             <div class="hero-name">
