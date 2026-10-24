@@ -20,11 +20,12 @@ class Page extends Model
     protected $fillable = [
         'workspace_id', 'product_id', 'store_connection_id', 'name', 'slug', 'headline', 'draft_version', 'live_version',
         'publish_state', 'last_error', 'remote_id', 'remote_url', 'remote_store', 'verified_at', 'created_by_user_id',
+        'document', 'document_revision', 'template',
     ];
 
     protected function casts(): array
     {
-        return ['verified_at' => 'datetime', 'draft_version' => 'integer', 'live_version' => 'integer'];
+        return ['verified_at' => 'datetime', 'draft_version' => 'integer', 'live_version' => 'integer', 'document' => 'array', 'document_revision' => 'integer'];
     }
 
     public function product(): BelongsTo
@@ -50,6 +51,17 @@ class Page extends Model
     public function attempts(): HasMany
     {
         return $this->hasMany(PublishAttempt::class);
+    }
+
+    public function generations(): HasMany
+    {
+        return $this->hasMany(PageGeneration::class);
+    }
+
+    /** Pages made before the page editor keep their old sections until they are opened in it. */
+    public function hasDocument(): bool
+    {
+        return is_array($this->document);
     }
 
     /** The draft has been frozen by a publish, so the next edit starts a new draft version. */

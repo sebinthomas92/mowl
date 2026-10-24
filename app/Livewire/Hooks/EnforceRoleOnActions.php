@@ -10,7 +10,6 @@ use App\Livewire\ContentBrowser;
 use App\Livewire\InboxDrawer;
 use App\Livewire\ProductCampaigns;
 use App\Livewire\ProductHub;
-use App\Livewire\ProductPages;
 use App\Livewire\ReviewQueue;
 use App\Livewire\StoreConnections;
 use App\Livewire\TeamIndex;
@@ -33,7 +32,6 @@ class EnforceRoleOnActions extends ComponentHook
         ContentBrowser::class => ['select', 'showTab', 'filter', 'clearFilters', 'addComment'],
         CampaignWorkspace::class => ['selectVersion', 'addComment', 'approveVersion', 'rejectVersion', 'approveSource'],
         ProductHub::class => ['cancelEdit'],
-        ProductPages::class => ['showPage', 'verifyPending'],
         ProductCampaigns::class => ['show', 'cancelEditing'],
         InboxDrawer::class => ['open', 'markAllRead'],
     ];

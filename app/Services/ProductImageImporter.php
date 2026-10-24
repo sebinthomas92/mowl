@@ -76,6 +76,45 @@ class ProductImageImporter
         return null;
     }
 
+    /**
+     * More of the product's own photos, for page galleries: the store's gallery images in page order,
+     * until the product has $limit product page photos or the time budget runs out (each download can
+     * take the full fetch timeout, and the editor waits for this). Thumbnails and huge images are skipped.
+     *
+     * @param  list<string>  $imageUrls
+     * @return int photos added
+     */
+    public function importGallery(Product $product, SourceSnapshot $source, array $imageUrls, int $limit = 8, float $budgetSeconds = 20): int
+    {
+        $started = microtime(true);
+        $existing = $product->mediaAssets()->where('type', 'image')->where('metadata->origin', 'product_page')->get();
+        $seen = $existing->map(fn (MediaAsset $asset) => $asset->metadata['source_url'] ?? null)->filter()->all();
+        $count = $existing->count();
+        $added = 0;
+        foreach (array_values(array_unique($imageUrls)) as $rank => $imageUrl) {
+            if ($count >= $limit || microtime(true) - $started > $budgetSeconds) {
+                break;
+            }
+            if (! is_string($imageUrl) || in_array($imageUrl, $seen, true)) {
+                continue;
+            }
+            try {
+                $image = $this->fetcher->fetchImage($imageUrl);
+                if ($image['width'] * $image['height'] > self::MAX_PIXELS || max($image['width'], $image['height']) < self::MIN_SIDE) {
+                    continue;
+                }
+                if ($this->store($product, $source, $rank, $image)->wasRecentlyCreated) {
+                    $count++;
+                    $added++;
+                }
+            } catch (Throwable) {
+                continue;
+            }
+        }
+
+        return $added;
+    }
+
     /** @param  array{bytes: string, mime_type: string, url: string, width: int, height: int}  $image */
     private function store(Product $product, SourceSnapshot $source, int $rank, array $image): MediaAsset
     {

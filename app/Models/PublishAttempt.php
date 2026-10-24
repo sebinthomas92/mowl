@@ -9,7 +9,7 @@ class PublishAttempt extends Model
 {
     protected $fillable = [
         'page_id', 'page_version_id', 'store_connection_id', 'action', 'status', 'error', 'remote_url', 'html',
-        'verify_checks', 'user_id', 'finished_at',
+        'verify_checks', 'user_id', 'finished_at', 'warning',
     ];
 
     protected function casts(): array
