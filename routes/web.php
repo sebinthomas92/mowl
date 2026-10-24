@@ -8,6 +8,7 @@ use App\Http\Controllers\ClientPortalController;
 use App\Http\Controllers\ClientReviewController;
 use App\Http\Controllers\ProductHubDeliveryController;
 use App\Http\Controllers\SandboxStoreController;
+use App\Http\Controllers\StoreApprovalController;
 use App\Http\Controllers\StripeWebhookController;
 use App\Http\Controllers\WorkflowDownloadController;
 use App\Http\Controllers\WorkflowPreviewController;
@@ -103,6 +104,8 @@ Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::get('/usage', UsageIndex::class)->name('usage.index');
     Route::get('/billing', BillingIndex::class)->name('billing.index');
     Route::get('/settings', WorkspaceSettings::class)->name('workspace.settings');
+    // WordPress sends the owner back here with a new application password; the throttle limits guessing.
+    Route::get('/settings/stores/wordpress', StoreApprovalController::class)->middleware(['throttle:20,1', NoIndex::class])->name('stores.wordpress.return');
     Route::get('/concierge', ConciergeIndex::class)->name('concierge.index');
     Route::get('/portal', ClientPortal::class)->name('portal.index');
     Route::get('/portal/items/{contentItem}/image', [ClientPortalController::class, 'image'])->name('portal.image');
