@@ -459,6 +459,10 @@ export function pageEditor() {
             const field = section && this.fieldDef(section.type, path);
             if (!field || !['text', 'textarea'].includes(field.type)) return;
             this.remember('inline:' + sectionId + ':' + path);
+            // Typing changes this section's markup in place, so its cached markup no longer matches what
+            // is on the canvas. Without it, the next render replaces the section even when the text goes
+            // back to what it was (Escape, Undo).
+            delete f.raw[sectionId];
             if (element.hasAttribute('data-mowl-empty')) {
                 element.textContent = '';
                 element.removeAttribute('data-mowl-empty');
