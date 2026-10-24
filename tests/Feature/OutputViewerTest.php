@@ -105,6 +105,24 @@ class OutputViewerTest extends TestCase
             ->assertSee('1 of 6');
     }
 
+    public function test_a_decision_is_refused_when_the_output_changed_after_the_viewer_showed_it(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        $library = app(ContentLibrary::class);
+        $library->syncPack($pack);
+        $positioning = $pack->contentItems()->where('section', 'positioning')->firstOrFail();
+
+        $viewer = Livewire::actingAs($owner)->test(ContentBrowser::class, ['productId' => $pack->product_id])->call('select', $positioning->id);
+        $library->saveDraft($positioning->latestVersion, ['value_proposition' => 'A directly supported viewer product fact.']);
+
+        $viewer->call('approve')->assertHasErrors('decision');
+        $this->assertSame('draft', $positioning->fresh()->status);
+
+        $viewer->call('approve')->assertHasNoErrors();
+        $this->assertSame('approved', $positioning->fresh()->status);
+    }
+
     public function test_a_blocked_approval_shows_the_reason_in_the_viewer(): void
     {
         [$owner, , $pack] = $this->fixture();

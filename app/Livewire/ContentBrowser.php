@@ -59,6 +59,10 @@ class ContentBrowser extends Component
 
     public string $commentBody = '';
 
+    /** The version and content the viewer last showed, so a decision never lands on content the reviewer did not see. */
+    #[Locked]
+    public ?string $shownVersion = null;
+
     /** Note sent with a decision in the viewer: optional when approving, required when asking for changes. */
     public string $decisionNote = '';
 
@@ -115,6 +119,9 @@ class ContentBrowser extends Component
         abort_unless($this->membership()?->canReview(), 403);
         $item = $this->item();
         $version = $item->latestVersion;
+        if (! $this->stillShown($version)) {
+            return;
+        }
         // Read the order first: with a status filter on, the decision moves this output out of the list.
         $ids = $this->orderedIds();
         try {
@@ -133,6 +140,9 @@ class ContentBrowser extends Component
         $this->validate(['decisionNote' => ['required', 'string', 'max:2000']], ['decisionNote.required' => 'Say what should change so the team can act on it.']);
         $item = $this->item();
         $version = $item->latestVersion;
+        if (! $this->stillShown($version)) {
+            return;
+        }
         $ids = $this->orderedIds();
         try {
             $library->requestChanges($version, auth()->user(), $this->decisionNote);
@@ -254,6 +264,7 @@ class ContentBrowser extends Component
         $this->itemId = $selected?->id;
         $versions = $selected ? $selected->versions()->with(['comments', 'createdBy', 'reviewedBy'])->orderByDesc('version')->get() : collect();
         $latest = $versions->first();
+        $this->shownVersion = $latest ? self::fingerprint($latest) : null;
         $position = $selected ? array_search($selected->id, $order, true) : false;
         $this->picked = array_values(array_intersect(array_map('intval', $this->picked), $list->pluck('id')->all()));
 
@@ -352,6 +363,22 @@ class ContentBrowser extends Component
     }
 
     /** After a decision, moves on to the next output still waiting for one, or stays when there is none. */
+    private static function fingerprint(ContentVersion $version): string
+    {
+        return $version->id.':'.hash('sha256', json_encode($version->body));
+    }
+
+    /** False, with a message, when the output changed (a new version or an edited draft) since the viewer showed it. */
+    private function stillShown(ContentVersion $version): bool
+    {
+        if ($this->shownVersion !== null && hash_equals($this->shownVersion, self::fingerprint($version))) {
+            return true;
+        }
+        $this->addError('decision', 'This output changed since you opened it. Check what it says now, then decide.');
+
+        return false;
+    }
+
     /** @param  list<int>  $ids  the grid's order from before the decision */
     private function decided(string $message, array $ids): void
     {
