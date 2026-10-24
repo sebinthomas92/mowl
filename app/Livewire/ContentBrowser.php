@@ -115,6 +115,8 @@ class ContentBrowser extends Component
         abort_unless($this->membership()?->canReview(), 403);
         $item = $this->item();
         $version = $item->latestVersion;
+        // Read the order first: with a status filter on, the decision moves this output out of the list.
+        $ids = $this->orderedIds();
         try {
             $library->approve($version, auth()->user(), null, trim($this->decisionNote) ?: null);
         } catch (ValidationException $exception) {
@@ -122,7 +124,7 @@ class ContentBrowser extends Component
 
             return;
         }
-        $this->decided("{$item->title} v{$version->version} approved. Nothing was published.");
+        $this->decided("{$item->title} v{$version->version} approved. Nothing was published.", $ids);
     }
 
     public function requestChanges(ContentLibrary $library): void
@@ -131,6 +133,7 @@ class ContentBrowser extends Component
         $this->validate(['decisionNote' => ['required', 'string', 'max:2000']], ['decisionNote.required' => 'Say what should change so the team can act on it.']);
         $item = $this->item();
         $version = $item->latestVersion;
+        $ids = $this->orderedIds();
         try {
             $library->requestChanges($version, auth()->user(), $this->decisionNote);
         } catch (ValidationException $exception) {
@@ -138,7 +141,7 @@ class ContentBrowser extends Component
 
             return;
         }
-        $this->decided("Changes requested on {$item->title} v{$version->version}. The team has been notified.");
+        $this->decided("Changes requested on {$item->title} v{$version->version}. The team has been notified.", $ids);
     }
 
     public function showTab(string $tab): void
@@ -349,9 +352,9 @@ class ContentBrowser extends Component
     }
 
     /** After a decision, moves on to the next output still waiting for one, or stays when there is none. */
-    private function decided(string $message): void
+    /** @param  list<int>  $ids  the grid's order from before the decision */
+    private function decided(string $message, array $ids): void
     {
-        $ids = $this->orderedIds();
         $index = array_search($this->itemId, $ids, true);
         $waiting = ContentItem::query()->whereIn('id', $ids)->whereIn('status', ['draft', 'review'])->pluck('id')->all();
         $after = $index === false ? [] : array_slice($ids, $index + 1);

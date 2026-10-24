@@ -90,6 +90,21 @@ class OutputViewerTest extends TestCase
         $this->assertSame('changes', $second->fresh()->status);
     }
 
+    public function test_with_a_status_filter_on_a_decision_still_moves_to_the_next_output(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        app(ContentLibrary::class)->syncPack($pack);
+        [$first, $second] = $pack->contentItems()->orderBy('id')->get()->all();
+
+        Livewire::actingAs($owner)->withQueryParams(['status' => 'draft'])->test(ContentBrowser::class, ['productId' => $pack->product_id])
+            ->call('select', $first->id)
+            ->call('approve')
+            ->assertHasNoErrors()
+            ->assertSet('itemId', $second->id)
+            ->assertSee('1 of 6');
+    }
+
     public function test_a_blocked_approval_shows_the_reason_in_the_viewer(): void
     {
         [$owner, , $pack] = $this->fixture();
