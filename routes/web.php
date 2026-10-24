@@ -8,6 +8,7 @@ use App\Http\Controllers\ClientPortalController;
 use App\Http\Controllers\ClientReviewController;
 use App\Http\Controllers\ProductHubDeliveryController;
 use App\Http\Controllers\SandboxStoreController;
+use App\Http\Controllers\StoreApprovalController;
 use App\Http\Controllers\StripeWebhookController;
 use App\Http\Controllers\WorkflowDownloadController;
 use App\Http\Controllers\WorkflowPreviewController;
@@ -69,6 +70,10 @@ Route::get('/shared/products/{token}/items/{contentItem}/image', [ClientReviewCo
 Route::get('/shared/products/{token}/google-ads/{campaignType}.csv', [ProductHubDeliveryController::class, 'sharedExport'])->name('product-hubs.shared-export');
 Route::get('/shared/products/{token}/media/{mediaAsset}', [ProductHubDeliveryController::class, 'sharedMedia'])->name('product-hubs.shared-media');
 Route::get('/shared/products/{token}/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'sharedCreative'])->name('product-hubs.shared-creative');
+
+// WordPress sends the owner back here with a new application password. Outside the workspace role gate:
+// the workspace comes from the encrypted state and the controller checks ownership of that one.
+Route::get('/settings/stores/wordpress', StoreApprovalController::class)->middleware(['auth', 'throttle:20,1', NoIndex::class])->name('stores.wordpress.return');
 
 Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::post('/workspaces/{workspace}/select', function (Workspace $workspace, Request $request) {

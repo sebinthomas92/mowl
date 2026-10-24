@@ -53,5 +53,9 @@
 .connections-card{display:flex;flex-direction:column;gap:4px}
 .connection-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:16px;border-radius:16px;background:var(--surface-2);margin-top:8px}
 .connection-form .full{grid-column:1/-1}
-.connect-steps{display:grid;gap:6px}.connect-steps ol{margin:0;padding-left:1.2em;display:grid;gap:4px}.connect-steps a{text-decoration:underline}
+.wp-connect{display:grid;gap:6px;justify-items:start}
+.manual-connect summary{cursor:pointer}
+.manual-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+.manual-grid ol{margin:0;padding-left:1.2em;display:grid;gap:4px}.manual-grid a{text-decoration:underline}
+@media (max-width:720px){.manual-grid{grid-template-columns:1fr}}
 @media (max-width:720px){.connection-form{grid-template-columns:1fr}}
