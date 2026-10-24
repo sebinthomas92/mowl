@@ -21,6 +21,12 @@ use Illuminate\Support\Facades\Http;
  */
 class WooCommerceStore implements StoreClient
 {
+    /**
+     * The page template block themes (Twenty Twenty-Four and Twenty Twenty-Five among them) offer
+     * without the page title, so the theme does not print the page's name above the hero.
+     */
+    public const NO_TITLE_TEMPLATE = 'page-no-title';
+
     public function __construct(private PageImages $images) {}
 
     public function check(StoreConnection $store): array
@@ -102,7 +108,10 @@ class WooCommerceStore implements StoreClient
             throw $this->failure($response, 'upload an image');
         }
 
-        return ['id' => (string) $response->json('id'), 'url' => (string) $response->json('source_url')];
+        $width = (int) $response->json('media_details.width');
+        $height = (int) $response->json('media_details.height');
+
+        return ['id' => (string) $response->json('id'), 'url' => (string) $response->json('source_url'), 'width' => $width > 0 ? $width : null, 'height' => $height > 0 ? $height : null];
     }
 
     public function putPage(StoreConnection $store, Page $page, ?string $remoteId, string $title, string $html): array
@@ -117,14 +126,47 @@ class WooCommerceStore implements StoreClient
             }
         }
         if (! $response) {
+            // A new page asks for the title-less template. Themes without one reject the template before
+            // anything is saved, so the page is then created with the theme's default template. Later
+            // publishes leave the template alone, so a template chosen in WordPress stays.
             $url = $this->endpoint($store, 'wp/v2/pages');
-            $response = $this->send(fn (PendingRequest $http) => $this->authed($http, $store)->post($url, $payload), $url);
+            $response = $this->send(fn (PendingRequest $http) => $this->authed($http, $store)->post($url, $payload + ['template' => self::NO_TITLE_TEMPLATE]), $url);
+            if ($this->rejectedTemplate($response)) {
+                $response = $this->send(fn (PendingRequest $http) => $this->authed($http, $store)->post($url, $payload), $url);
+            }
         }
         if (! $response->successful() || ! $response->json('id') || ! $response->json('link')) {
             throw $this->failure($response, 'save the page');
         }
 
-        return ['id' => (string) $response->json('id'), 'url' => (string) $response->json('link')];
+        return ['id' => (string) $response->json('id'), 'url' => (string) $response->json('link'), 'warning' => $this->strippedLayout($html, $response)];
+    }
+
+    /** WordPress answers an unknown template with a 400 that names the template parameter. */
+    private function rejectedTemplate(Response $response): bool
+    {
+        return $response->status() === 400 && $response->json('code') === 'rest_invalid_param' && is_array($response->json('data.params'))
+            && array_key_exists('template', $response->json('data.params'));
+    }
+
+    /**
+     * WordPress filters post content for users without the unfiltered_html capability (Editors on
+     * multisite, sites with DISALLOW_UNFILTERED_HTML). Before WordPress 7.0 that filter drops the
+     * "display" property, which the page's columns and grids rely on. The saved content tells: the
+     * response carries it raw, and an action link only when the user is unfiltered.
+     */
+    private function strippedLayout(string $html, Response $response): ?string
+    {
+        $raw = $response->json('content.raw');
+        $unfiltered = array_key_exists('https://api.w.org/action-unfiltered-html', (array) $response->json('_links'));
+        if ($unfiltered || ! is_string($raw)) {
+            return null;
+        }
+        if (substr_count($raw, 'display:') >= substr_count($html, 'display:')) {
+            return null;
+        }
+
+        return 'The store accepted the page but removed its layout styles, so columns show one under the other. WordPress does this for users who cannot post unfiltered HTML before version 7.0. Connect the store with an Administrator account, or update WordPress, then publish again.';
     }
 
     public function fetchPublic(StoreConnection $store, Page $page, string $url): string

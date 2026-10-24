@@ -33,7 +33,7 @@ class ContentLibrary
      * Words that make a factual or performance claim. Edited text may only use one when the
      * product page, confirmed Knowledge or the generated (evidence-checked) text already does.
      */
-    private const CLAIM_TERMS = [
+    public const CLAIM_TERMS = [
         'best', '#1', 'number one', 'no. 1', 'leading', 'proven', 'clinically', 'guarantee', 'guaranteed', 'certified',
         'award', 'patented', 'fastest', 'strongest', 'cheapest', 'lowest price', 'cure', 'cures', 'heal', 'heals',
         'doctor', 'dermatologist', 'recommended', 'tested', 'warranty', 'lifetime', 'money-back', 'free shipping',

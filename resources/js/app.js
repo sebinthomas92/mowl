@@ -1,1 +1,1 @@
-//
+import './page-editor';

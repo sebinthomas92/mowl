@@ -152,8 +152,8 @@ class PagePublisher
                 $version = $page->versions()->where('version', $page->draft_version)->first();
                 if (! $version) {
                     $snapshot = $this->builder->snapshot($page);
-                    // Content can change between the blocker check and the snapshot; only approved versions go out.
-                    $pinned = collect($snapshot['sections'])->pluck('item.content_version_id')->filter();
+                    // Older pages pin content items; content can change between the blocker check and the snapshot.
+                    $pinned = collect($snapshot['sections'] ?? [])->pluck('item.content_version_id')->filter();
                     if ($pinned->isNotEmpty() && ContentVersion::query()->whereIn('id', $pinned)->where('status', '!=', 'approved')->exists()) {
                         throw ValidationException::withMessages(['publish' => 'Some content on this page changed while publishing. Check the sections, then publish again.']);
                     }
@@ -189,7 +189,7 @@ class PagePublisher
                 if ($locked?->status !== 'publishing') {
                     return false;
                 }
-                $locked->update(['status' => 'verifying', 'remote_url' => $remote['url']]);
+                $locked->update(['status' => 'verifying', 'remote_url' => $remote['url'], 'warning' => isset($remote['warning']) ? mb_substr((string) $remote['warning'], 0, 500) : null]);
                 if ((int) $page->attempts()->max('id') === $attempt->id) {
                     $page->update(['publish_state' => 'verifying', 'remote_id' => $remote['id'], 'remote_url' => $remote['url'], 'remote_store' => $store->remoteKey()]);
                 }
@@ -215,14 +215,23 @@ class PagePublisher
         return $this->verify($page->fresh()) ?? $attempt->fresh();
     }
 
-    /** Uploads an image once per store and reuses it on later publishes. */
-    private function storeImage(StoreConnection $store, $client, array $ref, int $workspaceId): string
+    /**
+     * Uploads an image once per store and reuses it on later publishes.
+     *
+     * @return array{id: string, url: string, width: ?int, height: ?int}
+     */
+    private function storeImage(StoreConnection $store, $client, array $ref, int $workspaceId): array
     {
-        $cached = ($store->media ?? [])[$ref['key']]['url'] ?? null;
-        if ($cached) {
-            return $cached;
+        $known = function (array $image) use ($ref, $workspaceId): array {
+            $image = array_filter($image, fn ($value) => $value !== null);
+
+            return isset($image['width'], $image['height']) ? $image : $image + $this->images->dimensions($ref, $workspaceId);
+        };
+        $cached = ($store->media ?? [])[$ref['key']] ?? null;
+        if (is_array($cached) && filled($cached['url'] ?? null)) {
+            return $known(['id' => (string) ($cached['id'] ?? ''), 'url' => (string) $cached['url'], 'width' => $cached['width'] ?? null, 'height' => $cached['height'] ?? null]);
         }
-        $uploaded = $client->uploadImage($store, $ref, $workspaceId);
+        $uploaded = $known($client->uploadImage($store, $ref, $workspaceId));
         // Other pages may be publishing to this store too; merge into the latest map instead of replacing it.
         DB::transaction(function () use ($store, $ref, $uploaded): void {
             $locked = StoreConnection::query()->lockForUpdate()->findOrFail($store->id);
@@ -230,7 +239,7 @@ class PagePublisher
             $store->setRawAttributes($locked->getAttributes(), true);
         });
 
-        return $uploaded['url'];
+        return $uploaded;
     }
 
     /** @param  bool  $maybeWritten  the page was being sent when the store stopped answering */

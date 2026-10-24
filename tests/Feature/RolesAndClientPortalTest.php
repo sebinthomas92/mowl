@@ -84,9 +84,13 @@ class RolesAndClientPortalTest extends TestCase
         Livewire::actingAs($reviewer)->test(CampaignWorkspace::class, ['pack' => $north])->call('approveVersion')->assertStatus(422);
         $this->assertSame('draft', $north->versions()->first()->review_status);
 
-        $north->product->pages()->create(['workspace_id' => $workspace->id, 'name' => 'North page', 'slug' => 'north', 'headline' => 'North', 'draft_version' => 1]);
+        $page = $north->product->pages()->create(['workspace_id' => $workspace->id, 'name' => 'North page', 'slug' => 'north', 'headline' => 'North', 'draft_version' => 1]);
         Livewire::actingAs($reviewer)->test(ProductPages::class, ['productId' => $north->product_id])
-            ->assertSee('North page')->assertDontSee('New page')->assertSeeHtml('<fieldset class="fieldset-plain" disabled');
+            ->assertSee('North page')->assertSee('View draft')->assertDontSee('New page')->assertDontSee('Open editor')
+            ->call('create', 'studio', false)->assertForbidden();
+        $this->assertSame(1, $north->product->pages()->count());
+        $this->actingAs($reviewer)->get(route('pages.edit', [$north->product, $page]))->assertRedirect(route('pages.preview', [$north->product, $page]));
+        $this->actingAs($reviewer)->get(route('pages.preview', [$north->product, $page]))->assertOk()->assertSee('Back to the product');
 
         StoreConnection::create(['workspace_id' => $workspace->id, 'brand_id' => $kettle->product->brand_id, 'name' => 'Kettle store', 'driver' => 'sandbox', 'site_url' => 'https://kettle.test', 'status' => 'connected']);
         StoreConnection::create(['workspace_id' => $workspace->id, 'brand_id' => $north->product->brand_id, 'name' => 'North store', 'driver' => 'sandbox', 'site_url' => 'https://north.test', 'status' => 'connected']);

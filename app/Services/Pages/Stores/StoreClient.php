@@ -14,13 +14,14 @@ interface StoreClient
      */
     public function check(StoreConnection $store): array;
 
-    /** @return array{id: string, url: string} */
+    /** @return array{id: string, url: string, width?: ?int, height?: ?int} */
     public function uploadImage(StoreConnection $store, array $ref, int $workspaceId): array;
 
     /**
-     * Creates the page, or updates it when $remoteId still exists in the store.
+     * Creates the page, or updates it when $remoteId still exists in the store. A warning says what
+     * the store changed in the page it accepted.
      *
-     * @return array{id: string, url: string}
+     * @return array{id: string, url: string, warning?: ?string}
      */
     public function putPage(StoreConnection $store, Page $page, ?string $remoteId, string $title, string $html): array;
 

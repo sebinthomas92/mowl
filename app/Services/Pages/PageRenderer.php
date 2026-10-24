@@ -2,20 +2,35 @@
 
 namespace App\Services\Pages;
 
+use App\Services\Pages\Document\Document;
+use App\Services\Pages\Document\DocumentRenderer;
+
 /**
- * Turns a page snapshot into the HTML a store receives. The app preview renders the same sections,
- * so what people approve on screen is what gets published.
+ * Turns a page snapshot into the HTML a store receives. Page documents (format 2) render through
+ * {@see DocumentRenderer}, the same renderer as the editor's canvas. Older snapshots, made of sections
+ * bound to content items, render here as they always did, so rolling back to them shows what was live.
  *
  * Output has no line breaks between tags: WordPress turns blank lines in page content into paragraphs.
  * Only tags and inline styles that WordPress keeps for editors are used.
  */
 class PageRenderer
 {
+    public function __construct(private DocumentRenderer $documents) {}
+
     /**
-     * @param  callable(array): ?string  $imageUrl  resolves a snapshot image reference to a URL
+     * @param  callable(array): (string|array|null)  $image  resolves a snapshot image reference to a URL, or to
+     *                                                       {url, id, width, height} once it is in the store
      */
-    public function page(array $snapshot, int $version, callable $imageUrl): string
+    public function page(array $snapshot, int $version, callable $image): string
     {
+        if (($snapshot['format'] ?? 1) >= Document::FORMAT) {
+            return $this->documents->render((array) ($snapshot['document'] ?? []), ['page_id' => (int) $snapshot['page_id'], 'version' => $version], $image);
+        }
+        $imageUrl = function (array $ref) use ($image): ?string {
+            $resolved = $image($ref);
+
+            return is_array($resolved) ? ($resolved['url'] ?? null) : $resolved;
+        };
         $sections = implode('', array_map(fn (array $section) => $this->section($section, $snapshot, $imageUrl), $snapshot['sections'] ?? []));
 
         return '<div class="mowl-page" data-mowl-page="'.(int) $snapshot['page_id'].'" data-mowl-version="'.$version.'" style="max-width:960px;margin:0 auto">'.$sections.'</div>';

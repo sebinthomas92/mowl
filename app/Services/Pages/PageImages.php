@@ -38,6 +38,23 @@ class PageImages
         };
     }
 
+    /**
+     * The image's size in pixels, when the app knows it.
+     *
+     * @return array{width: ?int, height: ?int}
+     */
+    public function dimensions(array $ref, int $workspaceId): array
+    {
+        $image = $this->find($ref, $workspaceId);
+        [$width, $height] = match (true) {
+            $image instanceof BannerCreative => [$image->width, $image->height],
+            $image instanceof MediaAsset => [$image->metadata['width'] ?? null, $image->metadata['height'] ?? null],
+            default => [null, null],
+        };
+
+        return ['width' => (int) $width > 0 ? (int) $width : null, 'height' => (int) $height > 0 ? (int) $height : null];
+    }
+
     /** @return array{bytes: string, mime: string, filename: string}|null */
     public function contents(array $ref, int $workspaceId): ?array
     {

@@ -9,13 +9,17 @@
         body{margin:0;background:#F7F7F7;color:#0F0F0F;font:16px/1.6 system-ui,-apple-system,'Segoe UI',sans-serif}
         .sandbox-bar{background:#0F0F0F;color:#fff;font-size:13px;padding:10px 20px;display:flex;gap:12px;flex-wrap:wrap;justify-content:space-between}
         .sandbox-bar a{color:#CFCFCF}
+        *,*::before,*::after{box-sizing:border-box}
         main{max-width:1000px;margin:0 auto;padding:40px 20px}
+        main.full{max-width:none;padding:0;background:#fff}
         h1,h2{line-height:1.15}
+        img{max-width:100%;height:auto}
     </style>
 </head>
 <body>
     <div class="sandbox-bar"><span>{{ $store->name }} · sandbox store. Not a real shop; MarketingOwl hosts this page so you can try publishing.</span><a href="{{ route('sandbox-store.home', $store->api_base) }}">All pages</a></div>
-    <main>
+    {{-- Pages from the page editor are full width and bring their own spacing, like a store theme's full-width template. --}}
+    <main @class(['full' => $html !== null && str_contains($html, 'mowl-page alignfull')])>
         @if($html !== null)
             {!! $html !!}
         @else
