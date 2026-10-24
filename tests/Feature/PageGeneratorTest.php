@@ -184,7 +184,7 @@ class PageGeneratorTest extends TestCase
         $written = $editor->call('generate', null, '', 1)->effects['returns'][0];
         $this->assertTrue($written['ok']);
         $this->assertSame(2, $written['revision']);
-        $this->assertSame(['pageCost' => 1, 'credits' => 0, 'written' => true], $written['ai']);
+        $this->assertSame(['pageCost' => 1, 'credits' => 0, 'short' => true, 'written' => true], $written['ai']);
         $this->assertSame($page->fresh()->document, $written['document']);
 
         $missing = $editor->call('generate', 'sgone1234', '', 2)->effects['returns'][0];

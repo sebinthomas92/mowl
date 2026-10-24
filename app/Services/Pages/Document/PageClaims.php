@@ -366,13 +366,6 @@ final class PageClaims
     /** The amount in a price ("₹1,499.00" is "1499"), the way the launch pack checks write it. */
     private function amount(string $price): ?string
     {
-        if (! preg_match('/\d(?:[\d.,]*\d)?/u', $price, $match)) {
-            return null;
-        }
-        $number = preg_match('/,\d{1,2}$/', $match[0])
-            ? str_replace(',', '.', str_replace('.', '', $match[0]))
-            : str_replace(',', '', $match[0]);
-
-        return str_contains($number, '.') ? rtrim(rtrim($number, '0'), '.') : $number;
+        return preg_match('/\d(?:[\d.,]*\d)?/u', $price, $match) ? CampaignPackSafetyValidator::number($match[0]) : null;
     }
 }

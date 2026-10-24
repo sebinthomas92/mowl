@@ -352,9 +352,12 @@
                                 <button type="button" class="pill pri sm pe-block" @click="writePage(false)" :disabled="!!ai.busy">
                                     <i class="ti ti-sparkles" aria-hidden="true"></i><span x-text="ai.busy === 'page' ? 'Writing…' : (ai.state.written ? 'Write the whole page again' : 'Write the whole page')"></span>
                                 </button>
-                                <p class="pe-help" x-text="(ai.state.pageCost || 0) === 0 ? 'Included: the first AI write of each page is free.' : 'Uses 1 credit. ' + (ai.state.credits ?? 0) + ' left.'"></p>
-                                <template x-if="(ai.state.pageCost || 0) > 0 && (ai.state.credits ?? 0) < 1">
+                                <p class="pe-help" x-text="(ai.state.pageCost || 0) === 0 ? 'Included: the first AI write of each page is free.' : 'Uses 1 credit.' + (ai.state.credits === null || ai.state.credits === undefined ? '' : ' ' + ai.state.credits + ' left.')"></p>
+                                <template x-if="ai.state.short && ai.state.credits !== null">
                                     <p class="pe-help">No credits left. <a :href="config.urls.billing">Buy credits</a></p>
+                                </template>
+                                <template x-if="ai.state.short && ai.state.credits === null">
+                                    <p class="pe-help">The workspace has no credits left. Ask a workspace owner to add some.</p>
                                 </template>
                                 <p class="pe-help">To change one section, select it and use Rewrite on the Section tab. That is included.</p>
                             </div>

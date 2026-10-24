@@ -895,8 +895,11 @@ export function pageEditor() {
             this.scheduleSave();
         },
 
+        /** Edits that exist only in this tab, including ones a conflict or a refusal kept from saving. */
         unsaved() {
-            return !this.conflict && (this.saveState !== 'saved' || this._frame.saving);
+            const f = this._frame;
+
+            return !!f && !f.leaving && (this.saveState !== 'saved' || f.saving);
         },
 
         scheduleSave(delay = 900) {
@@ -990,8 +993,9 @@ export function pageEditor() {
             return { saved: 'Saved', saving: 'Saving…', unsaved: 'Unsaved changes', error: 'Not saved yet. Retrying…', refused: 'Not saved', conflict: 'Changed elsewhere' }[this.saveState] || '';
         },
 
+        /** Loads the latest version. The person chose this from the conflict notice, so no leave prompt. */
         reload() {
-            this.conflict = null;
+            if (this._frame) this._frame.leaving = true;
             window.location.reload();
         },
 
@@ -1000,7 +1004,8 @@ export function pageEditor() {
         async writePage(first = false) {
             if (this.ai.busy) return;
             const cost = this.ai.state.pageCost || 0;
-            if (!first && cost > 0 && !window.confirm(`Writing the whole page again uses 1 credit (${this.ai.state.credits} left) and replaces the text in every section. You can undo it. Continue?`)) return;
+            const left = this.ai.state.credits === null || this.ai.state.credits === undefined ? '' : ` (${this.ai.state.credits} left)`;
+            if (!first && cost > 0 && !window.confirm(`Writing the whole page again uses 1 credit${left} and replaces the text in every section. You can undo it. Continue?`)) return;
             if (!first && cost === 0 && this.ai.state.written === false && this.doc.sections.length && !window.confirm('The AI rewrites the text in every section from the product\'s facts. Images, prices and links stay. You can undo it. Continue?')) return;
             this.endInline(false);
             if (!(await this.flush())) {
@@ -1321,7 +1326,8 @@ export function pageEditor() {
         },
 
         async goBack() {
-            await this.flush();
+            if (!(await this.flush()) && !window.confirm('Your latest changes are not saved and will be lost if you leave. Leave the editor anyway?')) return;
+            this._frame.leaving = true;
             window.location.href = this.config.urls.back;
         },
 

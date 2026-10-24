@@ -259,10 +259,17 @@ class PageEditorTest extends TestCase
         $library->syncPack($pack);
         $positioning = $pack->contentItems()->where('section', 'positioning')->firstOrFail();
         $library->approve($positioning->latestVersion, $owner);
+        $offers = $pack->contentItems()->where('section', 'offers')->firstOrFail();
+        $offers->latestVersion->update(['body' => ['offers' => [
+            ['wording' => 'Read longer without the neck ache.', 'audience_or_situation' => 'For people who read in bed.'],
+            ['wording' => str_repeat('A second offer that runs long. ', 6), 'audience_or_situation' => 'For gift buyers.'],
+        ]] + $offers->latestVersion->body]);
+        $library->approve($offers->fresh()->latestVersion, $owner);
         $page = $product->pages()->create(['workspace_id' => $workspace->id, 'name' => 'Old page', 'slug' => 'old', 'headline' => 'The old headline', 'draft_version' => 1]);
         $page->sections()->create(['position' => 1, 'kind' => 'hero', 'title' => 'Hero']);
         $page->sections()->create(['position' => 2, 'kind' => 'message', 'title' => 'Message', 'content_item_id' => $positioning->id]);
-        $page->sections()->create(['position' => 3, 'kind' => 'cta', 'title' => 'Call to action', 'settings' => ['label' => 'Get yours', 'url' => 'https://example.com/buy', 'text' => '']]);
+        $page->sections()->create(['position' => 3, 'kind' => 'offer', 'title' => 'Offer', 'content_item_id' => $offers->id]);
+        $page->sections()->create(['position' => 4, 'kind' => 'cta', 'title' => 'Call to action', 'settings' => ['label' => 'Get yours', 'url' => 'https://example.com/buy', 'text' => '']]);
         $this->assertSame([], app(PageBuilder::class)->blockers($page), 'Older pages still publish as they are.');
 
         $this->actingAs($owner)->get(route('pages.edit', [$product, $page]))->assertOk();
@@ -270,10 +277,17 @@ class PageEditorTest extends TestCase
         $page->refresh();
         $this->assertTrue($page->hasDocument());
         $this->assertSame(['studio', 1], [$page->template, $page->document_revision]);
-        $this->assertSame(['product_hero', 'rich_text', 'cta'], array_column($page->document['sections'], 'type'));
-        $this->assertSame('The old headline', $page->document['sections'][0]['settings']['title']);
-        $this->assertSame((string) $positioning->latestVersion->body['brand_position'], $page->document['sections'][1]['settings']['text']);
-        $this->assertSame(['Get yours', 'https://example.com/buy'], [$page->document['sections'][2]['settings']['button_label'], $page->document['sections'][2]['settings']['button_url']]);
+        $sections = $page->document['sections'];
+        $this->assertSame(['product_hero', 'rich_text', 'rich_text', 'rich_text', 'cta'], array_column($sections, 'type'));
+        $this->assertSame('The old headline', $sections[0]['settings']['title']);
+        $body = $positioning->latestVersion->body;
+        $this->assertSame($body['value_proposition'], $sections[1]['settings']['heading']);
+        $this->assertSame($body['brand_position']."\n\nMade for:\n".implode("\n", array_map(fn (array $audience) => $audience['name'].': '.$audience['need'], $body['audience_priorities'])),
+            $sections[1]['settings']['text'], 'Who the product is made for stays on the page.');
+        $this->assertSame(['Read longer without the neck ache.', 'For people who read in bed.'], [$sections[2]['settings']['heading'], $sections[2]['settings']['text']]);
+        $this->assertSame(['', trim(str_repeat('A second offer that runs long. ', 6))."\n\nFor gift buyers."], [$sections[3]['settings']['heading'], $sections[3]['settings']['text']],
+            'Every offer stays, and one too long for a heading is kept whole in the text.');
+        $this->assertSame(['Get yours', 'https://example.com/buy'], [$sections[4]['settings']['button_label'], $sections[4]['settings']['button_url']]);
         $this->assertSame(0, $page->sections()->count());
         $this->assertSame(1, $page->draft_version, 'Converting is not a new version: nothing on the page changed.');
     }
@@ -356,6 +370,24 @@ class PageEditorTest extends TestCase
         $this->assertSame(0, $page->attempts()->count());
     }
 
+    public function test_brand_scoped_editors_see_what_a_write_costs_but_not_the_workspace_balance(): void
+    {
+        [$owner, $workspace, $product] = $this->fixture();
+        $workspace->credits()->create(['amount' => 7, 'event' => 'test_allocation', 'description' => 'Test credits']);
+        $scoped = User::factory()->create();
+        $workspace->users()->attach($scoped, ['role' => 'member', 'brand_id' => $product->brand_id]);
+        $page = app(PageBuilder::class)->start($product, $owner);
+        PageGeneration::create(['workspace_id' => $workspace->id, 'page_id' => $page->id, 'kind' => 'page', 'status' => 'completed', 'base_revision' => 1]);
+
+        $this->assertSame(['pageCost' => 1, 'credits' => 7, 'short' => false], array_intersect_key($this->config($owner, $page)['ai'], array_flip(['pageCost', 'credits', 'short'])));
+        $scopedConfig = $this->config($scoped, $page);
+        $this->assertSame(['pageCost' => 1, 'credits' => null, 'short' => false], array_intersect_key($scopedConfig['ai'], array_flip(['pageCost', 'credits', 'short'])));
+        $this->assertArrayNotHasKey('credits', $scopedConfig);
+
+        $workspace->credits()->create(['amount' => -7, 'event' => 'test_usage', 'description' => 'Used']);
+        $this->assertTrue($this->config($scoped, $page)['ai']['short'], 'They still learn that the workspace cannot pay for another write.');
+    }
+
     public function test_opening_the_editor_returns_the_credit_of_an_ai_run_that_was_cut_off(): void
     {
         [$owner, $workspace, $product] = $this->fixture();
@@ -379,6 +411,16 @@ class PageEditorTest extends TestCase
         $page->loadMissing('product');
 
         return Livewire::actingAs($user)->test(PageEditor::class, ['product' => $page->product, 'page' => $page]);
+    }
+
+    /** The editor's starting data, as the edit page gives it to the browser. */
+    private function config(User $user, Page $page): array
+    {
+        $page->loadMissing('product');
+        $html = $this->actingAs($user)->get(route('pages.edit', [$page->product, $page]))->assertOk()->getContent();
+        $this->assertSame(1, preg_match('#<script type="application/json" data-pe-config>(.*?)</script>#s', $html, $match));
+
+        return json_decode(html_entity_decode($match[1]), true);
     }
 
     private function returned(Testable $component): mixed

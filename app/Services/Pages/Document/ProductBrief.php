@@ -24,6 +24,7 @@ final class ProductBrief
      * @param  array<string, array>  $approved  approved launch pack copy, by section
      * @param  list<array>  $images  images a page may use, product page photos first
      * @param  array<string, string>  $withheld  why each of the product's other banners may not be used yet, by image key
+     * @param  Product|null  $prepared  the product as Knowledge leaves it: excluded values cleared, unresolved ones from the page
      */
     public function __construct(
         public readonly Product $product,
@@ -38,6 +39,7 @@ final class ProductBrief
         public readonly array $brand,
         public readonly ?SourceSnapshot $source,
         public readonly array $withheld = [],
+        private readonly ?Product $prepared = null,
     ) {}
 
     public static function for(Product $product): self
@@ -82,18 +84,25 @@ final class ProductBrief
             ]),
             source: $source,
             withheld: $withheld,
+            prepared: $subject,
         );
     }
 
     /** The product's name as the page should show it. */
     public function name(): string
     {
-        return (string) ($this->facts['name'] ?? $this->product->name);
+        return (string) ($this->facts['name'] ?? $this->subject()->name);
     }
 
     public function description(): string
     {
-        return trim((string) ($this->facts['description'] ?? $this->truth['description'] ?? $this->product->summary ?? ''));
+        return trim((string) ($this->facts['description'] ?? $this->truth['description'] ?? $this->subject()->summary ?? ''));
+    }
+
+    /** The product's own fields as a page may use them: a value the team excluded in Knowledge is not there. */
+    private function subject(): Product
+    {
+        return $this->prepared ?? $this->product;
     }
 
     /** @return list<string> one line per entry of a multi-line fact */
@@ -127,7 +136,7 @@ final class ProductBrief
     public function supportText(): string
     {
         return implode("\n", array_filter([
-            $this->product->name, $this->product->summary, $this->product->price, $this->price, $this->brand['name'] ?? null,
+            $this->subject()->name, $this->subject()->summary, $this->subject()->price, $this->price, $this->brand['name'] ?? null,
             $this->sourceText, json_encode($this->truth, JSON_UNESCAPED_UNICODE), implode("\n", $this->facts), implode("\n", array_map('strval', $this->team)),
             json_encode($this->approved, JSON_UNESCAPED_UNICODE),
         ]));

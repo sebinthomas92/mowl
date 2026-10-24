@@ -468,6 +468,16 @@ class CampaignPackSafetyValidator
     /** "1,499.00", "1.499,00" and "1499" are the same amount; "1,99" (a decimal comma) is 1.99. */
     private function amount(string $number): string
     {
+        return self::number($number);
+    }
+
+    /**
+     * An amount as written ("1,299", "30,00", "1.299,50", "64.00") as a plain number ("1299", "30",
+     * "1299.5", "64"). A comma before one or two final digits is a decimal comma. The price checks and
+     * the saving a page shows both read amounts this way.
+     */
+    public static function number(string $number): string
+    {
         $number = preg_match('/,\\d{1,2}$/', $number)
             ? str_replace(',', '.', str_replace('.', '', $number))
             : str_replace(',', '', $number);

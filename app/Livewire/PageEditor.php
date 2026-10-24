@@ -307,7 +307,6 @@ class PageEditor extends Component
         if ($brand = Theme::brandPalette($brief->brand['palette'] ?? [])) {
             $palettes = ['brand' => $brand] + $palettes;
         }
-        $workspace = $this->currentWorkspace();
 
         return [
             'document' => $page->document,
@@ -328,7 +327,6 @@ class PageEditor extends Component
             'checks' => $this->checks($page),
             'write' => request()->boolean('write') && ! $page->generations()->exists(),
             'isOwner' => $this->isOwner(),
-            'credits' => $workspace->spendableCredits(),
             'urls' => [
                 'back' => route('products.show', [$product, 'tab' => 'pages']),
                 'preview' => route('pages.preview', [$product, $page]),
@@ -340,9 +338,14 @@ class PageEditor extends Component
 
     private function aiState(Page $page): array
     {
+        $cost = app(PageGenerator::class)->pageCost($page);
+        $balance = $this->currentWorkspace()->spendableCredits();
+
         return [
-            'pageCost' => app(PageGenerator::class)->pageCost($page),
-            'credits' => $this->currentWorkspace()->spendableCredits(),
+            'pageCost' => $cost,
+            // Brand-scoped teammates learn whether the workspace can pay for a write, not its balance.
+            'credits' => $this->canSeeCosts() ? $balance : null,
+            'short' => $cost > 0 && $balance < $cost,
             'written' => $page->generations()->where('status', 'completed')->exists(),
         ];
     }
@@ -462,5 +465,10 @@ class PageEditor extends Component
     private function isOwner(): bool
     {
         return (bool) Membership::of(auth()->user(), $this->currentWorkspace())?->canPublish();
+    }
+
+    private function canSeeCosts(): bool
+    {
+        return (bool) Membership::of(auth()->user(), $this->currentWorkspace())?->canSeeCosts();
     }
 }

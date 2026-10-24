@@ -257,24 +257,26 @@ class PageBuilder
         $buyUrl = $brief->buyUrl;
         foreach ($legacy['sections'] as $entry) {
             $body = $entry['item']['body'] ?? [];
-            $section = match ($entry['kind']) {
-                'hero' => ['product_hero', [
+            $converted = match ($entry['kind']) {
+                'hero' => [['product_hero', [
                     'images' => $entry['image'] ? [$entry['image']] : $brief->photos(),
                     'title' => (string) $page->headline, 'description' => mb_substr(trim((string) ($body['supporting_text'] ?? '')) ?: (string) ($entry['summary'] ?? ''), 0, 600),
                     'price' => (string) $brief->price, 'button_label' => 'Buy now',
-                ]],
-                'message' => $body ? ['rich_text', ['heading' => mb_substr((string) ($body['value_proposition'] ?? $body['key_messaging']['value_proposition'] ?? ''), 0, 140), 'text' => (string) ($body['brand_position'] ?? '')]] : null,
-                'offer' => $body ? ['rich_text', ['heading' => mb_substr((string) ($body['offers'][0]['wording'] ?? ''), 0, 140), 'text' => (string) ($body['offers'][0]['audience_or_situation'] ?? '')]] : null,
-                'benefits' => $body ? ['benefits', ['heading' => 'Why you will love it', 'items' => array_map(fn ($angle) => ['title' => mb_substr((string) ($angle['title'] ?? ''), 0, 60), 'text' => mb_substr((string) ($angle['core_idea'] ?? ''), 0, 240)], array_slice((array) ($body['angles'] ?? []), 0, 8))]] : null,
-                'specs' => $entry['facts'] ? ['specs', ['rows' => array_map(fn ($fact) => ['label' => $fact['label'], 'value' => $fact['value']], $entry['facts'])]] : null,
-                'cta' => ['cta', ['heading' => mb_substr(trim((string) ($entry['settings']['text'] ?? '')) ?: 'Ready to buy?', 0, 120), 'button_label' => mb_substr((string) ($entry['settings']['label'] ?? 'Shop now'), 0, 40), 'button_url' => (string) ($entry['settings']['url'] ?? '')]],
-                default => null,
+                ]]],
+                'message' => $body ? [['rich_text', $this->legacyMessage($body)]] : [],
+                // Every offer the page showed, each as its own text section.
+                'offer' => array_map(fn (array $offer) => ['rich_text', $this->legacyText((string) ($offer['wording'] ?? ''), [(string) ($offer['audience_or_situation'] ?? '')])],
+                    array_values(array_filter((array) ($body['offers'] ?? []), 'is_array'))),
+                'benefits' => $body ? [['benefits', ['heading' => 'Why you will love it', 'items' => array_map(fn ($angle) => ['title' => mb_substr((string) ($angle['title'] ?? ''), 0, 60), 'text' => mb_substr((string) ($angle['core_idea'] ?? ''), 0, 240)], array_slice((array) ($body['angles'] ?? []), 0, 8))]]] : [],
+                'specs' => $entry['facts'] ? [['specs', ['rows' => array_map(fn ($fact) => ['label' => $fact['label'], 'value' => $fact['value']], $entry['facts'])]]] : [],
+                'cta' => [['cta', ['heading' => mb_substr(trim((string) ($entry['settings']['text'] ?? '')) ?: 'Ready to buy?', 0, 120), 'button_label' => mb_substr((string) ($entry['settings']['label'] ?? 'Shop now'), 0, 40), 'button_url' => (string) ($entry['settings']['url'] ?? '')]]],
+                default => [],
             };
             if ($entry['kind'] === 'cta' && $this->safeUrl($entry['settings']['url'] ?? null) && $buyUrl === '') {
                 $buyUrl = (string) $entry['settings']['url'];
             }
-            if ($section) {
-                $sections[] = Document::section($section[0], $section[1]);
+            foreach ($converted as [$type, $settings]) {
+                $sections[] = Document::section($type, $settings);
             }
         }
         $document = Document::sanitize(['theme' => Templates::theme('studio', $brief), 'buy_url' => $buyUrl, 'sections' => $sections]);
@@ -288,6 +290,40 @@ class PageBuilder
         });
 
         return $page->fresh();
+    }
+
+    /**
+     * A positioning or messaging item as the older page showed it: the value proposition, then the
+     * brand position, who it is made for and the proof points.
+     */
+    private function legacyMessage(array $body): array
+    {
+        $audiences = array_filter(array_map(fn ($audience) => is_array($audience)
+            ? trim(($audience['name'] ?? '').(filled($audience['need'] ?? null) ? ': '.$audience['need'] : '')) : '', (array) ($body['audience_priorities'] ?? [])));
+        $proof = array_filter(array_map(fn ($point) => is_string($point) ? trim($point) : '', (array) ($body['key_messaging']['proof_points'] ?? [])));
+
+        return $this->legacyText((string) ($body['value_proposition'] ?? $body['key_messaging']['value_proposition'] ?? ''), [
+            (string) ($body['brand_position'] ?? ''),
+            $audiences ? "Made for:\n".implode("\n", $audiences) : '',
+            implode("\n", $proof),
+        ]);
+    }
+
+    /**
+     * A heading and paragraphs for a text section. A heading too long for the field opens the text
+     * instead, so nothing is cut.
+     *
+     * @param  list<string>  $paragraphs
+     */
+    private function legacyText(string $heading, array $paragraphs): array
+    {
+        $heading = trim($heading);
+        if (mb_strlen($heading) > 140) {
+            array_unshift($paragraphs, $heading);
+            $heading = '';
+        }
+
+        return ['heading' => $heading, 'text' => implode("\n\n", array_filter(array_map('trim', $paragraphs), fn (string $text) => $text !== ''))];
     }
 
     /** @return list<array{label: string, value: string}> */

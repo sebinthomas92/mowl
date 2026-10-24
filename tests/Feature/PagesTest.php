@@ -16,6 +16,7 @@ use App\Notifications\PageActivity;
 use App\Services\ContentLibrary;
 use App\Services\MockCampaignPackGenerator;
 use App\Services\Pages\Document\Document;
+use App\Services\Pages\Document\DocumentRenderer;
 use App\Services\Pages\Document\ProductBrief;
 use App\Services\Pages\PageBuilder;
 use App\Services\Pages\PagePublisher;
@@ -559,6 +560,46 @@ class PagesTest extends TestCase
         $this->assertSame([['blocker', 'compare_price']], $price('₹699', '$1,999'), 'A former price in another currency would make the saving wrong.');
         $this->assertContains(['blocker', 'compare_price'], $price('₹699', '₹1,999 ₹2,499'));
         $this->assertSame([['confirm', 'compare_price']], $price('₹699', '₹1,999'), 'A former price the product page does not show needs an owner.');
+    }
+
+    public function test_the_saving_a_page_shows_reads_decimal_commas_like_the_price_checks(): void
+    {
+        $renderer = app(DocumentRenderer::class);
+
+        $this->assertSame(37, $renderer->saving('€19', '€30,00'));
+        $this->assertSame(33, $renderer->saving('€19,99', '€30'));
+        $this->assertSame(20, $renderer->saving('€1.199,00', '€1.499,00'));
+        $this->assertSame(46, $renderer->saving('₹699', '₹1,299'));
+        $this->assertSame(50, $renderer->saving('₹64,999', '₹1,29,998'));
+        $this->assertNull($renderer->saving('€30,00', '€19'));
+    }
+
+    public function test_what_the_team_excluded_in_knowledge_stays_off_the_page_and_backs_no_claim(): void
+    {
+        [$owner, $workspace, $pack] = $this->fixture();
+        $product = $pack->product;
+        $product->update(['summary' => 'Glows for 24 hours on a single charge.', 'price' => 'INR 899']);
+        foreach (['description' => 'Glows for 24 hours on a single charge.', 'price' => 'INR 899'] as $key => $value) {
+            $product->facts()->updateOrCreate(['key' => $key], ['workspace_id' => $workspace->id, 'source_value' => $value, 'confirmed_value' => null, 'status' => 'excluded']);
+        }
+
+        $brief = ProductBrief::for($product->fresh());
+        $this->assertSame('', $brief->description(), 'An excluded description is not written onto pages.');
+        $this->assertNull($brief->price);
+        $this->assertStringNotContainsString('24 hours', $brief->supportText());
+        $this->assertStringNotContainsString('899', $brief->supportText());
+
+        $page = $this->approvedPage($owner, $pack);
+        $hero = $page->document['sections'][$this->index($page, 'product_hero')]['settings'];
+        $this->assertStringNotContainsString('24 hours', $hero['description']);
+        $this->assertSame('', $hero['price']);
+        $page = $this->editDocument($page, function (array $document): array {
+            $document['sections'][] = Document::section('rich_text', ['heading' => 'All evening', 'text' => 'Glows for 24 hours on a single charge, only INR 899.']);
+
+            return $document;
+        });
+        $flagged = collect(app(PageBuilder::class)->issues($page))->filter(fn (array $issue) => str_contains($issue['text'], '24 hours'));
+        $this->assertNotEmpty($flagged, 'An excluded claim no longer backs the page.');
     }
 
     public function test_a_guarantee_heading_on_its_own_still_needs_an_owner(): void

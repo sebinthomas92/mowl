@@ -2,6 +2,8 @@
 
 namespace App\Services\Pages\Document;
 
+use App\Services\CampaignPackSafetyValidator;
+
 /**
  * Turns a page document into the HTML a store receives, and the editor's canvas into the same HTML
  * with editing hooks. One renderer for both, so the canvas is what goes live.
@@ -734,13 +736,14 @@ class DocumentRenderer
         return (int) round(($before - $now) / $before * 100);
     }
 
+    /** The first amount in the text, read as the price checks read it ("€30,00" is 30). */
     public function amount(string $text): ?float
     {
-        if (! preg_match('/\d[\d,]*(?:\.\d+)?/', $text, $match)) {
+        if (! preg_match('/\d(?:[\d.,]*\d)?/u', $text, $match)) {
             return null;
         }
 
-        return (float) str_replace(',', '', $match[0]);
+        return (float) CampaignPackSafetyValidator::number($match[0]);
     }
 
     /**
