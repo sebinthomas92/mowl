@@ -60,7 +60,7 @@ class BannerComposer
         $headlineBottom = $this->drawLines($canvas, $headline, $layout['x'], $layout['headline_y'], $white);
 
         if ($creative->supporting_text) {
-            $support = $this->fitText($creative->supporting_text, $layout['max_width'], 32, 23, 3, $layout['support_height']);
+            $support = $this->fitText($creative->supporting_text, $layout['max_width'], 38, 28, 3, $layout['support_height']);
             $supportY = $headlineBottom + 34;
             if ($supportY + $support['height'] <= $layout['cta_y'] - 30) {
                 $this->drawLines($canvas, $support, $layout['x'], $supportY, $muted);
