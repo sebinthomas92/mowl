@@ -16,7 +16,16 @@
                         <form wire:submit="save">
                             <label>Workspace name<input wire:model="name" type="text" maxlength="120" autocomplete="organization"></label>
                             @error('name')<small class="error">{{ $message }}</small>@enderror
-                            <button class="primary-button" type="submit">Save workspace name <span>→</span></button>
+                            @if($kindAvailable)
+                                <fieldset class="kind-choice settings-kind">
+                                    <legend>What you use Marketing Owl for</legend>
+                                    @foreach(\App\Models\Workspace::KINDS as $value => $label)
+                                        <label class="kind-option"><input type="radio" wire:model="kind" value="{{ $value }}" name="kind"><span><strong>{{ $label }}</strong><small>{{ $value === 'store' ? 'No client features. Share links go to teammates or freelancers.' : 'Adds the client hub, client accounts and the client portal.' }}</small></span></label>
+                                    @endforeach
+                                    @error('kind')<small class="error">{{ $message }}</small>@enderror
+                                </fieldset>
+                            @endif
+                            <button class="primary-button" type="submit">Save workspace <span>→</span></button>
                         </form>
                     @else
                         <div class="owner-only"><strong>Owner action</strong><p>Only {{ $owner?->name ?? 'the workspace owner' }} can change the workspace name.</p></div>

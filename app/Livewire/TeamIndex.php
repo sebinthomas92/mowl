@@ -39,7 +39,7 @@ class TeamIndex extends Component
 
         $data = $this->validate([
             'email' => ['required', 'email', 'max:255'],
-            'role' => ['required', Rule::in($this->assignableRoles())],
+            'role' => ['required', Rule::in($this->assignableRoles(true))],
             'scope' => ['nullable', Rule::in($this->scopeOptions($workspace))],
         ]);
         $email = Str::lower($data['email']);
@@ -161,10 +161,15 @@ class TeamIndex extends Component
         abort_unless(Membership::of(auth()->user(), $workspace)?->canManageTeam(), 403);
     }
 
-    /** Clients need a brand, so the role waits for the brand scope column in production. */
-    private function assignableRoles(): array
+    /**
+     * Clients need a brand, so the role waits for the brand scope column in production.
+     * A store has no clients, so new invitations there offer only team roles.
+     */
+    private function assignableRoles(bool $forInvitation = false): array
     {
-        return Membership::scopesAvailable() ? Membership::ASSIGNABLE : ['member', 'reviewer'];
+        $roles = Membership::scopesAvailable() ? Membership::ASSIGNABLE : ['member', 'reviewer'];
+
+        return $forInvitation && ! $this->currentWorkspace()->isAgency() ? array_values(array_diff($roles, ['client'])) : $roles;
     }
 
     private function scopeOptions(Workspace $workspace): array
@@ -196,10 +201,11 @@ class TeamIndex extends Component
             'brands' => $brands,
             'brandNames' => $brands->pluck('name', 'id'),
             'isOwner' => (bool) Membership::of(auth()->user(), $workspace)?->canManageTeam(),
-            'roles' => array_intersect_key(Membership::ROLES, array_flip($this->assignableRoles())),
+            'roles' => array_intersect_key(Membership::ROLES, array_flip($this->assignableRoles(true))),
+            'memberRoles' => array_intersect_key(Membership::ROLES, array_flip($this->assignableRoles())),
             'scopesAvailable' => Membership::scopesAvailable(),
             'seatsTaken' => self::seatsTaken($workspace),
             'seatLimit' => config('campaigns.seat_limit'),
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Team');
     }
 }

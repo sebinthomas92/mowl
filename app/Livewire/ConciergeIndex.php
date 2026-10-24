@@ -238,6 +238,6 @@ class ConciergeIndex extends Component
             'costAlerts' => $workspace?->generationJobs()->where('cost_alert', true)->count() ?? 0,
             'onboardingSteps' => $this->onboardingSteps(),
             'completedSteps' => $workspace?->onboardingState?->completed_steps ?? [],
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Concierge');
     }
 }

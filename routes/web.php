@@ -12,6 +12,7 @@ use App\Http\Controllers\StripeWebhookController;
 use App\Http\Controllers\WorkflowDownloadController;
 use App\Http\Controllers\WorkflowPreviewController;
 use App\Http\Controllers\WorkspaceInvitationController;
+use App\Http\Middleware\NoIndex;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\Register;
 use App\Livewire\BillingIndex;
@@ -20,8 +21,8 @@ use App\Livewire\BrandIndex;
 use App\Livewire\CampaignIndex;
 use App\Livewire\CampaignPackIndex;
 use App\Livewire\CampaignWorkspace;
+use App\Livewire\ClientLink;
 use App\Livewire\ClientPortal;
-use App\Livewire\ClientReview;
 use App\Livewire\ConciergeIndex;
 use App\Livewire\HelpIndex;
 use App\Livewire\LibraryIndex;
@@ -49,14 +50,22 @@ Route::get('/invitations/{token}', [WorkspaceInvitationController::class, 'accep
     ->middleware('throttle:12,1')
     ->name('invitations.accept');
 Route::get('/shared/campaign-packs/{token}', [CampaignPackDeliveryController::class, 'share'])->name('campaign-packs.share');
-Route::get('/client/{token}', ClientReview::class)->middleware('throttle:60,1')->name('client.review');
+// Client links, no sign-in. /shared/products is the client link from the Client hub tab; /client is an older named review link.
+// Both open the same page: work waiting for the client's decision, then the client hub.
+Route::get('/client/{token}', ClientLink::class)->middleware(['throttle:60,1', NoIndex::class])->name('client.review');
 Route::get('/client/{token}/banners/{contentItem}', [ClientReviewController::class, 'banner'])->middleware('throttle:120,1')->name('client.review-banner');
+Route::middleware('throttle:120,1')->group(function (): void {
+    Route::get('/client/{token}/hub/google-ads/{campaignType}.csv', [ProductHubDeliveryController::class, 'reviewLinkExport'])->name('client.hub-export');
+    Route::get('/client/{token}/hub/media/{mediaAsset}', [ProductHubDeliveryController::class, 'reviewLinkMedia'])->name('client.hub-media');
+    Route::get('/client/{token}/hub/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'reviewLinkCreative'])->name('client.hub-creative');
+});
 Route::middleware('throttle:120,1')->group(function (): void {
     Route::get('/sandbox-store/{token}', [SandboxStoreController::class, 'home'])->name('sandbox-store.home');
     Route::get('/sandbox-store/{token}/pages/{page}/{slug}', [SandboxStoreController::class, 'page'])->name('sandbox-store.page');
     Route::get('/sandbox-store/{token}/media/{key}', [SandboxStoreController::class, 'media'])->name('sandbox-store.media');
 });
-Route::get('/shared/products/{token}', [ProductHubDeliveryController::class, 'share'])->name('product-hubs.share');
+Route::get('/shared/products/{token}', ClientLink::class)->middleware(['throttle:60,1', NoIndex::class])->name('product-hubs.share');
+Route::get('/shared/products/{token}/items/{contentItem}/image', [ClientReviewController::class, 'sharedBanner'])->middleware('throttle:120,1')->name('product-hubs.shared-item-image');
 Route::get('/shared/products/{token}/google-ads/{campaignType}.csv', [ProductHubDeliveryController::class, 'sharedExport'])->name('product-hubs.shared-export');
 Route::get('/shared/products/{token}/media/{mediaAsset}', [ProductHubDeliveryController::class, 'sharedMedia'])->name('product-hubs.shared-media');
 Route::get('/shared/products/{token}/creatives/{bannerCreative}', [ProductHubDeliveryController::class, 'sharedCreative'])->name('product-hubs.shared-creative');

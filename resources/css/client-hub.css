@@ -71,3 +71,12 @@
 .hub-status .kv>span:first-child{width:120px}
 .hub-status .kv>span:last-child{text-align:left;flex:1}
 .client-main .hub-name{font-size:40px;margin:0}
+
+/* Sign-up: what the workspace is for */
+.kind-choice{border:0;padding:0;margin:22px 0 4px;display:grid;gap:10px}
+.kind-choice legend{text-transform:uppercase;letter-spacing:1.2px;font-size:9px;font-weight:700;color:var(--ink-2);margin-bottom:10px}
+.auth-form .kind-option{display:flex;gap:12px;align-items:flex-start;margin:0;padding:14px 16px;border:1px solid var(--line-strong);border-radius:14px;text-transform:none;letter-spacing:0;font-size:14px;font-weight:500;cursor:pointer}
+.auth-form .kind-option:has(input:checked){border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.kind-option input{accent-color:var(--accent);margin-top:3px}
+.kind-option span{display:flex;flex-direction:column;gap:2px}
+.kind-option small{color:var(--muted);font-size:12px;font-weight:400}

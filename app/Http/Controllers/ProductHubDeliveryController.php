@@ -4,10 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\BannerCreative;
 use App\Models\CampaignPackVersion;
+use App\Models\ContentClientLink;
 use App\Models\MediaAsset;
 use App\Models\Product;
 use App\Models\ProductHubShare;
 use App\Services\CampaignPackSafetyValidator;
+use App\Services\ContentLibrary;
 use App\Services\ProductHubContentAdapter;
 use App\Services\ProductHubCsvExporter;
 use App\Support\ClientHub;
@@ -19,18 +21,28 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProductHubDeliveryController extends Controller
 {
-    public function share(string $token): Response
+    /** The hub's files on an older named review link (/client/{token}): same files, authorised by that link. */
+    public function reviewLinkExport(string $token, string $campaignType, ProductHubContentAdapter $adapter, ProductHubCsvExporter $exporter): Response
     {
-        $share = $this->activeShare($token);
-        $product = $share->product->load(['brand.workspace', 'resourceLinks', 'mediaAssets']);
-        $hub = ClientHub::build($product, $this->approvedVersion($product), [
-            'media' => fn ($asset) => route('product-hubs.shared-media', [$token, $asset]),
-            'creative' => fn ($creative) => route('product-hubs.shared-creative', [$token, $creative]),
-            'export' => fn ($type) => route('product-hubs.shared-export', [$token, $type]),
-        ]);
+        return $this->csvResponse($this->reviewLinkProduct($token), $campaignType, $adapter, $exporter);
+    }
 
-        return response()->view('product-hubs.share', compact('share', 'product', 'hub'))
-            ->header('X-Robots-Tag', 'noindex, nofollow');
+    public function reviewLinkMedia(string $token, MediaAsset $mediaAsset): StreamedResponse
+    {
+        return $this->mediaResponse($this->reviewLinkProduct($token), $mediaAsset);
+    }
+
+    public function reviewLinkCreative(string $token, BannerCreative $bannerCreative): StreamedResponse
+    {
+        return $this->creativeResponse($this->reviewLinkProduct($token), $bannerCreative);
+    }
+
+    private function reviewLinkProduct(string $token): Product
+    {
+        $link = ContentLibrary::available() ? ContentClientLink::findActive($token) : null;
+        abort_unless($link && $link->product, 404);
+
+        return $link->product;
     }
 
     /** The client portal's copy of the hub: same files, authorised by the viewer's brand scope instead of a link. */

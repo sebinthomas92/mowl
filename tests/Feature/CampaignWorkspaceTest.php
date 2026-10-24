@@ -61,7 +61,7 @@ class CampaignWorkspaceTest extends TestCase
             ->assertSee('each reviewed on its own')
             ->assertSee('Ranked angles')
             ->assertSee('aria-label="Workspace sections"', false)
-            ->assertSee('Review queue');
+            ->assertSee('aria-label="Review, ', false);
 
         $this->assertDatabaseCount('products', 1);
         $this->assertDatabaseCount('source_snapshots', 1);

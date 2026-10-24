@@ -43,7 +43,7 @@
                                         $latestPack->status === 'failed' => ['bad', 'Launch pack failed', 'Open', route('campaign-packs.show', $latestPack)],
                                         ($product->changes_count ?? 0) > 0 => ['warn', trans_choice(':count output needs changes|:count outputs need changes', $product->changes_count), 'Revise', $show('content')],
                                         ($product->in_review_count ?? 0) > 0 => ['rev', trans_choice(':count output waiting for review|:count outputs waiting for review', $product->in_review_count), 'Review', route('review.index')],
-                                        $hasApproved && $product->hubShares->isEmpty() => ['ok', 'Approved, not shared yet', 'Share with client', $show('hub')],
+                                        $hasApproved && $product->hubShares->isEmpty() => ['ok', 'Approved, not shared yet', $workspace->isAgency() ? 'Share with client' : 'Share', $show('hub')],
                                         $hasApproved => ['ok', 'Approved and shared', 'Open', $show('hub')],
                                         default => ['', 'Launch pack in progress', 'Open', route('campaign-packs.show', $latestPack)],
                                     };

@@ -1,5 +1,5 @@
 <div class="app-shell">
-    <a class="skip-link" href="#main-content">Skip to review queue</a>
+    <a class="skip-link" href="#main-content">Skip to review</a>
     @include('partials.workspace-sidebar')
     <div class="app-main">
         @include('partials.top-bar')
@@ -11,7 +11,7 @@
                         <h1 class="display">{{ $selected->title }} <span class="tag">v{{ $current->version }} · in review</span></h1>
                         <p class="muted">{{ $selected->product->name }}@if($current->submitted_at) · submitted {{ $current->submitted_at->diffForHumans() }}@endif @if($previous) · revision of v{{ $previous->version }}{{ $previous->status === 'changes' ? ' after changes were requested' : '' }}@endif</p>
                     @else
-                        <h1 class="display">Review queue</h1>
+                        <h1 class="display">Review</h1>
                     @endif
                 </div>
             </div>

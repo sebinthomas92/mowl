@@ -60,7 +60,7 @@ class ProductHubTest extends TestCase
             ->call('createShare')->assertSet('shareUrl', fn ($url) => str_contains($url, '/shared/products/'));
 
         $share = $product->hubShares()->firstOrFail();
-        $this->get(route('product-hubs.share', $share->token))->assertOk()->assertSee('View only')->assertSee('Ready-to-use copy')->assertHeader('X-Robots-Tag', 'noindex, nofollow');
+        $this->get(route('product-hubs.share', $share->token))->assertOk()->assertDontSee('View only')->assertSee('Ready-to-use copy')->assertHeader('X-Robots-Tag', 'noindex, nofollow');
 
         Livewire::actingAs($owner)->test(ProductHub::class, ['product' => $product])->call('revokeShare');
         $this->get(route('product-hubs.share', $share->token))->assertNotFound();
@@ -157,7 +157,7 @@ class ProductHubTest extends TestCase
     {
         [$owner, , $product, $pack] = $this->fixture();
         $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'hub']))->assertOk()
-            ->assertSee('Nothing to share yet')->assertSee('Approve each output')->assertDontSee('Create client link');
+            ->assertSee('Not ready yet')->assertSee('Approve each output')->assertSee('Create client link')->assertSee('Nothing yet.');
         $pack->versions()->firstOrFail()->update(['review_status' => 'approved', 'reviewed_at' => now()]);
         $this->actingAs($owner)->get(route('products.show', [$product, 'tab' => 'hub']))
             ->assertSee($pack->name.' · version 1')->assertSee('Create client link')->assertSee('Preview · what your client sees');
@@ -180,7 +180,7 @@ class ProductHubTest extends TestCase
         $outsider = User::factory()->create();
         $workspace->users()->attach($outsider, ['role' => 'client', 'brand_id' => $other->brand_id]);
 
-        $this->actingAs($client)->get(route('portal.index'))->assertOk()->assertSee('Open hub');
+        $this->actingAs($client)->get(route('portal.index'))->assertOk()->assertSee('Open client hub');
         $this->actingAs($client)->get(route('portal.index', ['product' => $product->id]))->assertOk()
             ->assertSee('Ready-to-use copy')->assertSee(route('portal.hub-media', [$product->id, $asset]), false);
         $this->actingAs($client)->get(route('portal.hub-media', [$product->id, $asset]))->assertOk();

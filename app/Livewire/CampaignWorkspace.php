@@ -336,7 +336,7 @@ class CampaignWorkspace extends Component
         $pack = $version->campaignPack;
         if (ContentLibrary::available() && $version->version === $pack->versions()->max('version') && $pack->contentItems()->exists()
             && app(ContentLibrary::class)->current($pack) != app(CampaignPackContentNormalizer::class)->normalize($version->content ?? [], $pack->product, $pack->sourceSnapshot)) {
-            throw ValidationException::withMessages(['reviewNote' => 'Some outputs were edited after this version was generated. Approve each output in the Review queue so the edits are kept.']);
+            throw ValidationException::withMessages(['reviewNote' => 'Some outputs were edited after this version was generated. Approve each output in Review so the edits are kept.']);
         }
         app(CampaignPackSafetyValidator::class)->assertApprovable($version, $pack->sourceSnapshot);
         $version->update([
@@ -708,6 +708,6 @@ class CampaignWorkspace extends Component
                 ? CampaignPackShare::query()->where('campaign_pack_id', $pack->id)->latest()->get()
                 : collect(),
         ])
-            ->layout('components.layouts.app');
+            ->layout('components.layouts.app')->title($pack ? $pack->product->name.' · Launch pack' : 'New launch pack');
     }
 }

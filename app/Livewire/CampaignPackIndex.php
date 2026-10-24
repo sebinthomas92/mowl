@@ -31,6 +31,6 @@ class CampaignPackIndex extends Component
         $canSeeCosts = $membership->canSeeCosts();
 
         return view('livewire.campaign-pack-index', compact('workspace', 'packs', 'canCreate', 'canSeeCosts'))
-            ->layout('components.layouts.app');
+            ->layout('components.layouts.app')->title('Launch packs');
     }
 }

@@ -1,9 +1,9 @@
 <div class="client-page">
-    <a class="skip-link" href="#main-content">Skip to review</a>
+    <a class="skip-link" href="#main-content">Skip to your work</a>
     <header class="client-head">
         <svg width="30" height="20" viewBox="0 0 30 20" aria-hidden="true"><circle cx="9" cy="10" r="8" fill="#FF5A3D"/><circle cx="21" cy="10" r="8" fill="#EA38D0" opacity=".85"/><circle cx="9" cy="10" r="2.5" fill="#fff"/><circle cx="21" cy="10" r="2.5" fill="#fff"/></svg>
         <div class="grow">
-            <strong class="medium">{{ $brand?->name ?? $workspace->name }} · review</strong><br>
+            <strong class="medium">{{ $brand?->name ?? $workspace->name }} · client portal</strong><br>
             <span class="muted xs">Shared by {{ $workspace->name }}</span>
         </div>
         @if($preview)
@@ -29,7 +29,7 @@
         @if($preview)
             <div class="banner rev small" role="note">
                 <i class="ti ti-eye" aria-hidden="true"></i>
-                <span class="grow">This is what a client of {{ $brand?->name ?? 'a brand' }} sees. Decisions are made by the client; yours happen in the review queue.</span>
+                <span class="grow">This is what a client of {{ $brand?->name ?? 'a brand' }} sees. Clients decide here; your team decides in Review.</span>
                 @if($brands->count() > 1)
                     <span class="chips" role="group" aria-label="Brand to preview">
                         @foreach($brands as $option)
@@ -44,20 +44,30 @@
             <div class="row">
                 <a class="pill ghost sm" href="{{ route('portal.index', array_filter(['brand' => $preview ? $brand?->id : null])) }}" wire:navigate><i class="ti ti-arrow-left" aria-hidden="true"></i> All work for {{ $brand->name }}</a>
             </div>
-            <p class="muted">Everything here is approved and ready to use. Copy any line, download the images, or open the linked files.</p>
+            @if($flash)<div class="banner ok" role="status"><i class="ti ti-circle-check" aria-hidden="true"></i><span>{{ $flash }}</span></div>@endif
+            @php($productPending = $pending->where('product_id', $openProduct->id))
+            @if($productPending->isNotEmpty())
+                <section class="col" aria-labelledby="portal-product-pending">
+                    <h2 id="portal-product-pending" class="eyebrow">Waiting for your decision · {{ $productPending->count() }}</h2>
+                    @foreach($productPending as $item)
+                        @include('client-hub.decision', ['item' => $item, 'imageUrl' => $item->banner_creative_id ? route('portal.image', $item) : null, 'canDecide' => ! $preview])
+                    @endforeach
+                    <h2 class="eyebrow">Ready to use</h2>
+                </section>
+            @endif
             @include('client-hub.body', ['product' => $openProduct, 'hub' => $hub, 'heading' => 'h1'])
         @else
         <div>
-            <div class="eyebrow">Client view</div>
+            <div class="eyebrow">Client portal</div>
             <h1 class="display">Hello, {{ $preview ? 'client' : \Illuminate\Support\Str::before(auth()->user()->name, ' ') }}.</h1>
             @if($brand)
-                <p class="muted">{{ $pending->isEmpty() ? 'Nothing needs your decision right now.' : trans_choice(':count item needs your decision.|:count items need your decision.', $pending->count()) }} {{ trans_choice(':count approved deliverable is ready.|:count approved deliverables are ready.', $approved->count()) }}</p>
+                <p class="muted">{{ $pending->isEmpty() ? 'Nothing needs your decision right now.' : trans_choice(':count piece needs your decision.|:count pieces need your decision.', $pending->count()) }} {{ trans_choice(':count approved piece is ready.|:count approved pieces are ready.', $approved->count()) }}</p>
             @endif
         </div>
 
         @if(! $brand)
             <div class="empty">
-                <strong>{{ $preview ? 'Add a brand to preview the client view' : 'Your access is not set up yet' }}</strong>
+                <strong>{{ $preview ? 'Add a brand to preview the client portal' : 'Your access is not set up yet' }}</strong>
                 <span class="muted small">{{ $preview ? 'Clients see the work of one brand.' : 'Ask '.$workspace->name.' to share a brand with you.' }}</span>
             </div>
         @else
@@ -66,60 +76,30 @@
                 <div class="banner neu small" role="status"><span>Review items appear here after the next update.</span></div>
             @endunless
 
-            @foreach($pending as $item)
-                @php($version = $item->latestVersion)
-                @php($previous = $item->versions->firstWhere('version', $version->version - 1))
-                @php($imageUrl = $item->banner_creative_id ? route('portal.image', $item) : null)
-                <section class="card col" wire:key="portal-item-{{ $item->id }}" aria-labelledby="portal-item-{{ $item->id }}">
-                    <div class="row"><span class="eyebrow grow">Awaiting your review</span><span class="tag rev"><span class="dot"></span>{{ $item->title }} · version {{ $version->version }}</span></div>
-                    <div class="client-item">
-                        <div class="client-preview col">@include('content.preview', ['item' => $item, 'body' => $version->body, 'imageUrl' => $imageUrl])</div>
-                        <div class="col">
-                            <div><h2 id="portal-item-{{ $item->id }}" class="medium portal-title">{{ $item->title }}</h2><span class="muted xs">{{ $item->product->name }}</span></div>
-                            @if($previous)
-                                <div class="small"><span class="muted">What changed since version {{ $previous->version }}</span><br>{{ $version->note ?: 'A revised version.' }}</div>
-                            @endif
-                            @foreach($item->versions->sortBy('version') as $earlier)
-                                @foreach($earlier->comments as $comment)
-                                    <div class="msg portal-note">
-                                        <span class="av" aria-hidden="true">{{ mb_strtoupper(mb_substr($comment->author_name, 0, 1)) }}</span>
-                                        <span><strong class="medium">{{ $comment->user_id === auth()->id() ? 'You' : $comment->author_name }}</strong> <span class="muted xs">on version {{ $earlier->version }}</span><br>{{ $comment->body }}</span>
-                                    </div>
-                                @endforeach
-                            @endforeach
-                            @unless($preview)
-                                @error('decision.'.$item->id)<div class="banner bad xs" role="alert">{{ $message }}</div>@enderror
-                                <div class="field">
-                                    <label for="portal-comment-{{ $item->id }}">Comment on version {{ $version->version }}</label>
-                                    <textarea id="portal-comment-{{ $item->id }}" class="input" rows="3" wire:model="comments.{{ $item->id }}" placeholder="Optional for approval, required for changes"></textarea>
-                                    @error('comments.'.$item->id)<span class="err" role="alert">{{ $message }}</span>@enderror
-                                </div>
-                                <div class="row">
-                                    <button type="button" class="pill pri" wire:click="approve({{ $item->id }})" wire:loading.attr="disabled">Approve version {{ $version->version }}</button>
-                                    <button type="button" class="pill ghost" wire:click="requestChanges({{ $item->id }})" wire:loading.attr="disabled">Request changes</button>
-                                </div>
-                            @endunless
-                            <span class="muted xs">A decision applies to version {{ $version->version }} only. Approval does not publish anything.</span>
-                        </div>
-                    </div>
+            @if($pending->isNotEmpty())
+                <section class="col" aria-labelledby="portal-pending">
+                    <h2 id="portal-pending" class="eyebrow">Waiting for your decision · {{ $pending->count() }}</h2>
+                    @foreach($pending as $item)
+                        @include('client-hub.decision', ['item' => $item, 'imageUrl' => $item->banner_creative_id ? route('portal.image', $item) : null, 'canDecide' => ! $preview, 'showProduct' => true])
+                    @endforeach
                 </section>
-            @endforeach
+            @endif
 
             @if($hubProducts->isNotEmpty())
                 <section class="card col portal-hubs" aria-labelledby="portal-hubs">
-                    <h2 id="portal-hubs" class="eyebrow">Ready-to-use copy and images</h2>
+                    <h2 id="portal-hubs" class="eyebrow">Ready to use</h2>
                     @foreach($hubProducts as $hubItem)
                         <div class="li" wire:key="portal-hub-{{ $hubItem->id }}">
                             <span class="ic neu"><i class="ti ti-layout-grid" aria-hidden="true"></i></span>
-                            <span class="grow small"><strong class="medium">{{ $hubItem->name }}</strong><br><span class="muted xs">Client hub · every approved line for Meta, Google, email and social, plus images</span></span>
-                            <a class="pill ghost sm" href="{{ route('portal.index', array_filter(['product' => $hubItem->id, 'brand' => $preview ? $brand->id : null])) }}" wire:navigate>Open hub</a>
+                            <span class="grow small"><strong class="medium">{{ $hubItem->name }}</strong><br><span class="muted xs">Approved copy for Meta, Google, email and social, plus images</span></span>
+                            <a class="pill ghost sm" href="{{ route('portal.index', array_filter(['product' => $hubItem->id, 'brand' => $preview ? $brand->id : null])) }}" wire:navigate>Open client hub</a>
                         </div>
                     @endforeach
                 </section>
             @endif
 
             <section class="card col" aria-labelledby="portal-approved">
-                <h2 id="portal-approved" class="eyebrow">Approved deliverables</h2>
+                <h2 id="portal-approved" class="eyebrow">All approved work</h2>
                 @forelse($approved as $item)
                     <div class="li" wire:key="portal-approved-{{ $item->id }}">
                         <span class="portal-thumb">@include('content.thumb', ['item' => $item, 'height' => 52, 'imageUrl' => $item->banner_creative_id ? route('portal.image', $item) : null])</span>
@@ -131,7 +111,7 @@
                         @endif
                     </div>
                 @empty
-                    <p class="muted small">{{ $workspace->name }} is preparing your first deliverables.</p>
+                    <p class="muted small">{{ $workspace->name }} is preparing your first work.</p>
                 @endforelse
                 @foreach($pages as $page)
                     <div class="li" wire:key="portal-page-{{ $page->id }}">

@@ -28,8 +28,8 @@
         <div class="content-list">
             @if($all->isEmpty())
                 <div class="empty">
-                    <strong>No content yet</strong>
-                    <span class="small muted">Every launch pack output (positioning, angles, video routes, offers, channel copy and banners) appears here as its own item with versions and approval.</span>
+                    <strong>No outputs yet</strong>
+                    <span class="small muted">Every launch pack output (positioning, angles, video routes, offers, channel copy and banners) appears here on its own, with versions and its own approval.</span>
                     @if($canCreate)<a class="pill pri sm" href="{{ route('campaign-packs.create', array_filter(['product' => $productId])) }}" wire:navigate>Create a launch pack</a>@endif
                 </div>
             @elseif($list->isEmpty())
@@ -155,22 +155,14 @@
         @endif
     </div>
 
-    @if($productId && $isOwner)
+    @if($productId && $isOwner && $clientLinks->isNotEmpty())
         <section class="card col client-links" aria-labelledby="client-links-title">
-            <div class="row"><span id="client-links-title" class="eyebrow grow">Client review links</span><span class="muted xs">Clients see items in review and approved deliverables. Links expire after 14 days.</span></div>
-            @if($newLinkUrl)
-                <div class="banner ok xs" role="status"><span class="grow">Copy this link now. It is shown only once.</span></div>
-                <input class="input share-url" readonly value="{{ $newLinkUrl }}" aria-label="New client review link" onclick="this.select()">
-            @endif
-            <form class="client-link-form" wire:submit="createClientLink">
-                <div class="field"><label for="cl-name">Client name</label><input id="cl-name" class="input" wire:model="clientName" maxlength="120">@error('clientName')<span class="err">{{ $message }}</span>@enderror</div>
-                <div class="field"><label for="cl-email">Client email <span class="muted">(optional)</span></label><input id="cl-email" type="email" class="input" wire:model="clientEmail">@error('clientEmail')<span class="err">{{ $message }}</span>@enderror</div>
-                <button type="submit" class="pill ghost sm">Create review link</button>
-            </form>
+            <div class="row"><span id="client-links-title" class="eyebrow grow">Older review links</span><a class="small" href="{{ route('products.show', [$productId, 'tab' => 'hub']) }}" wire:navigate>Share from the Client hub tab instead</a></div>
+            <p class="muted xs">These links still work until they expire. Each opens the same client page as the client link.</p>
             @foreach($clientLinks as $clientLink)
                 <div class="li small" wire:key="client-link-{{ $clientLink->id }}">
-                    <span class="grow"><strong class="medium">{{ $clientLink->client_name }}</strong>@if($clientLink->client_email) · {{ $clientLink->client_email }}@endif<br><span class="xs muted">Expires {{ $clientLink->expires_at->format('j M') }}@if($clientLink->last_used_at) · last opened {{ $clientLink->last_used_at->diffForHumans() }}@endif</span></span>
-                    <button type="button" class="linkbtn" wire:click="revokeClientLink({{ $clientLink->id }})" wire:confirm="Revoke this link? The client will no longer be able to open it.">Revoke</button>
+                    <span class="grow"><strong class="medium">{{ $clientLink->client_name }}</strong>@if($clientLink->client_email) · {{ $clientLink->client_email }}@endif<br><span class="xs muted">Expires {{ $clientLink->expires_at->format('j M') }}</span></span>
+                    <button type="button" class="linkbtn" wire:click="revokeClientLink({{ $clientLink->id }})" wire:confirm="Turn off this link? The client will no longer be able to open it.">Turn off</button>
                 </div>
             @endforeach
         </section>

@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f7f7f7" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#111110" media="(prefers-color-scheme: dark)">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Marketing Owl — Campaign Intelligence</title>
+    <title>{{ isset($title) && $title ? $title.' · Marketing Owl' : 'Marketing Owl' }}</title>
     <meta name="description" content="Trusted, copy-ready launch packs for performance agencies.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>

@@ -98,7 +98,7 @@ class ClientPortal extends Component
             'hubProducts' => $hubProducts,
             'openProduct' => $openProduct,
             'hub' => $hub,
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Client portal');
     }
 
     private function membership(): Membership

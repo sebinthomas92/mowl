@@ -142,6 +142,6 @@ class BillingIndex extends Component
             'billingEvents' => $workspace->credits()
                 ->whereIn('event', ['beta_allocation', 'plan_allocation', 'credit_pack_purchase', 'credit_pack_refund', 'credit_dispute', 'credit_dispute_won', 'concierge_adjustment'])
                 ->latest()->limit(12)->get(),
-        ])->layout('components.layouts.app');
+        ])->layout('components.layouts.app')->title('Billing');
     }
 }

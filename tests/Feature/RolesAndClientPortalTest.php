@@ -138,7 +138,7 @@ class RolesAndClientPortalTest extends TestCase
 
         $this->actingAs($client)->get(route('portal.index'))
             ->assertOk()
-            ->assertSee('North Brand · review')
+            ->assertSee('North Brand · client portal')
             ->assertSee($item->title)
             ->assertDontSee('Kettle Product')
             ->assertDontSee('Pack credits')

@@ -7,6 +7,7 @@ use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rules\Password;
 use Livewire\Component;
 
@@ -15,6 +16,9 @@ class Register extends Component
     public string $name = '';
 
     public string $workspaceName = '';
+
+    /** "store" or "agency", see Workspace::KINDS. */
+    public string $kind = '';
 
     public string $email = '';
 
@@ -53,6 +57,7 @@ class Register extends Component
         $data = $this->validate([
             'name' => ['required', 'string', 'max:120'],
             'workspaceName' => [$invitation ? 'nullable' : 'required', 'string', 'max:120'],
+            'kind' => [$invitation ? 'nullable' : 'required', 'in:'.implode(',', array_keys(Workspace::KINDS))],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'confirmed', Password::min(8)],
         ]);
@@ -76,7 +81,7 @@ class Register extends Component
                 $lockedInvitation->workspace->users()->attach($user, $lockedInvitation->pivotAttributes());
                 $lockedInvitation->update(['accepted_at' => now()]);
             } else {
-                $workspace = Workspace::create(['name' => $data['workspaceName']]);
+                $workspace = Workspace::create(array_filter(['name' => $data['workspaceName'], 'kind' => Schema::hasColumn('workspaces', 'kind') ? $data['kind'] : null]));
                 $workspace->users()->attach($user, ['role' => 'owner']);
                 $workspace->credits()->create([
                     'amount' => config('campaigns.monthly_credits'),
@@ -96,6 +101,6 @@ class Register extends Component
 
     public function render()
     {
-        return view('livewire.auth.register')->layout('components.layouts.app');
+        return view('livewire.auth.register')->layout('components.layouts.app')->title('Create account');
     }
 }

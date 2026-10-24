@@ -40,6 +40,6 @@ class ProductIndex extends Component
         $canCreate = $membership->canCreate();
 
         return view('livewire.product-index', compact('workspace', 'products', 'brands', 'canCreate'))
-            ->layout('components.layouts.app');
+            ->layout('components.layouts.app')->title('Products');
     }
 }
