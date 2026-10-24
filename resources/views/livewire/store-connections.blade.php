@@ -4,6 +4,7 @@
     </div>
     <p class="small muted">Pages publish to these stores. A publish only counts as live once the page address serves it.</p>
     @if($flash)<div class="banner ok" role="status"><i class="ti ti-circle-check" aria-hidden="true"></i><span>{{ $flash }}</span></div>@endif
+    @if($problem)<div class="banner warn" role="alert"><i class="ti ti-alert-triangle" aria-hidden="true"></i><span>{{ $problem }}</span></div>@endif
 
     @forelse($stores as $store)
         <div class="li" wire:key="store-{{ $store->id }}">
@@ -37,24 +38,30 @@
             <div class="field"><label for="store-brand">Brand</label><select id="store-brand" class="input" wire:model="brandId"><option value="">Every brand</option>@foreach($brands as $brand)<option value="{{ $brand->id }}">{{ $brand->name }}</option>@endforeach</select>@error('brandId')<span class="field-error">{{ $message }}</span>@enderror</div>
             @if($driver === 'woocommerce')
                 <div class="field full"><label for="store-url">Store URL</label><input id="store-url" class="input" type="url" wire:model.blur="siteUrl" placeholder="https://shop.example.com" autocomplete="url">@error('siteUrl')<span class="field-error">{{ $message }}</span>@enderror</div>
-                <div class="field"><label for="store-user">WordPress username</label><input id="store-user" class="input" wire:model="username" autocomplete="off" spellcheck="false">@error('username')<span class="field-error">{{ $message }}</span>@enderror</div>
-                <div class="field"><label for="store-secret">Application password</label><input id="store-secret" class="input" type="password" wire:model="secret" autocomplete="new-password" placeholder="{{ $editingId ? 'Leave empty to keep the current one' : 'xxxx xxxx xxxx xxxx xxxx xxxx' }}">@error('secret')<span class="field-error">{{ $message }}</span>@enderror</div>
+                <div class="full wp-connect">
+                    <button type="button" class="pill pri sm" wire:click="connectWithWordPress" wire:loading.attr="disabled" wire:target="connectWithWordPress"><span wire:loading.remove wire:target="connectWithWordPress"><i class="ti ti-brand-wordpress" aria-hidden="true"></i> Connect with WordPress</span><span wire:loading wire:target="connectWithWordPress">Finding your WordPress…</span></button>
+                    <p class="xs muted">Your WordPress opens and asks you to approve MarketingOwl. Sign in as an Editor or Administrator and click Approve, and you come straight back here connected. You can revoke it in WordPress at any time.</p>
+                </div>
                 @php
                     $profileUrl = filter_var($siteUrl, FILTER_VALIDATE_URL) && in_array(parse_url($siteUrl, PHP_URL_SCHEME), ['http', 'https'], true)
                         ? rtrim($siteUrl, '/').'/wp-admin/profile.php#application-passwords-section' : null;
                 @endphp
-                <div class="full connect-steps">
-                    <p class="xs medium">Getting the application password</p>
-                    <ol class="xs muted">
-                        <li>Sign in to WordPress as an Editor or Administrator.</li>
-                        <li>Open @if($profileUrl)<a href="{{ $profileUrl }}" target="_blank" rel="noopener noreferrer">your profile's Application Passwords</a>@else Users, then Profile, then Application Passwords @endif, type MarketingOwl as the name and click Add New Application Password.</li>
-                        <li>Copy the password WordPress shows once and paste it here, spaces and all.</li>
-                    </ol>
-                    <p class="xs muted">WooCommerce API keys cannot publish pages, so this uses a WordPress user. The password is stored encrypted, and you can revoke it in WordPress at any time.</p>
-                </div>
+                <details class="full manual-connect" @if($errors->hasAny(['username', 'secret'])) open @endif>
+                    <summary class="xs medium">Use an application password instead</summary>
+                    <div class="manual-grid">
+                        <div class="field"><label for="store-user">WordPress username</label><input id="store-user" class="input" wire:model="username" autocomplete="off" spellcheck="false">@error('username')<span class="field-error">{{ $message }}</span>@enderror</div>
+                        <div class="field"><label for="store-secret">Application password</label><input id="store-secret" class="input" type="password" wire:model="secret" autocomplete="new-password" placeholder="{{ $editingId ? 'Leave empty to keep the current one' : 'xxxx xxxx xxxx xxxx xxxx xxxx' }}">@error('secret')<span class="field-error">{{ $message }}</span>@enderror</div>
+                        <ol class="xs muted full">
+                            <li>Sign in to WordPress as an Editor or Administrator.</li>
+                            <li>Open @if($profileUrl)<a href="{{ $profileUrl }}" target="_blank" rel="noopener noreferrer">your profile's Application Passwords</a>@else Users, then Profile, then Application Passwords @endif, type MarketingOwl as the name and click Add New Application Password.</li>
+                            <li>Copy the password WordPress shows once and paste it here, spaces and all.</li>
+                        </ol>
+                        <div class="full"><button type="submit" class="pill ghost sm" wire:loading.attr="disabled" wire:target="save"><span wire:loading.remove wire:target="save">{{ $editingId ? 'Check and save' : 'Check and connect' }}</span><span wire:loading wire:target="save">Checking the store…</span></button></div>
+                    </div>
+                </details>
             @endif
             <div class="row full">
-                <button type="submit" class="pill pri sm" wire:loading.attr="disabled" wire:target="save"><span wire:loading.remove wire:target="save">{{ $editingId ? 'Check and save' : 'Check and connect' }}</span><span wire:loading wire:target="save">Checking the store…</span></button>
+                @if($driver === 'sandbox')<button type="submit" class="pill pri sm" wire:loading.attr="disabled" wire:target="save"><span wire:loading.remove wire:target="save">{{ $editingId ? 'Save' : 'Add sandbox store' }}</span><span wire:loading wire:target="save">Setting up…</span></button>@endif
                 <button type="button" class="pill ghost sm" wire:click="close">Cancel</button>
             </div>
         </form>

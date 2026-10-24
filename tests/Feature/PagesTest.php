@@ -243,6 +243,49 @@ class PagesTest extends TestCase
         app(PagePublisher::class)->publish($page, $member);
     }
 
+    public function test_owners_connect_a_store_by_approving_marketingowl_in_wordpress(): void
+    {
+        [$owner, $workspace] = $this->fixture();
+        $this->fakeWordPress();
+        $approve = Livewire::actingAs($owner)->test(StoreConnections::class)->call('open')
+            ->set('name', 'Northline store')->set('siteUrl', 'https://shop.test/')
+            ->call('connectWithWordPress')->assertHasNoErrors();
+
+        $target = $approve->effects['redirect'];
+        $this->assertStringStartsWith('https://shop.test/wp-admin/authorize-application.php?', $target);
+        parse_str((string) parse_url($target, PHP_URL_QUERY), $query);
+        $this->assertSame('MarketingOwl', $query['app_name']);
+        $this->assertSame(config('pages.wordpress_app_id'), $query['app_id']);
+        $this->assertStringStartsWith(route('stores.wordpress.return').'?state=', $query['success_url']);
+        $this->assertSame(0, StoreConnection::query()->count(), 'Nothing is saved until WordPress approves.');
+
+        // Declining in WordPress, a forged state, or someone else's link connect nothing.
+        $this->assertStringEndsWith('&success=false', $query['reject_url']);
+        $this->actingAs($owner)->get($query['reject_url'])->assertRedirect(route('workspace.settings').'#connections')
+            ->assertSessionHas('stores.problem', fn ($problem) => str_contains($problem, 'not approved'));
+        $this->actingAs($owner)->get(route('stores.wordpress.return', ['state' => 'forged', 'user_login' => 'editor', 'password' => 'abcd']))
+            ->assertSessionHas('stores.problem', fn ($problem) => str_contains($problem, 'expired'));
+        $stranger = User::factory()->create();
+        $workspace->users()->attach($stranger, ['role' => 'owner']);
+        $this->actingAs($stranger)->get($query['success_url'].'&user_login=editor&password=abcd+abcd+abcd+abcd')->assertSessionHas('stores.problem');
+        $this->assertSame(0, StoreConnection::query()->count());
+
+        // Approving brings the owner back connected, with the password WordPress made.
+        $this->actingAs($owner)->get($query['success_url'].'&site_url=https%3A%2F%2Fshop.test&user_login=editor&password=abcd+abcd+abcd+abcd')
+            ->assertRedirect(route('workspace.settings').'#connections')
+            ->assertSessionHas('stores.flash', 'Northline store is connected. You can publish pages to it now.');
+        $store = StoreConnection::query()->sole();
+        $this->assertSame(['https://shop.test', 'editor', 'abcdabcdabcdabcd', 'connected'], [$store->site_url, $store->username, $store->secret, $store->status]);
+        $this->assertSame('store_connection_added', $workspace->auditEvents()->latest('id')->value('event'));
+        $this->actingAs($owner)->get($query['success_url'].'&user_login=editor&password=abcd+abcd+abcd+abcd')
+            ->assertSessionHas('stores.problem', fn ($problem) => str_contains($problem, 'already used'));
+        $this->assertSame(1, StoreConnection::query()->count(), 'Replaying the return trip adds nothing.');
+
+        Livewire::actingAs($owner)->test(StoreConnections::class)->call('open')
+            ->set('name', 'Locked')->set('siteUrl', 'https://locked.test')
+            ->call('connectWithWordPress')->assertHasErrors('siteUrl')->assertSee('application passwords switched off');
+    }
+
     public function test_connecting_a_store_reports_what_is_wrong(): void
     {
         [$owner] = $this->fixture();
@@ -384,7 +427,9 @@ class PagesTest extends TestCase
                 return Http::response(['code' => 'rest_not_logged_in'], 401);
             }
             if ($url === 'https://shop.test/wp-json/') {
-                return Http::response(['name' => 'Shop', 'namespaces' => ['oembed/1.0', 'wp/v2', 'wc/v3']]);
+                return Http::response(['name' => 'Shop', 'namespaces' => ['oembed/1.0', 'wp/v2', 'wc/v3'], 'authentication' => [
+                    'application-passwords' => ['endpoints' => ['authorization' => 'https://shop.test/wp-admin/authorize-application.php']],
+                ]]);
             }
             if (str_starts_with($url, 'https://shop.test/wp-json/wp/v2/users/me')) {
                 return $authed

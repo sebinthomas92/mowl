@@ -25,23 +25,7 @@ class WooCommerceStore implements StoreClient
 
     public function check(StoreConnection $store): array
     {
-        $index = null;
-        $apiBase = null;
-        foreach ([rtrim($store->site_url, '/').'/wp-json/', rtrim($store->site_url, '/').'/?rest_route=/'] as $candidate) {
-            $response = $this->send(fn (PendingRequest $http) => $http->get($candidate), $candidate);
-            if ($response->redirect() && $response->header('Location')) {
-                $target = (string) UriResolver::resolve(new Uri($candidate), new Uri($response->header('Location')));
-                throw new StoreException('The site redirects to '.preg_replace('#/(wp-json/?|\?rest_route=.*)$#', '', $target).'. Use that address as the store URL.');
-            }
-            $json = $response->successful() ? $response->json() : null;
-            if (is_array($json) && in_array('wp/v2', $json['namespaces'] ?? [], true)) {
-                [$index, $apiBase] = [$json, $candidate];
-                break;
-            }
-        }
-        if (! $index) {
-            throw new StoreException('This address does not look like a WordPress site. Check the store URL; the WordPress REST API must be switched on.');
-        }
+        [$index, $apiBase] = $this->discover($store);
 
         $store->api_base = $apiBase;
         $response = $this->send(fn (PendingRequest $http) => $this->authed($http, $store)->get($this->endpoint($store, 'wp/v2/users/me', ['context' => 'edit'])), $apiBase);
@@ -64,6 +48,43 @@ class WooCommerceStore implements StoreClient
         }
 
         return ['api_base' => $apiBase, 'has_woocommerce' => in_array('wc/v3', $index['namespaces'] ?? [], true)];
+    }
+
+    /**
+     * Where WordPress asks its signed-in user to approve MarketingOwl (WordPress 5.6+). Approving sends
+     * the user back with a new application password, so nobody copies one by hand.
+     *
+     * @return array{api_base: string, url: string}
+     */
+    public function authorization(StoreConnection $store): array
+    {
+        [$index, $apiBase] = $this->discover($store);
+        $url = $index['authentication']['application-passwords']['endpoints']['authorization'] ?? null;
+        if (! is_string($url) || ! in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
+            throw new StoreException(isset($index['authentication'])
+                ? 'This site has application passwords switched off. WordPress only allows them on https:// sites, and some security plugins turn them off. Switch them on, then try again.'
+                : 'This WordPress is too old to approve apps (it needs version 5.6 or later). Update WordPress, or use an application password instead.');
+        }
+
+        return ['api_base' => $apiBase, 'url' => $url];
+    }
+
+    /** @return array{0: array, 1: string} the REST index and the URL form it answered on */
+    private function discover(StoreConnection $store): array
+    {
+        foreach ([rtrim($store->site_url, '/').'/wp-json/', rtrim($store->site_url, '/').'/?rest_route=/'] as $candidate) {
+            $response = $this->send(fn (PendingRequest $http) => $http->get($candidate), $candidate);
+            if ($response->redirect() && $response->header('Location')) {
+                $target = (string) UriResolver::resolve(new Uri($candidate), new Uri($response->header('Location')));
+                throw new StoreException('The site redirects to '.preg_replace('#/(wp-json/?|\?rest_route=.*)$#', '', $target).'. Use that address as the store URL.');
+            }
+            $json = $response->successful() ? $response->json() : null;
+            if (is_array($json) && in_array('wp/v2', $json['namespaces'] ?? [], true)) {
+                return [$json, $candidate];
+            }
+        }
+
+        throw new StoreException('This address does not look like a WordPress site. Check the store URL; the WordPress REST API must be switched on.');
     }
 
     public function uploadImage(StoreConnection $store, array $ref, int $workspaceId): array

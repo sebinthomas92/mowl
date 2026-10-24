@@ -6,6 +6,7 @@ use App\Concerns\InteractsWithWorkspace;
 use App\Models\Page;
 use App\Models\PublishAttempt;
 use App\Models\StoreConnection;
+use App\Services\Pages\StoreConnector;
 use App\Services\Pages\StoreException;
 use App\Services\Pages\Stores\StoreClients;
 use App\Support\Membership;
@@ -37,11 +38,20 @@ class StoreConnections extends Component
 
     public ?string $flash = null;
 
+    public ?string $problem = null;
+
+    public function mount(): void
+    {
+        // Set on the way back from WordPress's approval screen.
+        $this->flash = session('stores.flash');
+        $this->problem = session('stores.problem');
+    }
+
     public function open(?int $id = null): void
     {
         $this->authorizeOwner();
         $this->resetValidation();
-        $this->reset(['driver', 'name', 'brandId', 'siteUrl', 'username', 'secret', 'flash']);
+        $this->reset(['driver', 'name', 'brandId', 'siteUrl', 'username', 'secret', 'flash', 'problem']);
         $this->editingId = null;
         if ($id) {
             $store = $this->store($id);
@@ -62,7 +72,32 @@ class StoreConnections extends Component
         $this->resetValidation();
     }
 
-    public function save(StoreClients $clients): void
+    /** Sends the owner to their WordPress to approve MarketingOwl; WordPress sends them back connected. */
+    public function connectWithWordPress(StoreConnector $connector)
+    {
+        $this->authorizeOwner();
+        $workspace = $this->currentWorkspace();
+        $this->driver = 'woocommerce';
+        $data = $this->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'brandId' => ['nullable', Rule::exists('brands', 'id')->where('workspace_id', $workspace->id)],
+            'siteUrl' => ['required', 'url:http,https', 'max:500'],
+        ], [], ['siteUrl' => 'store URL', 'brandId' => 'brand']);
+
+        $store = $this->editingId ? $this->store($this->editingId) : new StoreConnection(['workspace_id' => $workspace->id, 'driver' => 'woocommerce']);
+        $store->fill(['name' => trim($data['name']), 'brand_id' => $data['brandId'] ?: null, 'site_url' => rtrim(trim($data['siteUrl']), '/')]);
+        try {
+            $url = $connector->approvalUrl($store, auth()->user(), route('stores.wordpress.return'));
+        } catch (StoreException $exception) {
+            $this->addError('siteUrl', $exception->getMessage());
+
+            return null;
+        }
+
+        return $this->redirect($url);
+    }
+
+    public function save(StoreConnector $connector): void
     {
         $this->authorizeOwner();
         $workspace = $this->currentWorkspace();
@@ -92,30 +127,12 @@ class StoreConnections extends Component
         }
 
         try {
-            $result = $clients->for($store)->check($store);
+            $connector->connect($store, auth()->user());
         } catch (StoreException $exception) {
             $this->addError($store->driver === 'woocommerce' && $exception->auth ? 'secret' : 'siteUrl', $exception->getMessage());
 
             return;
         }
-        $moved = $store->exists && $store->isDirty('site_url');
-        if ($moved && $store->pages()->whereIn('publish_state', ['publishing', 'verifying'])->exists()) {
-            $this->addError('siteUrl', 'A page is publishing to this store. Change the address once it finishes.');
-
-            return;
-        }
-        DB::transaction(function () use ($store, $result, $moved): void {
-            if ($moved) {
-                // A new address is a different site: its pages and images have to be created there again.
-                $store->media = null;
-                $store->pages()->update([
-                    'remote_id' => null, 'remote_url' => null, 'remote_store' => null, 'live_version' => null,
-                    'publish_state' => 'idle', 'verified_at' => null, 'last_error' => null,
-                ]);
-            }
-            $store->fill($result + ['status' => 'connected', 'last_error' => null, 'checked_at' => now()])->save();
-        });
-        $this->audit($this->editingId ? 'store_connection_updated' : 'store_connection_added', $store);
 
         $this->close();
         $this->secret = '';
