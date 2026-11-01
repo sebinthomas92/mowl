@@ -163,6 +163,9 @@ class ProductCreateTest extends TestCase
 
         Livewire::actingAs($user)->test(ProductCreate::class)
             ->assertSet('brandId', 'new')
+            // A store's first brand is offered under the store's own name.
+            ->assertSet('newBrandName', $workspace->isAgency() ? '' : $workspace->name)
+            ->set('newBrandName', '')
             ->call('setMode', 'manual')
             ->call('save')
             ->assertHasErrors(['name' => 'required'])
@@ -185,6 +188,33 @@ class ProductCreateTest extends TestCase
         $this->assertSame('$24', $facts['price']->confirmed_value);
         $this->assertSame('Non-slip backing', $facts['benefits']->confirmed_value);
         $this->assertSame('missing', $facts['audience']->status);
+    }
+
+    public function test_a_new_store_gets_its_first_brand_named_for_it_or_for_the_page_brand(): void
+    {
+        Storage::fake('local');
+        $user = User::factory()->create();
+        $workspace = Workspace::create(['name' => 'Lumen Candles', 'kind' => 'store']);
+        $workspace->users()->attach($user, ['role' => 'owner']);
+
+        Livewire::actingAs($user)->test(ProductCreate::class)
+            ->assertSet('brandId', 'new')
+            ->assertSet('newBrandName', 'Lumen Candles');
+
+        Http::fake([
+            '93.184.216.34/media/*' => Http::response('', 404),
+            '93.184.216.34/*' => Http::response('<html><head><script type="application/ld+json">{"@type":"Product","name":"Amber Oud Candle","brand":{"@type":"Brand","name":"Lumen Home"},"offers":{"price":"1299","priceCurrency":"INR"}}</script></head><body>Candle</body></html>', 200, ['Content-Type' => 'text/html']),
+        ]);
+
+        Livewire::actingAs($user)->test(ProductCreate::class)
+            ->set('productUrl', '93.184.216.34/products/amber-oud')
+            ->call('import')
+            ->assertHasNoErrors()
+            ->assertSet('newBrandName', 'Lumen Home')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame('Lumen Home', Product::with('brand')->firstOrFail()->brand->name);
     }
 
     public function test_a_new_brand_respects_the_configured_limit(): void

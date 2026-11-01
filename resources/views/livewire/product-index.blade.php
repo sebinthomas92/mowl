@@ -20,13 +20,16 @@
                     @endforeach
                 </div>
             @endif
-            @if($products->isEmpty())
+            @if($gettingStarted)
+                @include('partials.next-steps', ['steps' => $gettingStarted, 'id' => 'start', 'eyebrow' => 'Getting started', 'heading' => $products->isEmpty() ? 'From product page to ready-to-post launch content in four steps.' : 'Keep going: your first launch pack is a few clicks away.'])
+            @endif
+            @if($products->isEmpty() && ! $gettingStarted)
                 <div class="empty">
                     <strong>{{ $brand ? 'No products for this brand yet' : 'Add your first product' }}</strong>
                     <span class="small muted">Paste the product's web page and we read its name, price and details for you to confirm. Saving a product never starts generation or uses credits.</span>
                     @if($canCreate)<a class="pill pri sm" href="{{ route('products.create', array_filter(['brand' => $brand])) }}" wire:navigate><i class="ti ti-plus" aria-hidden="true"></i> Add product</a>@endif
                 </div>
-            @else
+            @elseif($products->isNotEmpty())
                 <div class="tw">
                     <table class="tbl">
                         <thead><tr><th scope="col">Product</th><th scope="col">Brand</th><th scope="col">Where it stands</th><th scope="col">Next step</th></tr></thead>

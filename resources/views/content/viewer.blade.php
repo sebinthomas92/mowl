@@ -10,6 +10,11 @@
     $commentCount = $versions->sum(fn ($version) => $version->comments->count());
     $deciding = $canReview && in_array($latest->status, ['draft', 'review'], true);
     $blocking = collect($checks)->where('blocking', true)->where('ok', false);
+    $sourceUnapproved = $deciding && $pack?->sourceSnapshot && ! $pack->sourceSnapshot->approved_at;
+    // The facts banner above explains this one, with a button to fix it.
+    if ($sourceUnapproved) {
+        $blocking = $blocking->reject(fn ($check) => str_contains($check['label'], 'owner-approved'));
+    }
     $tab = in_array($detailTab, ['preview', 'edit', 'versions', 'comments'], true) ? $detailTab : 'preview';
 @endphp
 <div class="viewer" role="dialog" aria-modal="true" aria-labelledby="viewer-title" wire:key="viewer"
@@ -52,12 +57,23 @@
                     <span class="muted xs grow">{{ $typeLabel }}@if($latest->reviewed_by_name && in_array($latest->status, ['approved', 'changes'], true)) · {{ $latest->status === 'approved' ? 'approved' : 'changes asked' }} by {{ $latest->reviewed_by_name }}@if($latest->reviewed_at) on {{ $latest->reviewed_at->format('j M') }}@endif @endif</span>
                 </div>
 
-                @if($flash)<div class="banner ok xs" role="status"><i class="ti ti-circle-check" aria-hidden="true"></i><span>{{ $flash }}</span></div>@endif
+                @if($flash)<div class="banner ok xs" role="status"><i class="ti ti-circle-check" aria-hidden="true"></i><span>{{ $flash }}@if($flashLink)<span class="row viewer-source-actions"><a class="pill pri sm" href="{{ $flashLink['url'] }}">{{ $flashLink['label'] }} <i class="ti ti-arrow-right" aria-hidden="true"></i></a></span>@endif</span></div>@endif
                 @error('decision')<div class="banner bad xs" role="alert"><i class="ti ti-alert-triangle" aria-hidden="true"></i><span>{{ $message }}</span></div>@enderror
 
                 @if($deciding)
                     <section class="viewer-decide col" aria-labelledby="viewer-decide-title">
                         <span id="viewer-decide-title" class="eyebrow">Your decision on v{{ $latest->version }}</span>
+                        @if($sourceUnapproved)
+                            <div class="banner warn xs viewer-source">
+                                <i class="ti ti-file-search" aria-hidden="true"></i>
+                                <span class="grow">First, check the product facts this launch pack was written from{{ $pack->sourceSnapshot->url ? ' ('.parse_url($pack->sourceSnapshot->url, PHP_URL_HOST).')' : '' }}. Outputs can be approved once the facts are.
+                                    <span class="row viewer-source-actions">
+                                        <button type="button" class="pill pri sm" wire:click="approveSource" wire:loading.attr="disabled">Facts are right, approve them</button>
+                                        <a class="xs" href="{{ route('campaign-packs.show', $pack) }}#product-truth">See the facts</a>
+                                    </span>
+                                </span>
+                            </div>
+                        @endif
                         @if($blocking->isNotEmpty())
                             <ul class="checks viewer-checks" aria-label="Blocking checks">
                                 @foreach($blocking as $check)<li class="bad">✕ <span>{{ $check['label'] }}</span></li>@endforeach
@@ -69,7 +85,7 @@
                             @error('decisionNote')<span class="err" role="alert">{{ $message }}</span>@enderror
                         </div>
                         <div class="row viewer-decide-actions">
-                            <button type="button" class="pill pri" wire:click="approve" wire:loading.attr="disabled" @disabled($blocking->isNotEmpty())><i class="ti ti-check" aria-hidden="true"></i>Approve v{{ $latest->version }}</button>
+                            <button type="button" class="pill pri" wire:click="approve" wire:loading.attr="disabled" @disabled($blocking->isNotEmpty() || $sourceUnapproved)><i class="ti ti-check" aria-hidden="true"></i>Approve v{{ $latest->version }}</button>
                             <button type="button" class="pill ghost" wire:click="requestChanges" wire:loading.attr="disabled">Request changes</button>
                         </div>
                         <span class="muted xs">Approving marks this exact version as usable. It does not publish anything.</span>

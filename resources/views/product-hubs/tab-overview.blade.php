@@ -25,9 +25,26 @@
         }
     }
     if (! $version) {
-        $attention->push(['icon' => 'stack-2', 'tone' => 'neu', 'text' => 'No approved launch pack yet, so the client hub is empty', 'label' => 'Create', 'url' => route('campaign-packs.create', ['product' => $product->id])]);
+        $latestPack = $packs->sortByDesc('id')->first();
+        $attention->push($latestPack
+            ? ['icon' => 'stack-2', 'tone' => 'neu', 'text' => $agency ? 'No approved launch pack yet, so the client hub is empty' : 'No approved launch pack yet, so there is nothing to share', 'label' => 'Open pack', 'url' => route('campaign-packs.show', $latestPack)]
+            : ['icon' => 'stack-2', 'tone' => 'neu', 'text' => $agency ? 'No launch pack yet, so the client hub is empty' : 'No launch pack yet', 'label' => 'Create', 'url' => route('campaign-packs.create', ['product' => $product->id])]);
     }
+    // The first trip from product to shared launch pack, step by step, until it has been done once.
+    $latestPack ??= $packs->sortByDesc('id')->first();
+    $productSteps = [
+        ['title' => 'Add the product', 'hint' => null, 'done' => true],
+        ['title' => 'Write a launch pack', 'hint' => 'Copy, video scripts and ad lines from this product\'s confirmed facts. Uses 1 credit and takes about two minutes. Adding the audience and benefits in Knowledge first makes the copy sharper.', 'done' => (bool) $latestPack,
+            'label' => $canManage ? 'Create launch pack' : null, 'url' => route('campaign-packs.create', ['product' => $product->id])],
+        ['title' => 'Check and approve it', 'hint' => 'Approve the product facts, then each output. Nothing is published when you approve.', 'done' => (bool) $version,
+            'label' => 'Open launch pack', 'url' => $latestPack ? route('campaign-packs.show', $latestPack) : null],
+        ['title' => $agency ? 'Share it with your client' : 'Share or download it', 'hint' => $agency ? 'Your client gets one link with the approved copy and images.' : 'Copy approved lines, download banners, or send one link to anyone helping you launch.', 'done' => (bool) $shareUrl,
+            'label' => $agency ? 'Share with client' : 'Open Share', 'url' => route('products.show', [$product, 'tab' => 'hub'])],
+    ];
 @endphp
+@if(collect($productSteps)->contains('done', false))
+    <div class="product-next-steps">@include('partials.next-steps', ['steps' => $productSteps, 'id' => 'product', 'eyebrow' => 'Getting started', 'heading' => $latestPack ? 'Finish your first launch pack for '.$product->name.'.' : 'Next, write a launch pack for '.$product->name.'.'])</div>
+@endif
 <div class="grid">
     <section class="card col c5">
         <div class="row"><span class="eyebrow">What it is</span><span class="sp"></span>@if($knowledgeReady)<a class="small" href="{{ $knowledgeUrl }}" wire:navigate>Edit in Knowledge</a>@endif</div>
@@ -97,7 +114,7 @@
                 @php([$tone, $label] = \App\Models\Campaign::STATUSES[$item->status])
                 <div class="li"><span class="tag {{ $tone }}"><span class="dot"></span>{{ $label }}</span><span class="grow"><strong class="medium">{{ $item->name }}</strong>@if($item->dateRange()) <span class="muted">· {{ $item->dateRange() }}</span>@endif</span><span class="muted small">{{ $item->results_count ? 'Results imported' : ($item->status === 'planned' ? 'Not launched' : 'Waiting for results') }}</span><a class="pill ghost sm" href="{{ route('products.show', [$product, 'tab' => 'campaigns', 'campaign' => $item->id]) }}" wire:navigate>Open</a></div>
             @empty
-                <div class="li"><span class="muted small grow">No campaigns yet. A campaign references exact approved versions.</span><a class="pill ghost sm" href="{{ route('products.show', [$product, 'tab' => 'campaigns']) }}" wire:navigate>Plan a campaign</a></div>
+                <div class="li"><span class="muted small grow">No campaigns yet. Plan one once a launch pack is approved, then import its results.</span><a class="pill ghost sm" href="{{ route('products.show', [$product, 'tab' => 'campaigns']) }}" wire:navigate>Plan a campaign</a></div>
             @endforelse
         </section>
     @endif

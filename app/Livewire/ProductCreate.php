@@ -65,6 +65,10 @@ class ProductCreate extends Component
         $brands = $this->scopedBrands()->orderBy('name')->get(['id']);
         $requested = (int) request()->query('brand');
         $this->brandId = (string) ($brands->firstWhere('id', $requested)?->id ?? $brands->first()?->id ?? 'new');
+        // A store's first brand is almost always the store itself, so a new owner has nothing to type.
+        if ($this->brandId === 'new' && ! $this->currentWorkspace()->isAgency()) {
+            $this->newBrandName = mb_substr((string) $this->currentWorkspace()->name, 0, 120);
+        }
     }
 
     public function setMode(string $mode): void
@@ -114,6 +118,11 @@ class ProductCreate extends Component
         $this->price = mb_substr($source['price'] ?? '', 0, 40);
         $this->description = mb_substr($source['description'] ?? '', 0, 1000);
         $this->keepBoth = false;
+        // The page names its brand: offer it when a new brand is being made and nothing was typed yet.
+        $pageBrand = is_string($truth['brand'] ?? null) ? trim($truth['brand']) : '';
+        if ($this->brandId === 'new' && $pageBrand !== '' && in_array(trim($this->newBrandName), ['', trim((string) $this->currentWorkspace()->name)], true)) {
+            $this->newBrandName = mb_substr($pageBrand, 0, 120);
+        }
         $this->duplicateId = $this->findDuplicate([$this->productUrl, $page['url'] ?? null, $page['canonical_url'] ?? null])?->id;
     }
 

@@ -84,7 +84,7 @@ class CampaignWorkspaceTest extends TestCase
             ->assertDontSee('Their Lamp')
             ->call('chooseProduct', $mine->id)
             ->assertSet('productId', $mine->id)
-            ->assertSee('Start run · 1 credit');
+            ->assertSee('Write launch pack · 1 credit');
 
         Livewire::actingAs($user)->test(CampaignWorkspace::class)
             ->call('chooseProduct', $theirs->id)
