@@ -182,12 +182,15 @@
                             ['title' => "Approve the {$packSections->count()} outputs", 'hint' => "{$sectionsApproved} of {$packSections->count()} approved. Open each one, edit if needed, then approve it.", 'done' => $packSections->isNotEmpty() && $sectionsApproved === $packSections->count(),
                                 'label' => $nextOutput ? ($canReview ? 'Review next output' : 'Open next output') : null,
                                 'url' => $nextOutput ? route('products.show', [$pack->product, 'tab' => 'content', 'item' => $nextOutput->id]) : null],
-                            ['title' => 'Make banners', 'hint' => 'Three 4:5 images built from your approved copy and your product photo.', 'done' => $bannersMade, 'label' => $bannerStudioAvailable ? 'Go to banners' : null, 'url' => '#banner-studio'],
+                            ['title' => 'Make banners', 'hint' => $bannerStudioAvailable && ! $bannerProductImage
+                                    ? 'Optional. Banners need a product photo from the product page, and none was found, so you can share the copy without them.'
+                                    : ($bannerStudioAvailable ? 'Three 4:5 images built from your approved copy and your product photo.' : 'Optional. Banners are not available in this workspace yet.'),
+                                'done' => $bannersMade, 'skip' => ! $bannerStudioAvailable || ! $bannerProductImage, 'label' => 'Go to banners', 'url' => '#banner-studio'],
                             ['title' => $workspace->isAgency() ? 'Share it with your client' : 'Share or download it', 'hint' => $workspace->isAgency() ? 'One link where your client copies approved lines and downloads images.' : 'One link for anyone helping you launch, or copy lines and download images yourself.', 'done' => $shared,
                                 'label' => $workspace->isAgency() ? 'Share with client' : 'Open Share', 'url' => route('products.show', [$pack->product, 'tab' => 'hub'])],
                         ];
                     @endphp
-                    @if(collect($packSteps)->contains('done', false))
+                    @if(collect($packSteps)->contains(fn ($step) => ! $step['done'] && empty($step['skip'])))
                         <div class="pack-next-steps">@include('partials.next-steps', ['steps' => $packSteps, 'id' => 'pack', 'eyebrow' => 'What to do next', 'heading' => $pack->status === 'approved' ? 'Your launch pack is approved. Make banners and share it.' : 'Your launch pack is written. Check it, then approve it.'])</div>
                     @endif
                 @endif

@@ -420,7 +420,7 @@ class ContentBrowser extends Component
         if ($next) {
             $this->select($next);
             $message .= ' Showing the next one waiting.';
-        } elseif ($pack && $pack->status === 'approved') {
+        } elseif ($pack && $pack->status === 'approved' && $pack->contentItems()->get()->filter->isPackSection()->every(fn (ContentItem $item) => $item->status === 'approved')) {
             $message .= " Every output in this launch pack is approved, so v{$pack->current_version} is ready to use.";
             $this->flashLink = ['label' => 'Next: make banners', 'url' => route('campaign-packs.show', $pack).'#banner-studio'];
         }

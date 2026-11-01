@@ -8,6 +8,7 @@ use App\Livewire\WorkspaceSettings;
 use App\Models\CampaignPack;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\ContentLibrary;
 use App\Services\MockCampaignPackGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -82,6 +83,23 @@ class WorkspaceKindTest extends TestCase
         $product->hubShares()->create(['workspace_id' => $workspace->id, 'token' => str_repeat('a', 48), 'created_by_user_id' => $owner->id]);
 
         $this->actingAs($owner)->get(route('products.index'))->assertOk()->assertDontSee('Getting started');
+    }
+
+    public function test_without_a_product_photo_the_pack_guide_skips_banners_and_points_to_sharing(): void
+    {
+        [$owner, $workspace, , $pack] = $this->fixture();
+        $workspace->update(['kind' => 'store']);
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        app(ContentLibrary::class)->syncPack($pack);
+        $pack->contentItems()->update(['status' => 'approved']);
+        $pack->versions()->firstOrFail()->update(['review_status' => 'approved', 'reviewed_at' => now()]);
+        $pack->update(['status' => 'approved']);
+
+        $this->actingAs($owner)->get(route('campaign-packs.show', $pack))->assertOk()
+            ->assertSee('What to do next')
+            ->assertSee('you can share the copy without them')
+            ->assertSee('Open Share')
+            ->assertDontSee('Go to banners');
     }
 
     public function test_the_migration_makes_only_workspaces_with_clients_agencies(): void

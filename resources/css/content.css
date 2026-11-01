@@ -235,3 +235,4 @@
 .pack-next-steps{margin:0 0 28px}
 .product-next-steps{margin:0 0 20px}
 .lib-page > .next-steps{margin-bottom:4px}
+.next-steps-list li.skipped strong{color:var(--muted);font-weight:400}

@@ -212,6 +212,28 @@ class OutputViewerTest extends TestCase
         $this->assertSame('approved', $pack->fresh()->status);
     }
 
+    public function test_requesting_changes_on_a_revision_of_an_approved_pack_does_not_claim_it_is_ready(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        app(ContentLibrary::class)->syncPack($pack);
+        $items = $pack->contentItems()->orderBy('id')->get();
+        $viewer = Livewire::actingAs($owner)->test(ContentBrowser::class, ['productId' => $pack->product_id])->call('select', $items->first()->id);
+        foreach ($items as $item) {
+            $viewer->call('approve')->assertHasNoErrors();
+        }
+        $this->assertSame('approved', $pack->fresh()->status);
+
+        $revision = app(ContentLibrary::class)->revise($items->first()->fresh(), $owner);
+        $viewer->call('select', $items->first()->id)
+            ->set('decisionNote', 'Shorter, please.')
+            ->call('requestChanges')
+            ->assertHasNoErrors()
+            ->assertDontSee('ready to use')
+            ->assertSet('flashLink', null);
+        $this->assertSame('changes', $revision->fresh()->status);
+    }
+
     /** Adds finished banner sets of three to the pack and syncs its items. */
     private function banners(CampaignPack $pack, int $sets): void
     {
