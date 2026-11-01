@@ -229,6 +229,7 @@
 .next-steps-list li.done strong{color:var(--muted);font-weight:400}
 .next-steps-list li.current .next-steps-mark{background:var(--accent);color:var(--on-accent)}
 .next-steps-list li .pill{flex:none}
+.next-steps-list li>.grow{flex:1 1 220px;min-width:0}
 @media(max-width:720px){.next-steps-list li{flex-wrap:wrap}.next-steps-list li .pill{margin-left:40px}}
 .viewer-source-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px}
 .pack-next-steps{margin:0 0 28px}
