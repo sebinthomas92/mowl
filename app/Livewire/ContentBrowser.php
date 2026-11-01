@@ -68,6 +68,10 @@ class ContentBrowser extends Component
 
     public ?string $flash = null;
 
+    /** An optional next-step link shown with the flash: ['label' => ..., 'url' => ...]. */
+    #[Locked]
+    public ?array $flashLink = null;
+
     public function mount(?int $productId = null): void
     {
         $this->productId = $productId;
@@ -88,6 +92,7 @@ class ContentBrowser extends Component
         $this->commentBody = '';
         $this->decisionNote = '';
         $this->flash = null;
+        $this->flashLink = null;
         $this->resetValidation();
     }
 
@@ -152,6 +157,26 @@ class ContentBrowser extends Component
             return;
         }
         $this->decided("Changes requested on {$item->title} v{$version->version}. The team has been notified.", $ids);
+    }
+
+    /**
+     * Launch pack sections can only be approved once someone with review rights has approved the
+     * product facts the pack was written from. Doing it here saves a trip back to the pack page.
+     */
+    public function approveSource(): void
+    {
+        abort_unless($this->membership()?->canReview(), 403);
+        $source = $this->item()->campaignPack?->sourceSnapshot;
+        if (! $source || $source->approved_at) {
+            return;
+        }
+        $source->update(['approved_by_user_id' => auth()->id(), 'approved_at' => now()]);
+        $this->currentWorkspace()->auditEvents()->create([
+            'actor_user_id' => auth()->id(), 'event' => 'source_snapshot_approved', 'subject_type' => $source::class, 'subject_id' => $source->id, 'metadata' => [],
+        ]);
+        $this->resetValidation();
+        $this->flash = 'Product facts approved. You can approve the outputs now.';
+        $this->flashLink = null;
     }
 
     public function showTab(string $tab): void
@@ -385,12 +410,19 @@ class ContentBrowser extends Component
         $index = array_search($this->itemId, $ids, true);
         $waiting = ContentItem::query()->whereIn('id', $ids)->whereIn('status', ['draft', 'review'])->pluck('id')->all();
         $after = $index === false ? [] : array_slice($ids, $index + 1);
-        $next = collect($after)->first(fn (int $id) => in_array($id, $waiting, true));
+        $before = $index === false ? [] : array_slice($ids, 0, $index);
+        // Look ahead first, then wrap around, so skipped outputs are not forgotten.
+        $next = collect([...$after, ...$before])->first(fn (int $id) => in_array($id, $waiting, true));
+        $pack = $this->item()->campaignPack?->fresh();
         $this->decisionNote = '';
         $this->resetValidation();
+        $this->flashLink = null;
         if ($next) {
             $this->select($next);
             $message .= ' Showing the next one waiting.';
+        } elseif ($pack && $pack->status === 'approved' && $pack->contentItems()->get()->filter->isPackSection()->every(fn (ContentItem $item) => $item->status === 'approved')) {
+            $message .= " Every output in this launch pack is approved, so v{$pack->current_version} is ready to use.";
+            $this->flashLink = ['label' => 'Next: make banners', 'url' => route('campaign-packs.show', $pack).'#banner-studio'];
         }
         $this->flash = $message;
     }
@@ -445,7 +477,8 @@ class ContentBrowser extends Component
             $approved = $pack->versions()->where('review_status', 'approved')->orderByDesc('version')->first();
             $used[] = ['icon' => 'stack-2', 'text' => "Launch pack: {$pack->name}", 'url' => route('campaign-packs.show', $pack)];
             if ($approved) {
-                $used[] = ['icon' => 'world-share', 'text' => "Client hub and exports use launch pack v{$approved->version}", 'url' => null];
+                $where = $this->currentWorkspace()->isAgency() ? 'Client hub' : 'Share link';
+                $used[] = ['icon' => 'world-share', 'text' => "{$where} and exports use launch pack v{$approved->version}", 'url' => null];
             }
         }
         if ($item->banner_creative_id && $pack) {

@@ -8,6 +8,7 @@ use App\Livewire\WorkspaceSettings;
 use App\Models\CampaignPack;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Services\ContentLibrary;
 use App\Services\MockCampaignPackGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -57,6 +58,48 @@ class WorkspaceKindTest extends TestCase
             ->assertSet('kind', 'agency')->set('kind', 'store')->call('save')->assertHasNoErrors();
         $this->assertSame('store', $workspace->fresh()->kind);
         $this->assertDatabaseHas('workspace_audit_events', ['workspace_id' => $workspace->id, 'event' => 'workspace_kind_changed']);
+    }
+
+    public function test_a_new_store_is_walked_from_empty_products_to_a_shared_launch_pack(): void
+    {
+        $owner = User::factory()->create();
+        $workspace = Workspace::create(['name' => 'Lumen Candles', 'kind' => 'store']);
+        $workspace->users()->attach($owner, ['role' => 'owner']);
+
+        $this->actingAs($owner)->get(route('products.index'))->assertOk()
+            ->assertSee('Getting started')->assertSee('0 of 4 done')->assertSee('Write a launch pack');
+
+        [$owner, $workspace, $product, $pack] = $this->fixture();
+        $workspace->update(['kind' => 'store']);
+
+        $this->actingAs($owner)->get(route('products.index'))->assertOk()->assertSee('2 of 4 done')->assertSee('Open launch pack');
+        $this->actingAs($owner)->get(route('products.show', $product))->assertOk()
+            ->assertSee('Finish your first launch pack')->assertSee('nothing to share')->assertDontSee('client hub');
+        $this->actingAs($owner)->get(route('campaign-packs.show', $pack))->assertOk()
+            ->assertSee('What to do next')->assertSee('Facts are right, approve them')->assertSee('Share or download it');
+
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        $pack->versions()->firstOrFail()->update(['review_status' => 'approved', 'reviewed_at' => now()]);
+        $product->hubShares()->create(['workspace_id' => $workspace->id, 'token' => str_repeat('a', 48), 'created_by_user_id' => $owner->id]);
+
+        $this->actingAs($owner)->get(route('products.index'))->assertOk()->assertDontSee('Getting started');
+    }
+
+    public function test_without_a_product_photo_the_pack_guide_skips_banners_and_points_to_sharing(): void
+    {
+        [$owner, $workspace, , $pack] = $this->fixture();
+        $workspace->update(['kind' => 'store']);
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        app(ContentLibrary::class)->syncPack($pack);
+        $pack->contentItems()->update(['status' => 'approved']);
+        $pack->versions()->firstOrFail()->update(['review_status' => 'approved', 'reviewed_at' => now()]);
+        $pack->update(['status' => 'approved']);
+
+        $this->actingAs($owner)->get(route('campaign-packs.show', $pack))->assertOk()
+            ->assertSee('What to do next')
+            ->assertSee('you can share the copy without them')
+            ->assertSee('Open Share')
+            ->assertDontSee('Go to banners');
     }
 
     public function test_the_migration_makes_only_workspaces_with_clients_agencies(): void

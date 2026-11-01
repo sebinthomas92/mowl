@@ -80,14 +80,14 @@
                         <span class="eyebrow">Review before starting</span>
                         <div>
                             <div class="kv"><span>Product</span><span>{{ $briefProduct->name }}</span></div>
-                            <div class="kv"><span>Inputs used</span><span>offer · audience · product page · {{ $briefProduct->brand->name }} brand voice</span></div>
-                            <div class="kv"><span>Outputs</span><span>7 items, then 3 banners</span></div>
+                            <div class="kv"><span>Inputs used</span><span>offer · audience · product page{{ filled($briefProduct->brand->voice ?? null) ? ' · '.$briefProduct->brand->name.' brand voice' : '' }}</span></div>
+                            <div class="kv"><span>Outputs</span><span>7 outputs to review, then 3 banners</span></div>
                             <div class="kv"><span>Estimated usage</span><span class="num"><strong class="medium">{{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</strong>@if($canSeeCosts) of {{ $balance }} left @endif</span></div>
-                            <div class="kv"><span>Expected time</span><span>About a minute · you can leave</span></div>
+                            <div class="kv"><span>Expected time</span><span>About two minutes · you can leave</span></div>
                         </div>
                         @if($over)<div class="banner bad">@if($canSeeCosts)This run needs {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }} and {{ $balance }} {{ $balance === 1 ? 'is' : 'are' }} left. Choose standard quality or add credits.@else The workspace does not have enough credits for this run. Choose standard quality or ask the owner to add credits.@endif</div>@endif
                         <button type="submit" class="pill pri block" wire:loading.attr="disabled" wire:target="generatePack" @disabled($over)>
-                            <span wire:loading.remove wire:target="generatePack">Start run · {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</span><span wire:loading wire:target="generatePack">Starting…</span>
+                            <span wire:loading.remove wire:target="generatePack">Write launch pack · {{ $cost }} {{ \Illuminate\Support\Str::plural('credit', $cost) }}</span><span wire:loading wire:target="generatePack">Starting…</span>
                         </button>
                         <span class="muted xs">Credits are reserved when the run starts and returned automatically if every retry fails.</span>
                     </aside>
@@ -112,10 +112,10 @@
                     <div class="processing-console">
                         <div class="processing-mark"><span>{{ strtoupper(substr($pack->product->name, 0, 2)) }}</span></div>
                         <p class="kicker">CAMPAIGN JOB / {{ str_pad($job?->id ?? 0, 4, '0', STR_PAD_LEFT) }}</p>
-                        <h1>{{ $pack->status === 'failed' ? 'Generation needs attention.' : 'Building the launch pack.' }}</h1>
-                        <p>{{ $pack->status === 'failed' ? 'The job exhausted its automatic retries. Your credits were returned.' : 'The source is being captured, normalized, checked, and transformed into evidence-linked campaign content.' }}</p>
+                        <h1>{{ $pack->status === 'failed' ? 'Writing the launch pack failed.' : 'Writing your launch pack.' }}</h1>
+                        <p>{{ $pack->status === 'failed' ? 'The job exhausted its automatic retries. Your credits were returned.' : 'We read the product page again, write each output, then check every claim against your confirmed facts. This usually takes about two minutes.' }}</p>
                         <div class="processing-steps">
-                            @foreach(['fetching_source' => 'Refresh Product Truth', 'generating_pack' => 'Rank angles and build routes', 'complete' => 'Validate and save version'] as $phase => $label)
+                            @foreach(['fetching_source' => 'Read the product page', 'generating_pack' => 'Write the outputs', 'complete' => 'Check every claim'] as $phase => $label)
                                 <div @class(['active' => $job?->phase === $phase, 'done' => array_search($phase, array_keys(['fetching_source'=>1,'generating_pack'=>1,'complete'=>1])) < array_search($job?->phase, array_keys(['fetching_source'=>1,'generating_pack'=>1,'complete'=>1]))])><i></i><span>{{ $label }}</span></div>
                             @endforeach
                         </div>
@@ -124,7 +124,7 @@
                             <div class="job-error"><strong>{{ $job?->error_code ?: 'Generation failed' }}</strong><p>{{ $job?->error_message ?: 'The source could not be processed.' }}</p></div>
                             <button type="button" class="primary-button retry-button" wire:click="retryGeneration">Retry generation <span>↻</span></button>
                         @else
-                            <p class="polling-note">This page updates automatically. You can safely leave and return later.</p>
+                            <p class="polling-note">This page updates by itself. You can leave and come back; the pack will be waiting under Launch packs.</p>
                         @endif
                     </div>
                 </section>
@@ -159,7 +159,7 @@
                             <span class="verified-chip">✓ Claims and timing checked</span>
                         @endif
                         <button type="button" class="secondary-button" wire:click="startAnother">＋ New pack</button>
-                        <button type="button" class="copy-pack" @click="navigator.clipboard.writeText(@js(json_encode($content, JSON_PRETTY_PRINT))); copied = 'pack'; setTimeout(() => copied = '', 1600)"><span x-text="copied === 'pack' ? '✓ Copied' : '▣ Copy pack'"></span></button>
+                        <button type="button" class="secondary-button" title="Copies the whole pack as structured text" @click="navigator.clipboard.writeText(@js(json_encode($content, JSON_PRETTY_PRINT))); copied = 'pack'; setTimeout(() => copied = '', 1600)"><span x-text="copied === 'pack' ? '✓ Copied' : '▣ Copy pack'"></span></button>
                     </div>
                 </header>
 
@@ -167,6 +167,33 @@
                     <div class="product-art" aria-hidden="true"><div class="art-card"><span>CAMPAIGN</span><b>{{ strtoupper(substr($pack->product->name, 0, 2)) }}</b><i></i></div></div>
                     <div><p class="pack-number">PACK / {{ str_pad($pack->id, 4, '0', STR_PAD_LEFT) }}</p><h1>{{ $pack->product->name }}</h1><p>{{ $pack->product->brand->name }} <i>•</i> {{ $pack->product->price ?: 'Price not supplied' }} <i>•</i> Launch pack v{{ $version->version }}</p><div class="approval-line"><span>{{ $version->review_status === 'approved' ? '✓' : '•' }}</span><strong>{{ str($version->review_status)->title() }}</strong><i></i><small>{{ $version->reviewed_at ? 'Reviewed '.$version->reviewed_at->format('M j, Y') : 'Generated '.$version->created_at->format('M j, Y') }}</small>@if($canSeeCosts)<i></i><small>${{ number_format($pack->estimated_cost, 3) }} tracked cost</small>@endif</div></div>
                 </section>
+
+                @if($contentItems !== null && $contentItems->isNotEmpty() && $version->version === $pack->versions->max('version'))
+                    @php
+                        $packSections = $contentItems->filter->isPackSection();
+                        $sectionsApproved = $packSections->where('status', 'approved')->count();
+                        $nextOutput = $packSections->first(fn ($item) => $item->status !== 'approved');
+                        $factsApproved = (bool) $pack->sourceSnapshot?->approved_at;
+                        $bannersMade = $bannerStudioAvailable && $pack->bannerGenerationBatches->flatMap->creatives->where('status', 'completed')->isNotEmpty();
+                        $shared = $pack->product->hubShares()->whereNull('revoked_at')->exists();
+                        $packSteps = [
+                            ['title' => 'Check the product facts', 'hint' => 'Every claim in the pack must come from these facts, so they are approved first.', 'done' => $factsApproved,
+                                'label' => $canReview ? 'Facts are right, approve them' : null, 'action' => $canReview ? 'approveSource' : null, 'note' => $canReview ? null : 'An owner or reviewer approves the facts.'],
+                            ['title' => "Approve the {$packSections->count()} outputs", 'hint' => "{$sectionsApproved} of {$packSections->count()} approved. Open each one, edit if needed, then approve it.", 'done' => $packSections->isNotEmpty() && $sectionsApproved === $packSections->count(),
+                                'label' => $nextOutput ? ($canReview ? 'Review next output' : 'Open next output') : null,
+                                'url' => $nextOutput ? route('products.show', [$pack->product, 'tab' => 'content', 'item' => $nextOutput->id]) : null],
+                            ['title' => 'Make banners', 'hint' => $bannerStudioAvailable && ! $bannerProductImage
+                                    ? 'Optional. Banners need a product photo from the product page, and none was found, so you can share the copy without them.'
+                                    : ($bannerStudioAvailable ? 'Three 4:5 images built from your approved copy and your product photo.' : 'Optional. Banners are not available in this workspace yet.'),
+                                'done' => $bannersMade, 'skip' => ! $bannerStudioAvailable || ! $bannerProductImage, 'label' => 'Go to banners', 'url' => '#banner-studio'],
+                            ['title' => $workspace->isAgency() ? 'Share it with your client' : 'Share or download it', 'hint' => $workspace->isAgency() ? 'One link where your client copies approved lines and downloads images.' : 'One link for anyone helping you launch, or copy lines and download images yourself.', 'done' => $shared,
+                                'label' => $workspace->isAgency() ? 'Share with client' : 'Open Share', 'url' => route('products.show', [$pack->product, 'tab' => 'hub'])],
+                        ];
+                    @endphp
+                    @if(collect($packSteps)->contains(fn ($step) => ! $step['done'] && empty($step['skip'])))
+                        <div class="pack-next-steps">@include('partials.next-steps', ['steps' => $packSteps, 'id' => 'pack', 'eyebrow' => 'What to do next', 'heading' => $pack->status === 'approved' ? 'Your launch pack is approved. Make banners and share it.' : 'Your launch pack is written. Check it, then approve it.'])</div>
+                    @endif
+                @endif
 
                 @php
                     $activeJob = $pack->latestGenerationJob;
@@ -193,7 +220,7 @@
                             $approvedCount = $contentItems->where('status', 'approved')->count();
                         @endphp
                         <div class="card col tight-card">
-                            <div class="row small"><span>{{ $approvedCount }} of {{ $contentItems->count() }} approved</span><span class="sp"></span><span class="muted xs">When every section is approved, they are assembled into an approved launch pack version for exports, banners and the client hub.</span></div>
+                            <div class="row small"><span>{{ $approvedCount }} of {{ $contentItems->count() }} approved</span><span class="sp"></span><span class="muted xs">When every output is approved, they become one approved launch pack for exports, banners and {{ $workspace->isAgency() ? 'the client hub' : 'your share link' }}.</span></div>
                             <div class="bar" role="progressbar" aria-label="Outputs approved" aria-valuemin="0" aria-valuemax="{{ $contentItems->count() }}" aria-valuenow="{{ $approvedCount }}"><span style="width: {{ $contentItems->count() ? round($approvedCount / $contentItems->count() * 100) : 0 }}%"></span></div>
                         </div>
                         <div class="tw"><table class="tbl">
@@ -249,8 +276,8 @@
                 @endif
 
                 <section class="review-panel compact-review">
-                    <div><p class="section-label">SOURCE TRUTH</p><h3>{{ $pack->sourceSnapshot->approved_at ? 'Source approved '.$pack->sourceSnapshot->approved_at->format('M j, Y') : 'Source needs an owner approval' }}</h3><p>{{ $pack->sourceSnapshot->url }} · {{ $pack->product->sourceSnapshots()->count() }} source snapshots retained</p></div>
-                    @if($canReview && ! $pack->sourceSnapshot->approved_at)<button type="button" class="secondary-button" wire:click="approveSource">Approve source truth</button>@endif
+                    <div><p class="section-label">PRODUCT FACTS</p><h3>{{ $pack->sourceSnapshot->approved_at ? 'Product facts approved '.$pack->sourceSnapshot->approved_at->format('M j, Y') : 'Product facts need approval before outputs can be approved' }}</h3><p>{{ $pack->sourceSnapshot->url }} · {{ $pack->product->sourceSnapshots()->count() }} source snapshots retained</p></div>
+                    @if($canReview && ! $pack->sourceSnapshot->approved_at)<button type="button" class="secondary-button" wire:click="approveSource">Approve product facts</button>@endif
                 </section>
 
                 @if($version->review_status === 'approved')
@@ -293,7 +320,7 @@
                             <div class="truth-grid product-truth-summary">
                                 <div><small>PRODUCT</small><strong>{{ $content['product_truth']['name'] }}</strong></div>
                                 <div><small>PRICE</small><strong>{{ $content['product_truth']['price'] }}</strong></div>
-                                <div><small>AVAILABILITY</small><strong>{{ $content['product_truth']['availability'] }}</strong></div>
+                                <div><small>AVAILABILITY</small><strong>{{ \App\Services\ProductKnowledge::availabilityLabel($content['product_truth']['availability']) }}</strong></div>
                                 <div><small>EVIDENCE</small><strong>{{ count($version->evidence ?? []) }} classified {{ Str::plural('claim', count($version->evidence ?? [])) }}</strong></div>
                             </div>
                             <div class="truth-detail-grid">

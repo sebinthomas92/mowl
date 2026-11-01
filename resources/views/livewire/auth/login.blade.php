@@ -1,7 +1,7 @@
 <main class="auth-shell">
     <section class="auth-brand-panel">
         <div class="auth-lockup"><img src="/marketing-owl-logo.png" alt=""><span>Marketing<br>Owl</span></div>
-        <div class="auth-promise"><p>AGENCY CAMPAIGN INTELLIGENCE</p><h1>Turn product truth into campaigns your buyers can trust.</h1><span>Source-linked packs. Structured evidence. Copy ready to ship.</span></div>
+        <div class="auth-promise"><p>LAUNCH CONTENT FROM YOUR PRODUCT PAGE</p><h1>Turn product truth into campaigns your buyers can trust.</h1><span>For online stores and the agencies that run their marketing. Every claim comes from your product page.</span></div>
         <div class="auth-standard"><b>50</b><span>pack credits<br>included in beta</span></div>
     </section>
     <section class="auth-form-panel">

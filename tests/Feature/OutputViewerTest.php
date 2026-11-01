@@ -154,6 +154,86 @@ class OutputViewerTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_unapproved_product_facts_can_be_approved_from_the_viewer(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        app(ContentLibrary::class)->syncPack($pack);
+        $first = $pack->contentItems()->orderBy('id')->firstOrFail();
+
+        $viewer = Livewire::actingAs($owner)->test(ContentBrowser::class, ['productId' => $pack->product_id])
+            ->call('select', $first->id)
+            ->assertSee('First, check the product facts')
+            ->assertSee('Facts are right, approve them')
+            ->call('approveSource')
+            ->assertSee('Product facts approved.')
+            ->assertDontSee('Facts are right, approve them');
+
+        $this->assertNotNull($pack->sourceSnapshot->fresh()->approved_at);
+        $viewer->call('approve')->assertHasNoErrors();
+        $this->assertSame('approved', $first->fresh()->status);
+    }
+
+    public function test_a_contributor_cannot_approve_product_facts_from_the_viewer(): void
+    {
+        [, $workspace, $pack] = $this->fixture();
+        $member = User::factory()->create();
+        $workspace->users()->attach($member, ['role' => 'member']);
+        app(ContentLibrary::class)->syncPack($pack);
+
+        Livewire::actingAs($member)->test(ContentBrowser::class, ['productId' => $pack->product_id])
+            ->call('select', $pack->contentItems()->orderBy('id')->firstOrFail()->id)
+            ->assertDontSee('Facts are right, approve them')
+            ->call('approveSource')
+            ->assertForbidden();
+
+        $this->assertNull($pack->sourceSnapshot->fresh()->approved_at);
+    }
+
+    public function test_approving_the_last_output_points_to_banners_and_skipped_outputs_are_not_lost(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        app(ContentLibrary::class)->syncPack($pack);
+        $items = $pack->contentItems()->orderBy('id')->get();
+
+        // Start on the last output: once it is approved, the viewer wraps back to the first one waiting.
+        $viewer = Livewire::actingAs($owner)->test(ContentBrowser::class, ['productId' => $pack->product_id])
+            ->call('select', $items->last()->id)
+            ->call('approve')
+            ->assertSet('itemId', $items->first()->id);
+
+        foreach ($items->slice(0, -1) as $item) {
+            $viewer->call('approve')->assertHasNoErrors();
+        }
+
+        $viewer->assertSee('ready to use')
+            ->assertSee('Next: make banners')
+            ->assertSet('flashLink.url', route('campaign-packs.show', $pack).'#banner-studio');
+        $this->assertSame('approved', $pack->fresh()->status);
+    }
+
+    public function test_requesting_changes_on_a_revision_of_an_approved_pack_does_not_claim_it_is_ready(): void
+    {
+        [$owner, , $pack] = $this->fixture();
+        $pack->sourceSnapshot->update(['approved_by_user_id' => $owner->id, 'approved_at' => now()]);
+        app(ContentLibrary::class)->syncPack($pack);
+        $items = $pack->contentItems()->orderBy('id')->get();
+        $viewer = Livewire::actingAs($owner)->test(ContentBrowser::class, ['productId' => $pack->product_id])->call('select', $items->first()->id);
+        foreach ($items as $item) {
+            $viewer->call('approve')->assertHasNoErrors();
+        }
+        $this->assertSame('approved', $pack->fresh()->status);
+
+        $revision = app(ContentLibrary::class)->revise($items->first()->fresh(), $owner);
+        $viewer->call('select', $items->first()->id)
+            ->set('decisionNote', 'Shorter, please.')
+            ->call('requestChanges')
+            ->assertHasNoErrors()
+            ->assertDontSee('ready to use')
+            ->assertSet('flashLink', null);
+        $this->assertSame('changes', $revision->fresh()->status);
+    }
+
     /** Adds finished banner sets of three to the pack and syncs its items. */
     private function banners(CampaignPack $pack, int $sets): void
     {

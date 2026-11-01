@@ -15,7 +15,7 @@
                 <div>
                     <div class="eyebrow">Add product</div>
                     <h1 class="display">Add a product</h1>
-                    <p class="muted">Save a useful product without generating anything. Missing and conflicting facts stay visible in Knowledge.</p>
+                    <p class="muted">Paste your product's page address. We read its name, price and details, you check them, then save. Saving is free and generates nothing.</p>
                 </div>
             </header>
 
@@ -179,7 +179,7 @@
 
                 <aside class="col add-aside" aria-label="About this product's brand">
                     <section class="card col">
-                        <span class="eyebrow">Brand inheritance</span>
+                        <span class="eyebrow">About brands</span>
                         @if($brand)
                             <p class="small"><strong class="medium">{{ $brand->name }}</strong> supplies the voice, palette and audience defaults. A product's own value always wins and is labelled in Knowledge.</p>
                             @if($profileAvailable)
@@ -193,7 +193,7 @@
                             @endif
                             <a class="linkbtn" href="{{ route('brands.edit', $brand) }}" wire:navigate>Edit {{ $brand->name }}</a>
                         @else
-                            <p class="small">A new brand starts empty. Add its voice, audience and palette afterwards, and every product of the brand picks them up.</p>
+                            <p class="small">A brand groups products that share a voice, audience and colours. Most stores need just one, named after the store. You can add its voice and colours later under Brands, and every product picks them up.</p>
                         @endif
                     </section>
                     <section class="card col tip">

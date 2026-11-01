@@ -320,7 +320,7 @@ class ProductKnowledge
         }
         $availability = $this->clean($truth['availability'] ?? null);
         if ($availability !== null) {
-            $availability = (string) str(preg_replace('#^https?://schema\.org/#i', '', $availability))->headline();
+            $availability = self::availabilityLabel($availability);
         }
 
         return array_filter([
@@ -352,5 +352,15 @@ class ProductKnowledge
         $normalize = fn (string $value) => mb_strtolower(preg_replace('/\s+/u', ' ', trim($value)));
 
         return $normalize($a) === $normalize($b);
+    }
+
+    /** "https://schema.org/InStock" reads as "In Stock"; plain wording is kept as it is. */
+    public static function availabilityLabel(?string $value): string
+    {
+        $value = trim((string) $value);
+
+        return preg_match('#^https?://schema\.org/#i', $value)
+            ? (string) str(preg_replace('#^https?://schema\.org/#i', '', $value))->headline()
+            : $value;
     }
 }

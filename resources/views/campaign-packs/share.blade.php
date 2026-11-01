@@ -16,7 +16,7 @@
     <p class="meta">Version {{ $version->version }} · approved {{ $version->reviewed_at?->format('M j, Y') }}</p>
 
     <h2>Product Truth</h2>
-    <p><strong>{{ $content['product_truth']['price'] }}</strong> · {{ $content['product_truth']['availability'] }}</p>
+    <p><strong>{{ $content['product_truth']['price'] }}</strong> · {{ \App\Services\ProductKnowledge::availabilityLabel($content['product_truth']['availability']) }}</p>
     <ul>@foreach($content['product_truth']['verified_facts'] as $fact)<li>{{ $fact['statement'] }}</li>@endforeach</ul>
 
     <h2>Strongest angles</h2>

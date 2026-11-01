@@ -234,4 +234,11 @@ class ProductKnowledgeTest extends TestCase
             'status' => 'ready', 'extracted_content' => 'Page', 'extracted_truth' => $truth,
         ]);
     }
+
+    public function test_schema_org_availability_reads_as_plain_words(): void
+    {
+        $this->assertSame('In Stock', ProductKnowledge::availabilityLabel('https://schema.org/InStock'));
+        $this->assertSame('Out Of Stock', ProductKnowledge::availabilityLabel('http://schema.org/OutOfStock'));
+        $this->assertSame('Ships in 2 days', ProductKnowledge::availabilityLabel('Ships in 2 days'));
+    }
 }

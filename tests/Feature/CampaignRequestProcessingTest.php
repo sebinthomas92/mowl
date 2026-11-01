@@ -41,7 +41,7 @@ class CampaignRequestProcessingTest extends TestCase
         Livewire::actingAs($user)
             ->test(CampaignWorkspace::class, ['pack' => $job->campaignPack])
             ->assertOk()
-            ->assertSee('Building the launch pack.')
+            ->assertSee('Writing your launch pack.')
             ->assertSee('CAMPAIGN JOB');
     }
 
