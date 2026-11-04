@@ -119,3 +119,5 @@ PostgreSQL database whose name ends in `_test`, then run
 `php artisan test --filter=ProductHubPermissionsTest`. The connection must be able
 to create a role and schema; the test rolls back its schema and role changes.
 Without this variable, that PostgreSQL-specific test is skipped.
+In Claude Code cloud sessions, `.claude/hooks/start-postgres.sh` starts the
+image's PostgreSQL cluster and sets this variable automatically.
