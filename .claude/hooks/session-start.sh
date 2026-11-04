@@ -8,8 +8,9 @@ set -euo pipefail
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
 cd "$CLAUDE_PROJECT_DIR"
 
-# composer.lock targets PHP 8.4; cloud images may ship 8.3. Resolve a
-# compatible vendor tree locally and keep the committed lock untouched.
+# composer.lock targets PHP 8.4, which the cloud environment's setup script
+# installs. On an image still at 8.3, resolve a compatible vendor tree locally
+# and keep the committed lock untouched.
 if ! composer install --no-interaction --prefer-dist --no-progress; then
     composer update -W --no-interaction --prefer-dist --no-progress
     git checkout -- composer.lock
