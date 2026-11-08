@@ -188,6 +188,11 @@ class ContentItemsTest extends TestCase
         }
         $library->saveDraft($version->fresh(), ['value_proposition' => 'Save ₹100: now ₹699, free shipping over ₹499.']);
         $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+        // "now" right after "save", and a threshold whose subject follows the amount, keep their roles.
+        $library->saveDraft($version->fresh(), ['value_proposition' => 'Save now ₹100 on ₹699. ₹499 minimum order for free shipping.']);
+        $this->assertTrue($priceCheck()['ok'], $priceCheck()['label']);
+        $library->saveDraft($version->fresh(), ['value_proposition' => '₹499 minimum. Free shipping on everything.']);
+        $this->assertFalse($priceCheck()['ok']);
         // A fee ending one sentence is not struck out by the price starting the next.
         $pack->sourceSnapshot->update(['extracted_content' => 'Kindle Stand. Shipping ₹49. ₹699 in stock.']);
         $library->saveDraft($version->fresh(), ['value_proposition' => 'Was ₹49, now ₹699.']);

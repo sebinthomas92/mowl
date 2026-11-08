@@ -70,7 +70,8 @@ class LibraryPreviews
 
         $type = strtolower(trim(explode(';', (string) $response->header('Content-Type'))[0]));
         $extension = $this->extension($type);
-        if ($response->serverError()) {
+        // Timeouts, rate limits and server errors are worth retrying on a later view, so they don't mark the row.
+        if ($response->serverError() || in_array($response->status(), [408, 425, 429], true)) {
             return null;
         }
         if (! $response->successful() || ! str_starts_with($type, self::KINDS[$kind]) || ! $extension || strlen($response->body()) > self::MAX_BYTES[$kind]) {

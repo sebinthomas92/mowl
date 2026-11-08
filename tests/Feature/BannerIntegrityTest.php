@@ -145,7 +145,9 @@ class BannerIntegrityTest extends TestCase
         app(ProductKnowledge::class)->syncFromSource($product, $old);
         $new = $product->sourceSnapshots()->create(['url' => 'https://example.com/stand', 'content_hash' => 'b', 'status' => 'ready', 'extracted_content' => 'Stand', 'extracted_truth' => []]);
         app(ProductKnowledge::class)->syncFromSource($product, $new);
-        $this->assertSame('ok', $product->facts()->where('key', 'price')->value('status'));
+        // The page no longer shows the price, so the seeded one needs a decision before it is used again.
+        $this->assertSame('conflict', $product->facts()->where('key', 'price')->value('status'));
+        $this->assertNull($product->facts()->where('key', 'price')->value('source_value'));
 
         $this->assertSame([], app(CampaignPackSafetyValidator::class)->supportedPrices($new));
     }

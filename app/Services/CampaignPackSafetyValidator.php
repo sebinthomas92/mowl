@@ -20,7 +20,7 @@ class CampaignPackSafetyValidator
     private const PRICE_ROLES = [
         'old' => ['was|m\\.?r\\.?p\\.?|down from|instead of|regular(?:ly)?|list price|original(?:ly)?|struck', 'm\\.?r\\.?p'],
         'threshold' => ['over|above|exceed(?:s|ing)?|threshold(?: of)?|minimum(?: of)?', 'threshold|minimum|and above|or more'],
-        'saving' => ['save|saving', 'off'],
+        'saving' => ['save(?:\\s+now)?|saving', 'off'],
     ];
 
     private const CURRENCY_CODES = ['INR', 'USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'SGD', 'AED', 'NZD', 'CHF', 'CNY', 'HKD', 'SAR', 'MYR', 'ZAR', 'SEK', 'NOK', 'DKK', 'BRL', 'MXN', 'IDR', 'THB', 'PHP', 'KRW', 'QAR', 'NPR', 'LKR', 'BDT', 'PKR'];
@@ -280,12 +280,15 @@ class CampaignPackSafetyValidator
      */
     public function priceRole(string $before, string $after): ?string
     {
-        $parts = preg_split('/[.!?;]\s|\n|\bnow\b/iu', $before) ?: [''];
+        // "Save now ₹100" is still one saving claim, so "now" right after "save" doesn't end the clause.
+        $parts = preg_split('/[.!?;]\s|\n|(?<!\bsave\s)(?<!\bsaving\s)\bnow\b/iu', $before) ?: [''];
         $before = (string) end($parts);
+        $rest = (string) (preg_split('/[.!?;]\s|\n/u', $after)[0] ?? '');
         foreach (self::PRICE_ROLES as $role => [$lead, $trail]) {
             if (preg_match('/\b(?:'.$lead.')[\s:(]*$/iu', $before) === 1 || preg_match('/^[\s:(]*(?:'.$trail.')(?![\p{L}])/iu', $after) === 1) {
                 // "Over ₹750" is a threshold only when the clause is about shipping or the order, not the price.
-                if ($role === 'threshold' && preg_match('/\b(?:shipping|delivery|orders?|subtotals?|cart|basket|spend|purchases?)\b/iu', $before) !== 1) {
+                // The subject can come after the amount too: "₹499 minimum order for free shipping".
+                if ($role === 'threshold' && preg_match('/\b(?:shipping|delivery|orders?|subtotals?|cart|basket|spend|purchases?)\b/iu', $before.' '.$rest) !== 1) {
                     continue;
                 }
 

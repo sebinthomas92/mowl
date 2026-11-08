@@ -57,8 +57,13 @@ class StripeWebhookHandler
         }
 
         $packKey = (string) ($session['metadata']['pack'] ?? '');
+        // Fulfil the terms the customer bought: the credits and price we put in the session's metadata
+        // at checkout, not whatever the pack is configured as now. Sessions created before those keys
+        // existed fall back to the pack's current terms.
         $pack = config('billing.credit_packs.'.$packKey);
-        if (! is_array($pack) || (int) ($session['amount_total'] ?? 0) < $pack['amount'] || strtolower((string) ($session['currency'] ?? '')) !== config('billing.currency')) {
+        $credits = (int) ($session['metadata']['credits'] ?? 0) ?: (is_array($pack) ? (int) $pack['credits'] : 0);
+        $price = (int) ($session['metadata']['amount'] ?? 0) ?: (is_array($pack) ? (int) $pack['amount'] : 0);
+        if ($credits <= 0 || $price <= 0 || (int) ($session['amount_total'] ?? 0) < $price || strtolower((string) ($session['currency'] ?? '')) !== config('billing.currency')) {
             Log::warning('Stripe credit pack checkout did not match a pack.', ['session' => $session['id'] ?? null, 'pack' => $packKey]);
 
             return;
@@ -66,8 +71,8 @@ class StripeWebhookHandler
 
         $payment = (string) ($session['payment_intent'] ?? $session['id']);
         // A refund that arrived first leaves a marker; then there is nothing to grant.
-        $credits = fn () => WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$payment)->exists() || $this->disputed($workspace, $payment) ? null : $pack['credits'];
-        $this->ledger($workspace, $credits, 'credit_pack_purchase', $pack['credits'].' credits purchased', 'stripe:payment:'.$payment, [
+        $grant = fn () => WorkspaceCredit::query()->where('idempotency_key', 'stripe:refund:'.$payment)->exists() || $this->disputed($workspace, $payment) ? null : $credits;
+        $this->ledger($workspace, $grant, 'credit_pack_purchase', $credits.' credits purchased', 'stripe:payment:'.$payment, [
             'checkout_session' => $session['id'] ?? null,
             'payment_intent' => $session['payment_intent'] ?? null,
             'amount' => $session['amount_total'] ?? null,

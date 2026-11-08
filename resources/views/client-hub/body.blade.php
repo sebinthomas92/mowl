@@ -31,15 +31,15 @@
         }
     }">
     <section class="card hub-intro" aria-labelledby="hub-product-name">
-        <div class="hub-photo" data-initials="{{ mb_strtoupper(mb_substr($product->name, 0, 1)) }}">
-            @if($hub['imageUrl'])<img src="{{ $hub['imageUrl'] }}" alt="{{ $product->name }}" onerror="this.remove()">@endif
+        <div class="hub-photo" data-initials="{{ mb_strtoupper(mb_substr($hub['productName'] ?? $product->name, 0, 1)) }}">
+            @if($hub['imageUrl'])<img src="{{ $hub['imageUrl'] }}" alt="{{ $hub['productName'] ?? $product->name }}" onerror="this.remove()">@endif
         </div>
         <div class="col grow hub-intro-text">
             <div class="row hub-meta">
                 <span class="tag ok"><span class="dot"></span>Approved{{ $version ? ' · version '.$version->version : '' }}</span>
                 @if($approvedAt)<span class="muted xs">Approved {{ $approvedAt->format('j M Y') }}</span>@endif
             </div>
-            <{{ $heading ?? 'h2' }} id="hub-product-name" class="display hub-name">{{ $product->name }}</{{ $heading ?? 'h2' }}>
+            <{{ $heading ?? 'h2' }} id="hub-product-name" class="display hub-name">{{ $hub['productName'] ?? $product->name }}</{{ $heading ?? 'h2' }}>
             <p class="muted small">{{ $product->brand->name }}@if($price && $price !== 'Price not supplied') · {{ $price }}@endif</p>
             @if($summary)<p class="hub-summary">{{ $summary }}</p>@endif
             @if($hub['links']->isNotEmpty())
@@ -139,7 +139,7 @@
                     @foreach($hub['images'] as $image)
                         <figure class="hub-image">
                             <img src="{{ $image['url'] }}" alt="{{ $image['headline'] ? 'Banner: '.$image['headline'] : 'Approved banner' }}" loading="lazy">
-                            <figcaption class="row"><span class="grow small">{{ $image['headline'] ?: 'Banner' }}</span><a class="pill ghost sm" href="{{ $image['url'] }}" download="{{ \Illuminate\Support\Str::slug($product->name) }}-banner-{{ $image['id'] }}.png"><i class="ti ti-download" aria-hidden="true"></i>Download</a></figcaption>
+                            <figcaption class="row"><span class="grow small">{{ $image['headline'] ?: 'Banner' }}</span><a class="pill ghost sm" href="{{ $image['url'] }}" download="{{ \Illuminate\Support\Str::slug($hub['productName'] ?? $product->name) }}-banner-{{ $image['id'] }}.png"><i class="ti ti-download" aria-hidden="true"></i>Download</a></figcaption>
                         </figure>
                     @endforeach
                 </div>

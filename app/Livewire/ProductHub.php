@@ -228,7 +228,7 @@ class ProductHub extends Component
 
         $knowledgeReady = ProductKnowledge::available();
         $facts = $knowledgeReady ? app(ProductKnowledge::class)->facts($this->product) : collect();
-        $source = $this->latestSource();
+        $source = $this->factsSource($facts);
         $brandAudience = $knowledgeReady ? (app(ProductKnowledge::class)->brandProfile($this->product)['default_audience'] ?? null) : null;
         $packs = $this->product->campaignPacks->sortByDesc('id')->values();
         $tabs = self::TABS;
@@ -268,6 +268,19 @@ class ProductHub extends Component
     private function latestSource(): ?SourceSnapshot
     {
         return $this->product->sourceSnapshots()->where('status', 'ready')->latest('id')->first();
+    }
+
+    /**
+     * The snapshot the facts were last synced from, so the Sources card and "Source checked" describe
+     * the same page the Knowledge values came from. Regenerating an older pack can sync from a snapshot
+     * that isn't the newest one.
+     */
+    private function factsSource($facts): ?SourceSnapshot
+    {
+        $id = $facts->filter(fn ($fact) => ProductKnowledge::FACTS[$fact->key]['sourced'] ?? false)->pluck('source_snapshot_id')->filter()->max();
+        $snapshot = $id ? $this->product->sourceSnapshots()->where('status', 'ready')->whereKey($id)->first() : null;
+
+        return $snapshot ?? $this->latestSource();
     }
 
     private function auditFact(string $event, object $subject, array $metadata = []): void

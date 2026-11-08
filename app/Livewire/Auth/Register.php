@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Auth;
 
+use App\Livewire\TeamIndex;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
@@ -77,6 +78,7 @@ class Register extends Component
             if ($invitation) {
                 $lockedInvitation = WorkspaceInvitation::query()->lockForUpdate()->findOrFail($invitation->id);
                 abort_unless($lockedInvitation->isOpen(), 410);
+                TeamIndex::lockSeats($lockedInvitation->workspace_id);
                 abort_if($lockedInvitation->role !== 'client' && $lockedInvitation->workspace->users()->wherePivot('role', '!=', 'client')->count() >= config('campaigns.seat_limit'), 409);
                 $lockedInvitation->workspace->users()->attach($user, $lockedInvitation->pivotAttributes());
                 $lockedInvitation->update(['accepted_at' => now()]);

@@ -55,9 +55,16 @@ return new class extends Migration
         }
     }
 
+    /**
+     * Production adopted tables that existed before this migration, so rolling back only removes
+     * what this migration is sure it added. up() is safe to run again over the remaining tables.
+     */
     public function down(): void
     {
-        Schema::dropIfExists('stripe_webhook_events');
-        Schema::dropIfExists('workspace_subscriptions');
+        if (Schema::hasColumn('workspace_subscriptions', 'cancel_at_period_end')) {
+            Schema::table('workspace_subscriptions', function (Blueprint $table) {
+                $table->dropColumn('cancel_at_period_end');
+            });
+        }
     }
 };

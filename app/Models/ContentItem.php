@@ -53,6 +53,12 @@ class ContentItem extends Model
         return $this->hasOne(ContentVersion::class)->ofMany('version', 'max');
     }
 
+    /** The newest approved version, which stays the deliverable while a revision is drafted or reviewed. */
+    public function approvedVersion(): HasOne
+    {
+        return $this->hasOne(ContentVersion::class)->ofMany(['version' => 'max'], fn ($query) => $query->where('status', 'approved'));
+    }
+
     public function pageSections(): HasMany
     {
         return $this->hasMany(PageSection::class);
