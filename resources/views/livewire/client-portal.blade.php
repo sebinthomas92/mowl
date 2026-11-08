@@ -21,6 +21,7 @@
                     </div>
                 </details>
             @endif
+            <a class="pill ghost sm" href="{{ route('account.edit') }}" wire:navigate>Account</a>
             <form method="POST" action="{{ route('logout') }}">@csrf<button type="submit" class="pill ghost sm">Sign out</button></form>
         @endif
     </header>

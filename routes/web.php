@@ -15,8 +15,11 @@ use App\Http\Controllers\WorkflowDownloadController;
 use App\Http\Controllers\WorkflowPreviewController;
 use App\Http\Controllers\WorkspaceInvitationController;
 use App\Http\Middleware\NoIndex;
+use App\Livewire\AccountSettings;
+use App\Livewire\Auth\ForgotPassword;
 use App\Livewire\Auth\Login;
 use App\Livewire\Auth\Register;
+use App\Livewire\Auth\ResetPassword;
 use App\Livewire\BillingIndex;
 use App\Livewire\BrandEditor;
 use App\Livewire\BrandIndex;
@@ -47,6 +50,8 @@ Route::redirect('/', '/products');
 Route::middleware('guest')->group(function (): void {
     Route::get('/login', Login::class)->name('login');
     Route::get('/register', Register::class)->name('register');
+    Route::get('/forgot-password', ForgotPassword::class)->middleware('throttle:30,1')->name('password.request');
+    Route::get('/reset-password/{token}', ResetPassword::class)->middleware(['throttle:30,1', NoIndex::class])->name('password.reset');
 });
 
 Route::get('/invitations/{token}', [WorkspaceInvitationController::class, 'accept'])
@@ -113,6 +118,7 @@ Route::middleware(['auth', 'workspace.role'])->group(function (): void {
     Route::get('/usage', UsageIndex::class)->name('usage.index');
     Route::get('/billing', BillingIndex::class)->name('billing.index');
     Route::get('/settings', WorkspaceSettings::class)->name('workspace.settings');
+    Route::get('/account', AccountSettings::class)->name('account.edit');
     Route::get('/concierge', ConciergeIndex::class)->name('concierge.index');
     Route::get('/portal', ClientPortal::class)->name('portal.index');
     Route::get('/portal/items/{contentItem}/image', [ClientPortalController::class, 'image'])->name('portal.image');

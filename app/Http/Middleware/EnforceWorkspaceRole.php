@@ -20,7 +20,7 @@ use Symfony\Component\HttpFoundation\Response;
 class EnforceWorkspaceRole
 {
     /** Routes a client may use. */
-    private const CLIENT_ROUTES = ['portal.*', 'logout', 'workspaces.select'];
+    private const CLIENT_ROUTES = ['portal.*', 'account.*', 'logout', 'workspaces.select'];
 
     /** Routes that only create, so reviewers and clients never land on them. */
     private const CREATE_ROUTES = ['products.create', 'brands.create', 'campaign-packs.create'];

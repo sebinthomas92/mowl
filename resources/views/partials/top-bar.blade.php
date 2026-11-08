@@ -16,6 +16,7 @@
         <summary class="avatar" aria-label="Account menu for {{ $user->name }}" title="{{ $user->name }}">{{ collect(explode(' ', $user->name))->filter()->take(2)->map(fn ($part) => mb_strtoupper(mb_substr($part, 0, 1)))->implode('') }}</summary>
         <div class="menu menu-end" role="menu">
             <div class="mh"><strong>{{ $user->name }}</strong><br>{{ $user->email }}<br>{{ $membership->roleLabel() }}{{ $membership->brandId ? ' · '.($workspace->brands()->find($membership->brandId)?->name ?? 'one brand') : '' }}</div>
+            <a href="{{ route('account.edit') }}" wire:navigate role="menuitem"><i class="ti ti-user-circle" aria-hidden="true"></i>Account &amp; password</a>
             <form method="POST" action="{{ route('logout') }}">@csrf<button type="submit" role="menuitem"><i class="ti ti-logout" aria-hidden="true"></i>Sign out</button></form>
         </div>
     </details>
