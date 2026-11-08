@@ -103,11 +103,11 @@
                 @forelse($approved as $item)
                     <div class="li" wire:key="portal-approved-{{ $item->id }}">
                         <span class="portal-thumb">@include('content.thumb', ['item' => $item, 'height' => 52, 'imageUrl' => $item->banner_creative_id ? route('portal.image', $item) : null])</span>
-                        <span class="grow small"><strong class="medium">{{ $item->title }}</strong> · version {{ $item->current_version }}<br><span class="muted xs">{{ $item->product->name }}@if($item->latestVersion?->reviewed_by_name) · approved by {{ $item->latestVersion->reviewed_by_name }}@endif</span></span>
+                        <span class="grow small"><strong class="medium">{{ $item->title }}</strong> · version {{ $item->approvedVersion->version }}<br><span class="muted xs">{{ $item->product->name }}@if($item->approvedVersion->reviewed_by_name) · approved by {{ $item->approvedVersion->reviewed_by_name }}@endif</span></span>
                         @if($item->banner_creative_id)
                             <a class="pill ghost sm" href="{{ route('portal.image', [$item, 'download' => 1]) }}">Download</a>
                         @else
-                            <details class="portal-details"><summary class="pill ghost sm">Read</summary><div class="client-preview col">@include('content.preview', ['item' => $item, 'body' => $item->latestVersion?->body ?? []])</div></details>
+                            <details class="portal-details"><summary class="pill ghost sm">Read</summary><div class="client-preview col">@include('content.preview', ['item' => $item, 'body' => $item->approvedVersion->body ?? []])</div></details>
                         @endif
                     </div>
                 @empty

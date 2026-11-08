@@ -162,6 +162,23 @@ class RolesAndClientPortalTest extends TestCase
         $this->assertTrue($owner->notifications()->where('data->event', 'changes_requested')->exists());
     }
 
+    public function test_an_approved_deliverable_stays_in_the_portal_while_it_is_revised(): void
+    {
+        [$owner, $workspace, $north] = $this->workspace();
+        $item = $this->inReview($north, $owner);
+        $library = app(ContentLibrary::class);
+        $library->approve($item->latestVersion, $owner);
+        $client = $this->member($workspace, 'client', $north->product->brand_id);
+
+        $draft = $library->revise($item->fresh(), $owner);
+        $library->saveDraft($draft, ['value_proposition' => 'Unreviewed team wording.']);
+
+        Livewire::actingAs($client)->test(ClientPortal::class)
+            ->assertViewHas('approved', fn ($approved) => $approved->pluck('id')->all() === [$item->id])
+            ->assertSee($item->title.'</strong> · version 1', false)
+            ->assertDontSee('Unreviewed team wording.');
+    }
+
     public function test_a_client_cannot_decide_on_another_brands_item(): void
     {
         [$owner, $workspace, $north, $kettle] = $this->workspace();

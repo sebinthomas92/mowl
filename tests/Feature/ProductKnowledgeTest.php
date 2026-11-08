@@ -40,7 +40,7 @@ class ProductKnowledgeTest extends TestCase
         $knowledge = app(ProductKnowledge::class);
         $knowledge->facts($product);
 
-        $conflicts = $knowledge->syncFromSource($product, $this->snapshot($product, ['name' => 'Desk Lamp', 'price' => '64.00', 'currency' => 'USD']));
+        $conflicts = $knowledge->syncFromSource($product, $this->snapshot($product, ['name' => 'Desk Lamp', 'price' => '64.00', 'currency' => 'USD', 'description' => 'A warm desk lamp.', 'availability' => 'https://schema.org/InStock']));
 
         $this->assertSame(['price'], $conflicts);
         $price = $product->facts()->where('key', 'price')->first();
@@ -87,7 +87,7 @@ class ProductKnowledgeTest extends TestCase
     {
         [$owner, , $product] = $this->fixture();
         app(ProductKnowledge::class)->facts($product);
-        app(ProductKnowledge::class)->syncFromSource($product, $this->snapshot($product, ['name' => 'Desk Lamp', 'price' => '70']));
+        app(ProductKnowledge::class)->syncFromSource($product, $this->snapshot($product, ['name' => 'Desk Lamp', 'price' => '70', 'description' => 'A warm desk lamp.', 'availability' => 'https://schema.org/InStock']));
 
         $hub = Livewire::actingAs($owner)->test(ProductHub::class, ['product' => $product])
             ->set('tab', 'knowledge')
@@ -161,7 +161,7 @@ class ProductKnowledgeTest extends TestCase
         [$owner, , $product] = $this->fixture();
         $this->mock(ProductPageFetcher::class)->shouldReceive('fetch')->once()->with('https://example.com/lamp')->andReturn([
             'url' => 'https://example.com/lamp', 'content_hash' => hash('sha256', 'v2'), 'content' => 'New page',
-            'product_truth' => ['name' => 'Desk Lamp', 'price' => '59', 'currency' => 'USD', 'availability' => 'https://schema.org/InStock'],
+            'product_truth' => ['name' => 'Desk Lamp', 'price' => '59', 'currency' => 'USD', 'description' => 'A warm desk lamp.', 'availability' => 'https://schema.org/InStock'],
         ]);
 
         Livewire::actingAs($owner)->test(ProductHub::class, ['product' => $product])
@@ -233,6 +233,59 @@ class ProductKnowledgeTest extends TestCase
             'url' => 'https://example.com/lamp', 'content_hash' => hash('sha256', json_encode($truth)),
             'status' => 'ready', 'extracted_content' => 'Page', 'extracted_truth' => $truth,
         ]);
+    }
+
+    public function test_a_currency_change_alone_is_a_conflict(): void
+    {
+        [, , $product] = $this->fixture();
+        $knowledge = app(ProductKnowledge::class);
+        $knowledge->facts($product);
+        $product->facts()->where('key', 'price')->update(['confirmed_value' => 'USD 54']);
+
+        $conflicts = $knowledge->syncFromSource($product, $this->snapshot($product, ['name' => 'Desk Lamp', 'price' => '54', 'currency' => 'EUR', 'description' => 'A warm desk lamp.', 'availability' => 'https://schema.org/InStock']));
+
+        $this->assertSame(['price'], $conflicts);
+    }
+
+    public function test_a_fact_the_page_stops_showing_is_cleared_and_raised(): void
+    {
+        [, , $product] = $this->fixture();
+        $knowledge = app(ProductKnowledge::class);
+        $knowledge->facts($product);
+
+        $conflicts = $knowledge->syncFromSource($product, $this->snapshot($product, ['name' => 'Desk Lamp', 'price' => '54', 'currency' => 'USD', 'description' => 'A warm desk lamp.']));
+
+        $this->assertSame(['availability'], $conflicts);
+        $availability = $product->facts()->where('key', 'availability')->first();
+        $this->assertNull($availability->source_value);
+        $this->assertSame('In Stock', $availability->confirmed_value);
+        $this->assertSame('conflict', $availability->status);
+
+        // Nothing changes on the next check while the page still shows nothing.
+        $this->assertSame([], $knowledge->syncFromSource($product, $this->snapshot($product, ['name' => 'Desk Lamp', 'price' => '54', 'currency' => 'USD', 'description' => 'A warm desk lamp.', 'x' => 1])));
+    }
+
+    public function test_restoring_a_fact_whose_source_changed_while_excluded_is_a_conflict(): void
+    {
+        [, , $product] = $this->fixture();
+        $knowledge = app(ProductKnowledge::class);
+        $knowledge->facts($product);
+        $price = $product->facts()->where('key', 'price')->first();
+        $knowledge->exclude($price);
+
+        $knowledge->syncFromSource($product, $this->snapshot($product, ['name' => 'Desk Lamp', 'price' => '64', 'currency' => 'USD', 'description' => 'A warm desk lamp.', 'availability' => 'https://schema.org/InStock']));
+        $knowledge->restore($price->fresh());
+
+        $this->assertSame('conflict', $price->fresh()->status);
+        $this->assertSame('$54.00', $price->fresh()->confirmed_value);
+    }
+
+    public function test_sourced_values_are_trimmed_to_the_fact_limits(): void
+    {
+        $values = app(ProductKnowledge::class)->sourceValues(['name' => str_repeat('n', 300), 'description' => str_repeat('d', 2000)]);
+
+        $this->assertSame(160, mb_strlen($values['name']));
+        $this->assertSame(1000, mb_strlen($values['description']));
     }
 
     public function test_schema_org_availability_reads_as_plain_words(): void

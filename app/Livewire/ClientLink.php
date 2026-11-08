@@ -100,7 +100,7 @@ class ClientLink extends Component
             'hub' => $hub,
             'canDecide' => $this->canDecide($link),
             'imageUrl' => fn (ContentItem $item) => $item->banner_creative_id ? route($imageRoute, [$this->token, $item->id]) : null,
-        ])->layout('components.layouts.app')->title($product->name.' · '.$product->brand->name);
+        ])->layout('components.layouts.app')->title(($hub['productName'] ?? $product->name).' · '.$product->brand->name);
     }
 
     private function link(): ContentClientLink|ProductHubShare

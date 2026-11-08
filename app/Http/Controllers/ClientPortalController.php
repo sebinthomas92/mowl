@@ -15,7 +15,7 @@ class ClientPortalController extends Controller
     {
         $membership = Membership::of($request->user(), $contentItem->workspace_id);
         abort_unless($membership && $membership->allowsBrand($contentItem->product?->brand_id), 404);
-        abort_unless(in_array($contentItem->status, ['review', 'approved'], true), 404);
+        abort_unless(in_array($contentItem->status, ['review', 'approved'], true) || $contentItem->approvedVersion()->exists(), 404);
         $creative = $contentItem->bannerCreative;
         abort_unless($creative && $creative->status === 'completed' && $creative->output_path, 404);
         abort_unless(Storage::disk($creative->disk)->exists($creative->output_path), 404);

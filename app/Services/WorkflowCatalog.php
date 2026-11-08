@@ -108,12 +108,16 @@ class WorkflowCatalog
         }
 
         // Bodies are loaded only for the pack being shown (see withBodies()).
-        return LibraryPrompt::query()
+        $prompts = LibraryPrompt::query()
             ->select($columns)
             ->orderBy('collection')->orderBy('pack')->orderBy('position')->orderBy('id')
             ->get()
-            ->groupBy(fn (LibraryPrompt $prompt) => $prompt->collection.'|'.$prompt->pack)
-            ->map(function (Collection $prompts) {
+            // A source pack whose entries sit in different library categories shows under each of them.
+            ->groupBy(fn (LibraryPrompt $prompt) => $prompt->collection.'|'.$prompt->pack.'|'.$prompt->category);
+        $packCategories = $prompts->keys()->countBy(fn (string $key) => Str::beforeLast($key, '|'));
+
+        return $prompts
+            ->map(function (Collection $prompts) use ($packCategories) {
                 $first = $prompts->first();
                 $collection = config('workflows.collections.'.$first->collection, []);
                 // One credit for the pack when every prompt shares it; otherwise each prompt shows its own.
@@ -146,7 +150,8 @@ class WorkflowCatalog
                 ])->values()->all();
 
                 return $this->normalize([
-                    'slug' => $first->collection.'-'.$first->pack,
+                    // The slug stays collection-pack unless the pack is split across categories.
+                    'slug' => $first->collection.'-'.$first->pack.($packCategories[$first->collection.'|'.$first->pack] > 1 ? '-'.$first->category : ''),
                     'name' => $first->pack,
                     'category' => $first->category,
                     'availability' => 'download',

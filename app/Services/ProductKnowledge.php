@@ -35,7 +35,13 @@ class ProductKnowledge
     /** Production runs migrations as a separate step; callers skip knowledge until the table exists. */
     public static function available(): bool
     {
-        return self::$available ??= Schema::hasTable('product_facts');
+        // Only a positive answer is cached: a long-lived worker that checked before the migration ran
+        // must pick the table up once it exists.
+        if (self::$available !== true) {
+            self::$available = Schema::hasTable('product_facts');
+        }
+
+        return self::$available;
     }
 
     /** Every fact for the product, in display order, creating missing rows from the latest source. */
@@ -66,6 +72,9 @@ class ProductKnowledge
         $conflicts = [];
 
         DB::transaction(function () use ($product, $snapshot, $values, $workspaceId, &$conflicts) {
+            // Locking the product serialises first-time creation: row locks on facts can't cover rows that
+            // don't exist yet, so two first renders would otherwise both insert and hit the unique key.
+            Product::whereKey($product->getKey())->lockForUpdate()->first();
             $existing = $product->facts()->lockForUpdate()->get()->keyBy('key');
 
             foreach (self::FACTS as $key => $definition) {
@@ -97,6 +106,15 @@ class ProductKnowledge
                 }
 
                 $updates = ['source_snapshot_id' => $snapshot->id, 'source_checked_at' => now()];
+                if ($new === null && $fact->source_value !== null) {
+                    // The page stopped showing this fact. "Source says" must not keep the old value, and a
+                    // confirmed value nobody can check against the page any more needs a decision.
+                    $updates['source_value'] = null;
+                    if ($fact->status !== 'excluded' && $fact->confirmed_value !== null) {
+                        $updates['status'] = 'conflict';
+                        $conflicts[] = $key;
+                    }
+                }
                 if ($new !== null) {
                     $updates['source_value'] = $new;
                     if ($fact->status !== 'excluded') {
@@ -154,7 +172,14 @@ class ProductKnowledge
     public function restore(ProductFact $fact): void
     {
         abort_unless($fact->status === 'excluded', 422);
-        $fact->update(['status' => $fact->confirmed_value === null ? 'missing' : 'ok']);
+        // The source may have changed while the fact was excluded, since sync skips conflict checks for
+        // excluded facts. A restored value that no longer matches the page comes back as a conflict.
+        $status = match (true) {
+            $fact->confirmed_value === null => 'missing',
+            self::FACTS[$fact->key]['sourced'] && $fact->source_value !== null && ! $this->same($fact->source_value, $fact->confirmed_value, $fact->key) => 'conflict',
+            default => 'ok',
+        };
+        $fact->update(['status' => $status]);
     }
 
     /**
@@ -323,12 +348,20 @@ class ProductKnowledge
             $availability = self::availabilityLabel($availability);
         }
 
-        return array_filter([
+        $values = array_filter([
             'name' => $this->clean($truth['name'] ?? null),
             'price' => $this->clean($price),
             'description' => $this->clean($truth['description'] ?? null),
             'availability' => $availability,
         ], fn ($value) => $value !== null);
+
+        // Same limits as the editor and the product import, so a long page title isn't a conflict on
+        // arrival and "Accept source" can't save more than the column holds.
+        foreach ($values as $key => $value) {
+            $values[$key] = rtrim(mb_substr($value, 0, self::FACTS[$key]['max']));
+        }
+
+        return $values;
     }
 
     private function clean(mixed $value): ?string
@@ -343,15 +376,35 @@ class ProductKnowledge
 
     private function same(string $a, string $b, string $key): bool
     {
-        // "$54.00", "USD 54" and "54.00" are the same price.
+        // "$54.00", "USD 54" and "54.00" are the same price; "USD 54" and "EUR 54" are not.
         if ($key === 'price' && preg_match('/\d/', $a) && preg_match('/\d/', $b)) {
             $amount = fn (string $value) => (float) str_replace(',', '', preg_replace('/[^\d.,]/', '', $value));
+            [$currencyA, $currencyB] = [self::currency($a), self::currency($b)];
+            if ($currencyA !== null && $currencyB !== null && $currencyA !== $currencyB) {
+                return false;
+            }
 
             return abs($amount($a) - $amount($b)) < 0.005;
         }
         $normalize = fn (string $value) => mb_strtolower(preg_replace('/\s+/u', ' ', trim($value)));
 
         return $normalize($a) === $normalize($b);
+    }
+
+    /** The ISO code a price names with a code or a symbol, or null when it names none. */
+    private static function currency(string $price): ?string
+    {
+        if (preg_match('/\b([A-Z]{3})\b/', strtoupper($price), $match) && ! in_array($match[1], ['MRP', 'RRP'], true)) {
+            return $match[1];
+        }
+        // "$" and "¥" name several currencies, so they don't count as a currency on their own.
+        foreach (['₹' => 'INR', 'Rs' => 'INR', '€' => 'EUR', '£' => 'GBP'] as $symbol => $code) {
+            if (str_contains($price, $symbol)) {
+                return $code;
+            }
+        }
+
+        return null;
     }
 
     /** "https://schema.org/InStock" reads as "In Stock"; plain wording is kept as it is. */
