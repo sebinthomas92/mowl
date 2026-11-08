@@ -102,30 +102,82 @@
                 @php
                     $job = $pack->latestGenerationJob;
                 @endphp
-                <section class="processing-page" wire:poll.3s aria-live="polite"
+                <section class="lib-page run-page" wire:poll.3s aria-live="polite"
                     @if($processJobUrl && $job && in_array($job->status, ['queued', 'retrying']))
                         wire:key="process-job-{{ $job->id }}-{{ $job->attempts }}"
                         x-data
                         x-init="fetch(@js($processJobUrl), { method: 'POST', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content, 'Accept': 'application/json' } }).finally(() => $wire.$refresh())"
                     @endif>
-                    <div class="processing-breadcrumbs"><a href="{{ route('campaign-packs.index') }}">Launch packs</a><span>›</span><strong>{{ $pack->product->name }}</strong></div>
-                    <div class="processing-console">
-                        <div class="processing-mark"><span>{{ strtoupper(substr($pack->product->name, 0, 2)) }}</span></div>
-                        <p class="kicker">CAMPAIGN JOB / {{ str_pad($job?->id ?? 0, 4, '0', STR_PAD_LEFT) }}</p>
-                        <h1>{{ $pack->status === 'failed' ? 'Writing the launch pack failed.' : 'Writing your launch pack.' }}</h1>
-                        <p>{{ $pack->status === 'failed' ? 'The job exhausted its automatic retries. Your credits were returned.' : 'We read the product page again, write each output, then check every claim against your confirmed facts. This usually takes about two minutes.' }}</p>
-                        <div class="processing-steps">
-                            @foreach(['fetching_source' => 'Read the product page', 'generating_pack' => 'Write the outputs', 'complete' => 'Check every claim'] as $phase => $label)
-                                <div @class(['active' => $job?->phase === $phase, 'done' => array_search($phase, array_keys(['fetching_source'=>1,'generating_pack'=>1,'complete'=>1])) < array_search($job?->phase, array_keys(['fetching_source'=>1,'generating_pack'=>1,'complete'=>1]))])><i></i><span>{{ $label }}</span></div>
-                            @endforeach
+                    @php
+                        $phases = ['fetching_source' => ['Read the product page', 'We fetch the page again so nothing is written from stale facts.'], 'generating_pack' => ['Write the outputs', 'Positioning, ad angles, video scripts and channel copy.'], 'complete' => ['Check every claim', 'Each claim is matched to the page or your confirmed Knowledge.']];
+                        $order = array_keys($phases);
+                        // A failed or waiting job loses its phase, so the source snapshot tells which step stopped.
+                        $stepPhase = $job?->phase;
+                        if (in_array($stepPhase, ['failed', 'retry_wait'], true)) {
+                            $stepPhase = match ($job->sourceSnapshot?->status) {
+                                'failed' => 'fetching_source',
+                                'ready' => 'generating_pack',
+                                default => null,
+                            };
+                        }
+                        $at = array_search($stepPhase, $order, true);
+                        $failed = $pack->status === 'failed';
+                        $jobStatus = $job?->status ?? $pack->status;
+                        [$runTone, $runLabel] = match (true) {
+                            $failed => ['bad', 'Failed'],
+                            $jobStatus === 'retrying' => ['rev', 'Retrying'],
+                            $jobStatus === 'queued' => ['', 'Queued'],
+                            default => ['rev', 'Running'],
+                        };
+                    @endphp
+                    <div class="row run-crumb"><a class="pill ghost sm" href="{{ route('products.show', $pack->product) }}" wire:navigate><i class="ti ti-arrow-left" aria-hidden="true"></i> {{ $pack->product->name }}</a><span class="muted small">Launch packs · run {{ $job?->id ?? '—' }}</span></div>
+                    <div class="pagehead">
+                        <div>
+                            <div class="eyebrow">Generation run · campaign job {{ str_pad($job?->id ?? 0, 4, '0', STR_PAD_LEFT) }}</div>
+                            <h1 class="display">{{ $failed ? 'Writing the launch pack failed.' : 'Writing your launch pack.' }}</h1>
+                            <div class="row run-meta"><span class="tag {{ $runTone }}"><span class="dot"></span>{{ $runLabel }}</span><span class="muted small">{{ $failed ? 'The job used up its automatic retries. Your credits were returned.' : 'Usually about two minutes. You can leave; the Inbox tells you when it is ready.' }}</span></div>
                         </div>
-                        <div class="job-metadata"><span>Status <strong>{{ str($job?->status ?? $pack->status)->replace('_', ' ')->title() }}</strong></span><span>Mode <strong>{{ ucfirst($pack->analysis_mode) }}</strong></span><span>Credits <strong>{{ $pack->credit_cost }}</strong></span><span>Attempt <strong>{{ $job?->attempts ?? 0 }} / 3</strong></span></div>
-                        @if($pack->status === 'failed')
-                            <div class="job-error"><strong>{{ $job?->error_code ?: 'Generation failed' }}</strong><p>{{ $job?->error_message ?: 'The source could not be processed.' }}</p></div>
-                            <button type="button" class="primary-button retry-button" wire:click="retryGeneration">Retry generation <span>↻</span></button>
-                        @else
-                            <p class="polling-note">This page updates by itself. You can leave and come back; the pack will be waiting under Launch packs.</p>
-                        @endif
+                    </div>
+                    <div class="run-layout">
+                        <section class="card col run-steps" aria-label="Progress">
+                            <div class="row"><span class="small">Progress</span><span class="sp"></span><span class="muted xs">Attempt {{ $job?->attempts ?? 0 }} of 3</span></div>
+                            @php $share = $failed ? 100 : ($at === false ? 5 : (int) round(($at + ($stepPhase === 'complete' ? 1 : .5)) / count($order) * 100)); @endphp
+                            <div class="bar" role="progressbar" aria-label="Run progress" aria-valuenow="{{ $share }}" aria-valuemin="0" aria-valuemax="100"><span style="width:{{ $share }}%"></span></div>
+                            <ol class="timeline">
+                                @foreach($phases as $phase => [$label, $hint])
+                                    @php
+                                        $index = array_search($phase, $order, true);
+                                        $dot = match (true) {
+                                            $failed && $at !== false && $index === $at => 'bad',
+                                            $at !== false && $index < $at => 'ok',
+                                            ! $failed && $at !== false && $index === $at => 'cur',
+                                            ! $failed && $at === false && $index === 0 => 'cur',
+                                            default => '',
+                                        };
+                                    @endphp
+                                    <li class="tstep"><span class="tdot {{ $dot }}" aria-hidden="true"></span><span class="grow"><strong class="medium">{{ $label }}</strong><br><span class="muted xs">{{ $hint }}</span></span>@if($dot === 'ok')<span class="sr-only">done</span>@elseif($dot === 'cur')<span class="sr-only">in progress</span>@endif</li>
+                                @endforeach
+                            </ol>
+                            @if($failed)
+                                <div class="banner bad small" role="alert"><i class="ti ti-alert-triangle" aria-hidden="true"></i><span><strong>{{ $job?->error_code ?: 'Generation failed' }}.</strong> {{ $job?->error_message ?: 'The source could not be processed.' }}</span></div>
+                            @endif
+                        </section>
+                        <aside class="card col run-side">
+                            <span class="eyebrow">This run</span>
+                            <div>
+                                <div class="kv"><span>Product</span><span>{{ $pack->product->name }}</span></div>
+                                <div class="kv"><span>Depth</span><span>{{ in_array($pack->analysis_mode, ['deep', 'premium'], true) ? 'Deep' : 'Standard' }}</span></div>
+                                <div class="kv"><span>Estimated usage</span><span class="num">{{ trans_choice(':count credit|:count credits', (int) $pack->credit_cost) }}</span></div>
+                                <div class="kv"><span>Status</span><span>{{ str($jobStatus)->replace('_', ' ')->title() }}</span></div>
+                            </div>
+                            @if($failed)
+                                @error('sourceUrl')<div class="banner warn small" role="alert"><span>{{ $message }}</span></div>@enderror
+                                <button type="button" class="pill pri block" wire:click="retryGeneration" wire:loading.attr="disabled" wire:target="retryGeneration"><i class="ti ti-refresh" aria-hidden="true"></i> Retry generation</button>
+                                <span class="muted xs">Retrying charges the estimate again and returns it if this run fails too.</span>
+                            @else
+                                <span class="muted xs">This page updates by itself. The pack will be waiting under the product's Launch packs.</span>
+                            @endif
+                        </aside>
                     </div>
                 </section>
             @else

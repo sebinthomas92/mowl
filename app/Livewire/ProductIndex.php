@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Services\ContentLibrary;
 use App\Services\ProductKnowledge;
 use App\Support\Membership;
+use Illuminate\Support\Carbon;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -14,17 +15,78 @@ class ProductIndex extends Component
 {
     use InteractsWithWorkspace;
 
+    /** Products whose source page was last read longer ago than this count as stale. */
+    public const STALE_DAYS = 14;
+
     #[Url]
     public ?int $brand = null;
+
+    #[Url]
+    public string $q = '';
+
+    /** active, attention or archived */
+    #[Url]
+    public string $show = 'active';
+
+    /** list or grid */
+    #[Url]
+    public string $view = 'list';
+
+    public ?string $notice = null;
+
+    public function archive(int $id): void
+    {
+        $product = $this->manageableProduct($id);
+        $product->forceFill(['archived_at' => now()])->save();
+        $this->notice = $product->name.' is archived. Its facts, launch packs and approvals are kept.';
+    }
+
+    public function restore(int $id): void
+    {
+        $product = $this->manageableProduct($id);
+        $product->forceFill(['archived_at' => null])->save();
+        $this->notice = $product->name.' is back in your products.';
+    }
+
+    public function clearFilters(): void
+    {
+        $this->reset('q', 'brand', 'show');
+    }
+
+    private function manageableProduct(int $id): Product
+    {
+        abort_unless(Product::archiveAvailable(), 404);
+        $workspace = $this->currentWorkspace();
+        $membership = Membership::of(auth()->user(), $workspace);
+        abort_unless($membership?->canCreate(), 403);
+        $product = $membership->scopeBrands(Product::query())
+            ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
+            ->find($id);
+        abort_unless($product, 404);
+
+        return $product;
+    }
 
     public function render()
     {
         $workspace = $this->currentWorkspace();
         $membership = Membership::of(auth()->user(), $workspace);
-        $products = $membership->scopeBrands(Product::query())
+        $archiveAvailable = Product::archiveAvailable();
+        $show = in_array($this->show, ['active', 'attention', 'archived'], true) ? $this->show : 'active';
+        if ($show === 'archived' && ! $archiveAvailable) {
+            $show = 'active';
+        }
+        $search = trim(mb_strtolower($this->q));
+        $all = $membership->scopeBrands(Product::query())
             ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
             ->when($this->brand, fn ($query) => $query->where('brand_id', $this->brand))
-            ->with(['brand', 'campaignPacks.versions:id,campaign_pack_id,review_status', 'hubShares' => fn ($query) => $query->whereNull('revoked_at')])
+            ->with([
+                'brand', 'campaignPacks.versions:id,campaign_pack_id,review_status',
+                'hubShares' => fn ($query) => $query->whereNull('revoked_at'),
+                'mediaAssets' => fn ($query) => $query->where('mime_type', 'like', 'image/%')->where('status', '!=', 'failed')->orderBy('id'),
+            ])
+            ->withMax(['sourceSnapshots as source_created_at' => fn ($query) => $query->where('status', 'ready')], 'created_at')
+            ->withMax(['sourceSnapshots as source_fetched_at' => fn ($query) => $query->where('status', 'ready')], 'fetched_at')
             ->withCount('campaignPacks')
             ->when(ContentLibrary::available(), fn ($query) => $query->withCount([
                 'contentItems as in_review_count' => fn ($items) => $items->where('status', 'review'),
@@ -34,15 +96,51 @@ class ProductIndex extends Component
                 'facts as conflicts_count' => fn ($facts) => $facts->where('status', 'conflict'),
             ]))
             ->latest()
-            ->get();
+            ->get()
+            ->each(fn (Product $product) => $product->setAttribute('source_checked_at', collect([$product->source_fetched_at, $product->source_created_at])->filter()->max()));
+
+        $archivedCount = $archiveAvailable ? $all->filter->isArchived()->count() : 0;
+        $active = $all->reject->isArchived()->values();
+        $attentionCount = $active->filter(fn (Product $product) => $this->needsAttention($product))->count();
+        $products = match ($show) {
+            'archived' => $all->filter->isArchived()->values(),
+            'attention' => $active->filter(fn (Product $product) => $this->needsAttention($product))->values(),
+            default => $active,
+        };
+        if ($search !== '') {
+            $products = $products->filter(fn (Product $product) => str_contains(mb_strtolower($product->name.' '.$product->brand->name), $search))->values();
+        }
+        $filtered = $search !== '' || $show !== 'active';
+        $view = $this->view === 'grid' ? 'grid' : 'list';
 
         $brands = $membership->scopeBrands($workspace->brands()->getQuery(), 'id')->orderBy('name')->get(['id', 'name']);
         $canCreate = $membership->canCreate();
 
-        $gettingStarted = $this->gettingStarted($products, $canCreate, $workspace->isAgency());
+        $gettingStarted = $filtered ? null : $this->gettingStarted($active, $canCreate, $workspace->isAgency());
 
-        return view('livewire.product-index', compact('workspace', 'products', 'brands', 'canCreate', 'gettingStarted'))
+        return view('livewire.product-index', compact(
+            'workspace', 'products', 'brands', 'canCreate', 'gettingStarted', 'archiveAvailable', 'show', 'view',
+            'archivedCount', 'attentionCount', 'filtered', 'active'
+        ))
             ->layout('components.layouts.app')->title('Products');
+    }
+
+    /** Something on the product is waiting for the team: changed facts, failed or unreviewed work, or a stale source. */
+    public function needsAttention(Product $product): bool
+    {
+        $latest = $product->campaignPacks->sortByDesc('id')->first();
+
+        return ($product->conflicts_count ?? 0) > 0
+            || ($product->changes_count ?? 0) > 0
+            || ($product->in_review_count ?? 0) > 0
+            || $latest?->status === 'failed'
+            || $this->isStale($product);
+    }
+
+    public function isStale(Product $product): bool
+    {
+        return $product->source_checked_at !== null
+            && Carbon::parse($product->source_checked_at)->lt(now()->subDays(self::STALE_DAYS));
     }
 
     /**

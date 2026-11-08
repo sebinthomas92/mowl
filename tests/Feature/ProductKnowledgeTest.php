@@ -235,6 +235,26 @@ class ProductKnowledgeTest extends TestCase
         ]);
     }
 
+    public function test_an_audience_override_can_go_back_to_the_brand_default(): void
+    {
+        [$owner, , $product] = $this->fixture();
+        $product->brand->update(['default_audience' => 'Home office workers']);
+        $knowledge = app(ProductKnowledge::class);
+        $knowledge->facts($product);
+        $knowledge->confirm($product->facts()->where('key', 'audience')->first(), 'Students', $owner);
+
+        Livewire::actingAs($owner)->test(ProductHub::class, ['product' => $product])
+            ->set('tab', 'knowledge')
+            ->assertSee('Use brand default')
+            ->call('useBrandDefault')
+            ->assertHasNoErrors();
+
+        $audience = $product->facts()->where('key', 'audience')->first();
+        $this->assertSame('missing', $audience->status);
+        $this->assertNull($audience->confirmed_value);
+        $this->assertSame('Home office workers', $knowledge->inheritedAudience($product->fresh(), $audience));
+    }
+
     public function test_a_currency_change_alone_is_a_conflict(): void
     {
         [, , $product] = $this->fixture();

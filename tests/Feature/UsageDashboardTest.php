@@ -34,6 +34,22 @@ class UsageDashboardTest extends TestCase
             ->assertDontSee('Hidden allocation');
     }
 
+    public function test_each_run_shows_its_estimate_against_the_credits_it_actually_used(): void
+    {
+        [$user, $workspace] = $this->workspaceUser('Runs Agency');
+        $this->job($workspace, 0.12, false);
+        $job = $workspace->generationJobs()->latest('id')->first();
+        $job->update(['status' => 'failed', 'credit_cost' => 3, 'error_message' => 'The product page timed out.']);
+        $workspace->credits()->create(['amount' => -3, 'event' => 'pack_generation', 'description' => 'Deep pack', 'campaign_generation_job_id' => $job->id]);
+        $workspace->credits()->create(['amount' => 3, 'event' => 'generation_refund', 'description' => 'Refund', 'campaign_generation_job_id' => $job->id]);
+
+        Livewire::actingAs($user)->test(UsageIndex::class)
+            ->assertSee('Runs: estimate against actual')
+            ->assertSee('3 credits')
+            ->assertSee('0 credits')
+            ->assertSee('The product page timed out.');
+    }
+
     public function test_usage_dashboard_requires_authentication(): void
     {
         $this->get('/usage')->assertRedirect('/login');
