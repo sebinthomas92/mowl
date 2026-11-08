@@ -61,8 +61,9 @@ class AccountSettings extends Component
                 ->where('id', '!=', session()->getId())
                 ->delete();
         }
-        // Destroy the old session too, so a copied cookie from before the change stops working.
-        session()->regenerate(true);
+        // New session ID and the old one destroyed, so a copied cookie stops working. migrate() keeps the
+        // CSRF token, so forms already on this page (Livewire, sign out) keep working without a reload.
+        session()->migrate(true);
 
         $this->reset('current_password', 'password', 'password_confirmation');
         session()->flash('status', 'Password changed. Other devices have been signed out.');

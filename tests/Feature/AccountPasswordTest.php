@@ -110,6 +110,9 @@ class AccountPasswordTest extends TestCase
             ['id' => 'someone-else', 'user_id' => $other->id, 'payload' => '', 'last_activity' => time()],
         ]);
         $oldRemember = $user->remember_token;
+        $this->actingAs($user);
+        $oldSessionId = session()->getId();
+        $csrfToken = session()->token();
 
         Livewire::actingAs($user)->test(AccountSettings::class)
             ->set('current_password', 'old-password')
@@ -123,6 +126,8 @@ class AccountPasswordTest extends TestCase
         $user->refresh();
         $this->assertTrue(Hash::check('brand-new-password', $user->password));
         $this->assertNotSame($oldRemember, $user->remember_token);
+        $this->assertNotSame($oldSessionId, session()->getId());
+        $this->assertSame($csrfToken, session()->token());
         $this->assertDatabaseMissing('sessions', ['id' => 'other-device']);
         $this->assertDatabaseHas('sessions', ['id' => 'someone-else']);
     }
