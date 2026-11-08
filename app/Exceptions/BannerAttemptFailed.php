@@ -11,7 +11,10 @@ use RuntimeException;
  */
 final class BannerAttemptFailed extends RuntimeException
 {
-    public function __construct(public readonly string $errorCode, string $message, public readonly float $spentCost, public readonly ?string $rejectedImage = null)
+    /**
+     * @param  array{0: int, 1: int, 2: int}  $tokens  image-model input, output text and output image tokens already spent
+     */
+    public function __construct(public readonly string $errorCode, string $message, public readonly float $spentCost, public readonly ?string $rejectedImage = null, public readonly array $tokens = [0, 0, 0])
     {
         parent::__construct($message);
     }

@@ -143,7 +143,7 @@ class BillingCheckout
             throw ValidationException::withMessages(['billing' => 'Start the plan before buying extra credits.']);
         }
 
-        $metadata = ['workspace_id' => (string) $workspace->id, 'kind' => 'credits', 'pack' => $packKey, 'credits' => (string) $pack['credits']];
+        $metadata = ['workspace_id' => (string) $workspace->id, 'kind' => 'credits', 'pack' => $packKey, 'credits' => (string) $pack['credits'], 'amount' => (string) $pack['amount']];
 
         return $this->checkoutUrl($workspace, $owner, [
             'mode' => 'payment',

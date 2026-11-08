@@ -95,9 +95,10 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
                 'content_hash' => hash('sha256', $final),
                 'provider' => $result->provider,
                 'model' => $result->model,
-                'input_tokens' => $result->inputTokens,
-                'output_text_tokens' => $result->outputTextTokens,
-                'output_image_tokens' => $result->outputImageTokens,
+                // Rejected earlier attempts already added their tokens, like their spend.
+                'input_tokens' => (int) $creative->input_tokens + $result->inputTokens,
+                'output_text_tokens' => (int) $creative->output_text_tokens + $result->outputTextTokens,
+                'output_image_tokens' => (int) $creative->output_image_tokens + $result->outputImageTokens,
                 'estimated_cost' => $cost,
                 'provider_request_id' => $result->providerRequestId,
                 'provider_latency_ms' => $result->providerLatencyMs,
@@ -112,9 +113,13 @@ class GenerateBannerCreative implements ShouldBeUnique, ShouldQueue
                 'metadata' => ['campaign_pack_id' => $creative->campaign_pack_id, 'provider' => $result->provider, 'estimated_cost' => $cost],
             ]);
         } catch (Throwable $exception) {
+            $tokens = $exception instanceof BannerAttemptFailed ? $exception->tokens : [0, 0, 0];
             $creative->update([
                 'status' => 'retrying',
                 'estimated_cost' => round((float) $creative->estimated_cost + ($exception instanceof BannerAttemptFailed ? $exception->spentCost : 0.0), 6),
+                'input_tokens' => (int) $creative->input_tokens + $tokens[0],
+                'output_text_tokens' => (int) $creative->output_text_tokens + $tokens[1],
+                'output_image_tokens' => (int) $creative->output_image_tokens + $tokens[2],
                 'error_code' => $exception instanceof VertexAIResponseException || $exception instanceof BannerAttemptFailed ? $exception->errorCode : class_basename($exception),
                 'error_message' => mb_substr($exception->getMessage().$this->keepRejected($creative, $exception), 0, 2000),
             ]);
