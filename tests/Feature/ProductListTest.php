@@ -40,7 +40,8 @@ class ProductListTest extends TestCase
         $stale = $brand->products()->create(['name' => 'Old Lamp']);
         $fresh = $brand->products()->create(['name' => 'New Lamp']);
         $this->snapshot($stale, now()->subDays(30));
-        $this->snapshot($fresh, now()->subDay());
+        $this->snapshot($fresh, now()->subDays(40));
+        $fresh->sourceSnapshots()->first()->forceFill(['fetched_at' => now()->subDay()])->save();
 
         Livewire::actingAs($owner)->test(ProductIndex::class)
             ->assertSee('Stale')

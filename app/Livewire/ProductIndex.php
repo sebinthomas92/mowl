@@ -85,7 +85,8 @@ class ProductIndex extends Component
                 'hubShares' => fn ($query) => $query->whereNull('revoked_at'),
                 'mediaAssets' => fn ($query) => $query->where('mime_type', 'like', 'image/%')->where('status', '!=', 'failed')->orderBy('id'),
             ])
-            ->withMax(['sourceSnapshots as source_checked_at' => fn ($query) => $query->where('status', 'ready')], 'created_at')
+            ->withMax(['sourceSnapshots as source_created_at' => fn ($query) => $query->where('status', 'ready')], 'created_at')
+            ->withMax(['sourceSnapshots as source_fetched_at' => fn ($query) => $query->where('status', 'ready')], 'fetched_at')
             ->withCount('campaignPacks')
             ->when(ContentLibrary::available(), fn ($query) => $query->withCount([
                 'contentItems as in_review_count' => fn ($items) => $items->where('status', 'review'),
@@ -95,7 +96,8 @@ class ProductIndex extends Component
                 'facts as conflicts_count' => fn ($facts) => $facts->where('status', 'conflict'),
             ]))
             ->latest()
-            ->get();
+            ->get()
+            ->each(fn (Product $product) => $product->setAttribute('source_checked_at', collect([$product->source_fetched_at, $product->source_created_at])->filter()->max()));
 
         $archivedCount = $archiveAvailable ? $all->filter->isArchived()->count() : 0;
         $active = $all->reject->isArchived()->values();
