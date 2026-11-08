@@ -168,6 +168,16 @@ class ProductHub extends Component
         $this->auditFact('product_fact_restored', $fact);
     }
 
+    /** Drop the product's own audience so it inherits the brand's default again. */
+    public function useBrandDefault(ProductKnowledge $knowledge): void
+    {
+        $fact = $this->fact('audience');
+        abort_unless($knowledge->brandProfile($this->product)['default_audience'] ?? null, 422);
+        $before = $fact->confirmed_value;
+        $knowledge->confirm($fact, '', auth()->user());
+        $this->auditFact('product_fact_brand_default', $fact, ['before' => $before]);
+    }
+
     public function refreshSource(ProductPageFetcher $fetcher, ProductKnowledge $knowledge): void
     {
         $this->authorizeManager();

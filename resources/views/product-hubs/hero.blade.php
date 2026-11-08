@@ -8,6 +8,7 @@
     $heroMembership = \App\Support\Membership::of(auth()->user(), $workspace);
     $siblings = $heroMembership->scopeBrands(\App\Models\Product::query())
         ->whereHas('brand', fn ($query) => $query->where('workspace_id', $workspace->id))
+        ->when(\App\Models\Product::archiveAvailable(), fn ($query) => $query->where(fn ($inner) => $inner->whereNull('archived_at')->orWhere('id', $product->id)))
         ->with('brand')->orderBy('name')->limit(30)->get();
 @endphp
 <section class="hero">
@@ -36,6 +37,7 @@
                 @endif
             </div>
             <div class="tags">
+                @if($product->isArchived())<span class="tag"><span class="dot"></span>Archived · restore it from Products</span>@endif
                 @if($checkedAt)
                     <span @class(['tag', 'warn' => $stale, 'ok' => ! $stale])><span class="dot"></span>Source checked {{ $checkedAt->diffForHumans() }}</span>
                 @else

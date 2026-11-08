@@ -80,6 +80,9 @@
                                         @default
                                             <button type="button" class="pill ghost sm" wire:click="editFact('{{ $item->key }}')">Edit</button>
                                     @endswitch
+                                    @if($overrides)
+                                        <button type="button" class="pill ghost sm" wire:click="useBrandDefault" wire:confirm="Use the {{ $product->brand->name }} audience for this product instead?">Use brand default</button>
+                                    @endif
                                     @if(! in_array($item->status, ['excluded', 'missing']) && $item->key !== 'name')
                                         <button type="button" class="iconbtn flat" wire:click="excludeFact('{{ $item->key }}')" aria-label="Exclude {{ strtolower($def['label']) }} from generated content" title="Exclude from generated content"><i class="ti ti-eye-off" aria-hidden="true"></i></button>
                                     @endif

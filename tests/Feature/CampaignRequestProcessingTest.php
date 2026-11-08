@@ -42,7 +42,7 @@ class CampaignRequestProcessingTest extends TestCase
             ->test(CampaignWorkspace::class, ['pack' => $job->campaignPack])
             ->assertOk()
             ->assertSee('Writing your launch pack.')
-            ->assertSee('CAMPAIGN JOB');
+            ->assertSee('campaign job');
     }
 
     public function test_a_job_can_finish_when_the_review_status_column_is_not_migrated(): void

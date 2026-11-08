@@ -9,6 +9,7 @@
 @import './campaigns.css';
 @import './workflows.css';
 @import './billing.css';
+@import './settings.css';
 @import './client-hub.css';
 @import '@tabler/icons-webfont/dist/tabler-icons.min.css';
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';

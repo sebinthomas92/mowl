@@ -6,12 +6,31 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
 
 class Product extends Model
 {
     protected $fillable = ['brand_id', 'name', 'price', 'summary'];
+
+    private static ?bool $archiveAvailable = null;
+
+    protected function casts(): array
+    {
+        return ['archived_at' => 'datetime'];
+    }
+
+    /** Production runs migrations as a separate step; archiving stays hidden until the column exists. */
+    public static function archiveAvailable(): bool
+    {
+        return self::$archiveAvailable ??= Schema::hasColumn('products', 'archived_at');
+    }
+
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
+    }
 
     public function brand(): BelongsTo
     {
