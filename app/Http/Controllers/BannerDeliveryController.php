@@ -22,6 +22,8 @@ class BannerDeliveryController extends Controller
     {
         $this->authorizeCreative($request, $pack, $bannerCreative);
         abort_unless(app(CampaignPackSafetyValidator::class)->bannerPrices($bannerCreative) === [], 404);
+        // Open the file first, so a missing file never records a download.
+        $response = $this->response($bannerCreative, true);
         $bannerCreative->batch->workspace->auditEvents()->create([
             'actor_user_id' => $request->user()->id,
             'event' => 'campaign_banner_downloaded',
@@ -30,7 +32,7 @@ class BannerDeliveryController extends Controller
             'metadata' => ['campaign_pack_id' => $pack->id, 'version' => $bannerCreative->campaignPackVersion->version],
         ]);
 
-        return $this->response($bannerCreative, true);
+        return $response;
     }
 
     private function authorizeCreative(Request $request, CampaignPack $pack, BannerCreative $creative): void

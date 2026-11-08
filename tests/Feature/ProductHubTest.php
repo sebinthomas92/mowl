@@ -158,6 +158,11 @@ class ProductHubTest extends TestCase
             ->assertHeader('X-Storage-Status', 'disk=local; driver=local; result=missing; root_exists=yes; ephemeral=no');
         $this->actingAs($owner)->get(route('campaign-banners.image', [$pack, $creative]))->assertNotFound()
             ->assertHeader('X-Storage-Status');
+        $this->actingAs($owner)->get(route('campaign-banners.download', [$pack, $creative]))->assertNotFound();
+        $this->assertSame(0, $workspace->auditEvents()->where('event', 'campaign_banner_downloaded')->count());
+        // A shared link opened by someone signed in to another workspace explains nothing either.
+        $this->actingAs(User::factory()->create())->get(route('product-hubs.shared-creative', [$share->token, $creative]))
+            ->assertNotFound()->assertHeaderMissing('X-Storage-Status');
         auth()->logout();
         $this->get(route('product-hubs.shared-creative', [$share->token, $creative]))->assertNotFound()->assertHeaderMissing('X-Storage-Status');
     }

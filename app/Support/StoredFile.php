@@ -23,6 +23,7 @@ class StoredFile
         $disk = $disk ?: (string) config('filesystems.default');
         $stream = null;
         $reason = null;
+        $detail = '';
         try {
             $storage = Storage::disk($disk);
             if (! filled($path)) {
@@ -34,12 +35,15 @@ class StoredFile
                 $reason = is_resource($stream) ? null : 'unreadable';
             }
         } catch (Throwable $exception) {
+            // Keep the full message (GCS sign-in, token exchange) in the server log; the header stays short.
+            report($exception);
+            $detail = ' message='.str_replace(["\r", "\n"], ' ', $exception->getMessage());
             $reason = 'error: '.class_basename($exception);
         }
 
         if ($reason !== null) {
             $status = self::diagnose($disk, (string) $path, $reason);
-            error_log('stored_file_unavailable '.$status.' path='.$path);
+            error_log('stored_file_unavailable '.$status.' path='.$path.$detail);
             abort(404, headers: $explain ? ['X-Storage-Status' => $status] : []);
         }
 
