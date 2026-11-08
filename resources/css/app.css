@@ -132,3 +132,4 @@ button { cursor:pointer; }
 .field.is-focus .input{box-shadow:0 0 0 2px var(--accent)}.field.is-focus label{color:var(--link)}
 
 .banner-card-body .banner-price-issue { display: block; margin-top: 4px; color: var(--bad-fg); white-space: normal; overflow: visible; line-height: 1.4; }
+.account-help{margin:-6px 0 20px;color:var(--muted);font-size:11px;line-height:1.5}.settings-card .error{display:block;margin:-12px 0 16px}.auth-status{margin:0 0 18px;padding:12px 14px;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--ok-fg);font-size:12px;line-height:1.5}.auth-forgot{display:flex;justify-content:flex-end;margin:-8px 0 18px}.auth-forgot a{color:var(--orange-deep);font-size:11px;font-weight:700}
