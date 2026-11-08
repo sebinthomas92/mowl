@@ -44,6 +44,22 @@ class AccountPasswordTest extends TestCase
         $this->actingAs($client)->get(route('account.edit'))->assertOk()->assertSee('Change password')->assertSee('Back to your work');
     }
 
+    public function test_clients_and_reviewers_can_change_their_own_password(): void
+    {
+        foreach (['client', 'reviewer'] as $role) {
+            $user = $this->member($role);
+
+            Livewire::actingAs($user)->test(AccountSettings::class)
+                ->set('current_password', 'old-password')
+                ->set('password', 'brand-new-password')
+                ->set('password_confirmation', 'brand-new-password')
+                ->call('updatePassword')
+                ->assertHasNoErrors();
+
+            $this->assertTrue(Hash::check('brand-new-password', $user->fresh()->password), $role);
+        }
+    }
+
     public function test_changing_the_password_needs_the_current_one(): void
     {
         $user = $this->member();

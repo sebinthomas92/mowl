@@ -61,7 +61,8 @@ class AccountSettings extends Component
                 ->where('id', '!=', session()->getId())
                 ->delete();
         }
-        session()->regenerate();
+        // Destroy the old session too, so a copied cookie from before the change stops working.
+        session()->regenerate(true);
 
         $this->reset('current_password', 'password', 'password_confirmation');
         session()->flash('status', 'Password changed. Other devices have been signed out.');
