@@ -91,7 +91,8 @@ class ClientPortal extends Component
             'brands' => $brands,
             'preview' => ! $membership->isClient(),
             'pending' => $items->where('status', 'review')->values(),
-            'approved' => $items->where('status', 'approved')->values(),
+            // An approved deliverable stays listed, at its approved version, while the team revises it.
+            'approved' => $items->filter(fn (ContentItem $item) => $item->approvedVersion)->values(),
             'pages' => $brand ? $this->livePages($brand) : collect(),
             'workspaces' => auth()->user()->workspaces()->orderBy('name')->get(),
             'available' => ContentLibrary::available(),
@@ -129,9 +130,10 @@ class ClientPortal extends Component
         return ContentItem::query()
             ->where('workspace_id', $brand->workspace_id)
             ->whereHas('product', fn ($query) => $query->where('brand_id', $brand->id))
-            ->whereIn('status', ['review', 'approved'])
+            ->where(fn ($query) => $query->whereIn('status', ['review', 'approved'])
+                ->orWhereHas('versions', fn ($versions) => $versions->where('status', 'approved')))
             // Clients see what clients wrote, never the team's internal notes.
-            ->with(['latestVersion', 'product', 'variationOf', 'versions.comments' => fn ($query) => $query->where('author_role', 'client')->orderBy('id')])
+            ->with(['latestVersion', 'approvedVersion', 'product', 'variationOf', 'versions.comments' => fn ($query) => $query->where('author_role', 'client')->orderBy('id')])
             ->orderBy('product_id')->orderBy('id')
             ->get();
     }

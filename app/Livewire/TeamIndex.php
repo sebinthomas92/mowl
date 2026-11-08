@@ -56,14 +56,14 @@ class TeamIndex extends Component
             return;
         }
 
-        if ($data['role'] !== 'client' && self::seatsTaken($workspace) >= config('campaigns.seat_limit')) {
-            $this->addError('email', 'All five beta seats are already assigned or reserved.');
-
-            return;
-        }
-
         $token = Str::random(48);
-        $invitation = DB::transaction(function () use ($workspace, $email, $token, $data, $brandId): WorkspaceInvitation {
+        $invitation = DB::transaction(function () use ($workspace, $email, $token, $data, $brandId): ?WorkspaceInvitation {
+            // Seat checks and the writes that take a seat run under a lock on the workspace row, so two
+            // owners acting at once can't both take the last seat.
+            self::lockSeats($workspace);
+            if ($data['role'] !== 'client' && self::seatsTaken($workspace) >= config('campaigns.seat_limit')) {
+                return null;
+            }
             $workspace->invitations()
                 ->whereRaw('LOWER(email) = ?', [$email])
                 ->whereNull('accepted_at')
@@ -78,6 +78,11 @@ class TeamIndex extends Component
                 'expires_at' => now()->addDays(7),
             ], fn ($value) => $value !== null));
         });
+        if (! $invitation) {
+            $this->addError('email', 'All five beta seats are already assigned or reserved.');
+
+            return;
+        }
 
         $this->inviteUrl = route('invitations.accept', ['token' => $token]);
         $this->reset('email');
@@ -112,17 +117,28 @@ class TeamIndex extends Component
 
             return;
         }
-        if ($member->pivot->role === 'client' && $role !== 'client' && self::seatsTaken($workspace) >= config('campaigns.seat_limit')) {
-            $this->addError("access.{$userId}.role", 'Every seat is taken. Free one before giving this client a team role.');
-
-            return;
-        }
-
         $pivot = ['role' => $role];
         if (Membership::scopesAvailable()) {
             $pivot['brand_id'] = $brandId;
         }
-        $workspace->users()->updateExistingPivot($member->id, $pivot);
+        $member = DB::transaction(function () use ($workspace, $userId, $role, $pivot) {
+            self::lockSeats($workspace);
+            // Re-read under the lock: another owner may have changed this member's role meanwhile.
+            $current = $workspace->users()->whereKey($userId)->first();
+            abort_unless($current, 404);
+            abort_if($current->pivot->role === 'owner', 422);
+            if ($current->pivot->role === 'client' && $role !== 'client' && self::seatsTaken($workspace) >= config('campaigns.seat_limit')) {
+                return null;
+            }
+            $workspace->users()->updateExistingPivot($current->id, $pivot);
+
+            return $current;
+        });
+        if (! $member) {
+            $this->addError("access.{$userId}.role", 'Every seat is taken. Free one before giving this client a team role.');
+
+            return;
+        }
         // A narrower scope takes effect in the inbox too: earlier notifications may name other brands' work.
         $narrowed = ($role === 'client' && $member->pivot->role !== 'client')
             || ($brandId !== null && $brandId !== (isset($member->pivot->brand_id) ? (int) $member->pivot->brand_id : null));
@@ -154,6 +170,12 @@ class TeamIndex extends Component
     {
         return $workspace->users()->wherePivot('role', '!=', 'client')->count()
             + $workspace->invitations()->whereNull('accepted_at')->where('expires_at', '>', now())->where('role', '!=', 'client')->count();
+    }
+
+    /** Serialises everything that takes a seat in this workspace. Call inside a transaction. */
+    public static function lockSeats(Workspace|int $workspace): void
+    {
+        Workspace::query()->whereKey($workspace instanceof Workspace ? $workspace->getKey() : $workspace)->lockForUpdate()->first();
     }
 
     private function authorizeOwner(Workspace $workspace): void
