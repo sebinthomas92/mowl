@@ -157,7 +157,7 @@
                             <span class="eyebrow">This run</span>
                             <div>
                                 <div class="kv"><span>Product</span><span>{{ $pack->product->name }}</span></div>
-                                <div class="kv"><span>Depth</span><span>{{ $pack->analysis_mode === 'premium' ? 'Deep' : 'Standard' }}</span></div>
+                                <div class="kv"><span>Depth</span><span>{{ in_array($pack->analysis_mode, ['deep', 'premium'], true) ? 'Deep' : 'Standard' }}</span></div>
                                 <div class="kv"><span>Estimated usage</span><span class="num">{{ trans_choice(':count credit|:count credits', (int) $pack->credit_cost) }}</span></div>
                                 <div class="kv"><span>Status</span><span>{{ str($jobStatus)->replace('_', ' ')->title() }}</span></div>
                             </div>

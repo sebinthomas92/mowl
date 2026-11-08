@@ -20,9 +20,9 @@ class UsageIndex extends Component
         $bannerBatchesQuery = Schema::hasTable('banner_generation_batches')
             ? $workspace->bannerGenerationBatches()
             : null;
-        $jobs = (clone $jobsQuery)->with('campaignPack.product.brand')->latest()->limit(25)->get();
+        $jobs = (clone $jobsQuery)->with('campaignPack.product.brand')->latest()->limit(30)->get();
         $bannerBatches = $bannerBatchesQuery
-            ? (clone $bannerBatchesQuery)->with('campaignPack.product.brand')->latest()->limit(25)->get()
+            ? (clone $bannerBatchesQuery)->with('campaignPack.product.brand')->latest()->limit(30)->get()
             : collect();
 
         $creditBalance = $workspace->spendableCredits();
@@ -67,7 +67,7 @@ class UsageIndex extends Component
             'pack' => $job->campaignPack,
             'what' => $job->section
                 ? 'Rewrite · '.str_replace('_', ' ', $job->section)
-                : ($job->analysis_mode === 'premium' ? 'Launch pack · deep' : 'Launch pack'),
+                : (in_array($job->analysis_mode, ['deep', 'premium'], true) ? 'Launch pack · deep' : 'Launch pack'),
             'at' => $job->created_at,
             'status' => $job->status,
             'estimate' => (int) $job->credit_cost,
