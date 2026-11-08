@@ -14,9 +14,9 @@ use App\Services\ProductHubContentAdapter;
 use App\Services\ProductHubCsvExporter;
 use App\Support\ClientHub;
 use App\Support\Membership;
+use App\Support\StoredFile;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProductHubDeliveryController extends Controller
@@ -53,12 +53,12 @@ class ProductHubDeliveryController extends Controller
 
     public function portalMedia(Request $request, int $productId, MediaAsset $mediaAsset): StreamedResponse
     {
-        return $this->mediaResponse($this->portalProduct($request, $productId), $mediaAsset);
+        return $this->mediaResponse($this->portalProduct($request, $productId), $mediaAsset, true);
     }
 
     public function portalCreative(Request $request, int $productId, BannerCreative $bannerCreative): StreamedResponse
     {
-        return $this->creativeResponse($this->portalProduct($request, $productId), $bannerCreative);
+        return $this->creativeResponse($this->portalProduct($request, $productId), $bannerCreative, true);
     }
 
     private function portalProduct(Request $request, int $productId): Product
@@ -88,7 +88,7 @@ class ProductHubDeliveryController extends Controller
     {
         $this->authorizeProduct($request, $product);
 
-        return $this->mediaResponse($product, $mediaAsset);
+        return $this->mediaResponse($product, $mediaAsset, true);
     }
 
     public function sharedMedia(string $token, MediaAsset $mediaAsset): StreamedResponse
@@ -100,7 +100,7 @@ class ProductHubDeliveryController extends Controller
     {
         $this->authorizeProduct($request, $product);
 
-        return $this->creativeResponse($product, $bannerCreative);
+        return $this->creativeResponse($product, $bannerCreative, true);
     }
 
     public function sharedCreative(string $token, BannerCreative $bannerCreative): StreamedResponse
@@ -142,43 +142,31 @@ class ProductHubDeliveryController extends Controller
         abort_unless($product->brand->workspace->users()->whereKey($request->user()->id)->exists(), 404);
     }
 
-    private function mediaResponse(Product $product, MediaAsset $mediaAsset): StreamedResponse
+    private function mediaResponse(Product $product, MediaAsset $mediaAsset, bool $explain = false): StreamedResponse
     {
         abort_unless($mediaAsset->product_id === $product->id && $mediaAsset->status !== 'failed', 404);
-        abort_unless(Storage::disk($mediaAsset->disk)->exists($mediaAsset->path), 404);
-        $stream = Storage::disk($mediaAsset->disk)->readStream($mediaAsset->path);
-        abort_unless(is_resource($stream), 404);
 
-        return response()->stream(function () use ($stream): void {
-            fpassthru($stream);
-            fclose($stream);
-        }, 200, [
+        return StoredFile::response($mediaAsset->disk, $mediaAsset->path, [
             'Content-Type' => $mediaAsset->mime_type,
             'Content-Disposition' => 'inline; filename="'.addslashes($mediaAsset->original_name).'"',
             'Cache-Control' => 'private, no-store',
             'X-Content-Type-Options' => 'nosniff',
-        ]);
+        ], $explain);
     }
 
-    private function creativeResponse(Product $product, BannerCreative $creative): StreamedResponse
+    private function creativeResponse(Product $product, BannerCreative $creative, bool $explain = false): StreamedResponse
     {
         abort_unless($creative->campaignPack?->product_id === $product->id, 404);
         abort_unless($creative->campaignPackVersion?->review_status === 'approved', 404);
         abort_unless($creative->status === 'completed' && $creative->output_path, 404);
         // A banner showing a price the product page does not is never delivered to clients.
         abort_unless(app(CampaignPackSafetyValidator::class)->bannerPrices($creative) === [], 404);
-        abort_unless(Storage::disk($creative->disk)->exists($creative->output_path), 404);
-        $stream = Storage::disk($creative->disk)->readStream($creative->output_path);
-        abort_unless(is_resource($stream), 404);
 
-        return response()->stream(function () use ($stream): void {
-            fpassthru($stream);
-            fclose($stream);
-        }, 200, [
+        return StoredFile::response($creative->disk, $creative->output_path, [
             'Content-Type' => 'image/png',
             'Content-Disposition' => 'inline; filename="campaign-creative-'.$creative->id.'.png"',
             'Cache-Control' => 'private, no-store',
             'X-Content-Type-Options' => 'nosniff',
-        ]);
+        ], $explain);
     }
 }

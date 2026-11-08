@@ -5,8 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\BannerCreative;
 use App\Models\CampaignPack;
 use App\Services\CampaignPackSafetyValidator;
+use App\Support\StoredFile;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class BannerDeliveryController extends Controller
@@ -22,6 +22,8 @@ class BannerDeliveryController extends Controller
     {
         $this->authorizeCreative($request, $pack, $bannerCreative);
         abort_unless(app(CampaignPackSafetyValidator::class)->bannerPrices($bannerCreative) === [], 404);
+        // Open the file first, so a missing file never records a download.
+        $response = $this->response($bannerCreative, true);
         $bannerCreative->batch->workspace->auditEvents()->create([
             'actor_user_id' => $request->user()->id,
             'event' => 'campaign_banner_downloaded',
@@ -30,7 +32,7 @@ class BannerDeliveryController extends Controller
             'metadata' => ['campaign_pack_id' => $pack->id, 'version' => $bannerCreative->campaignPackVersion->version],
         ]);
 
-        return $this->response($bannerCreative, true);
+        return $response;
     }
 
     private function authorizeCreative(Request $request, CampaignPack $pack, BannerCreative $creative): void
@@ -38,22 +40,16 @@ class BannerDeliveryController extends Controller
         abort_unless($creative->campaign_pack_id === $pack->id, 404);
         abort_unless($pack->product->brand->workspace->users()->whereKey($request->user()->id)->exists(), 404);
         abort_unless($creative->status === 'completed' && $creative->output_path, 404);
-        abort_unless(Storage::disk($creative->disk)->exists($creative->output_path), 404);
     }
 
     private function response(BannerCreative $creative, bool $download): StreamedResponse
     {
-        $stream = Storage::disk($creative->disk)->readStream($creative->output_path);
-        abort_unless(is_resource($stream), 404);
         $filename = 'campaign-banner-'.$creative->campaign_pack_id.'-'.$creative->id.'.png';
 
-        return response()->stream(function () use ($stream): void {
-            fpassthru($stream);
-            fclose($stream);
-        }, 200, [
+        return StoredFile::response($creative->disk, $creative->output_path, [
             'Content-Type' => 'image/png',
             'Content-Disposition' => ($download ? 'attachment' : 'inline').'; filename="'.$filename.'"',
             'Cache-Control' => 'private, no-store',
-        ]);
+        ], true);
     }
 }

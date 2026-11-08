@@ -151,6 +151,20 @@ class ProductHubTest extends TestCase
         auth()->logout();
         $this->get(route('product-hubs.shared-media', [$share->token, $asset]))->assertOk();
         $this->get(route('product-hubs.shared-creative', [$share->token, $creative]))->assertOk();
+
+        // A file the disk no longer has is a 404 that says why to a signed-in member, and nothing to a link viewer.
+        Storage::disk('local')->delete('creatives/approved.png');
+        $this->actingAs($owner)->get(route('products.hub-creative', [$product, $creative]))->assertNotFound()
+            ->assertHeader('X-Storage-Status', 'disk=local; driver=local; result=missing; root_exists=yes; ephemeral=no');
+        $this->actingAs($owner)->get(route('campaign-banners.image', [$pack, $creative]))->assertNotFound()
+            ->assertHeader('X-Storage-Status');
+        $this->actingAs($owner)->get(route('campaign-banners.download', [$pack, $creative]))->assertNotFound();
+        $this->assertSame(0, $workspace->auditEvents()->where('event', 'campaign_banner_downloaded')->count());
+        // A shared link opened by someone signed in to another workspace explains nothing either.
+        $this->actingAs(User::factory()->create())->get(route('product-hubs.shared-creative', [$share->token, $creative]))
+            ->assertNotFound()->assertHeaderMissing('X-Storage-Status');
+        auth()->logout();
+        $this->get(route('product-hubs.shared-creative', [$share->token, $creative]))->assertNotFound()->assertHeaderMissing('X-Storage-Status');
     }
 
     public function test_empty_state_and_campaign_history_are_honest(): void
