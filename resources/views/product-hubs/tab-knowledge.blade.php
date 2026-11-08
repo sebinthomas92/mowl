@@ -68,7 +68,11 @@
                                 <div class="row">
                                     @switch($item->status)
                                         @case('conflict')
-                                            <button type="button" class="pill dark sm" wire:click="acceptSource('{{ $item->key }}')">Accept source</button>
+                                            @if($item->source_value !== null)
+                                                <button type="button" class="pill dark sm" wire:click="acceptSource('{{ $item->key }}')">Accept source</button>
+                                            @else
+                                                <button type="button" class="pill ghost sm" wire:click="editFact('{{ $item->key }}')">Edit</button>
+                                            @endif
                                             <button type="button" class="pill ghost sm" wire:click="keepConfirmed('{{ $item->key }}')">Keep mine</button>
                                             @break
                                         @case('excluded')
