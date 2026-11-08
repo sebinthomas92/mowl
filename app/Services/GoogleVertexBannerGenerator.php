@@ -141,7 +141,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
             return $this->result($split, $usage, $extraCost, $cutout);
         }
 
-        throw new BannerAttemptFailed($failure[0] ?? 'banner_third_party_text', $failure[1] ?? 'No generated background passed its checks.', $this->spent($usage, $extraCost), $result->imageBytes ?? null);
+        throw new BannerAttemptFailed($failure[0] ?? 'banner_third_party_text', $failure[1] ?? 'No generated background passed its checks.', $this->spent($usage, $extraCost), $result->imageBytes ?? null, $usage);
     }
 
     /** @param  array{x: float, y: float, width: float}|null  $spot */
@@ -168,7 +168,7 @@ class GoogleVertexBannerGenerator implements BannerGenerator
     {
         $spent = $this->spent($usage, $extraCost);
 
-        return $spent > 0 ? new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), $spent) : $exception;
+        return $spent > 0 ? new BannerAttemptFailed($exception->errorCode, $exception->getMessage(), $spent, tokens: $usage) : $exception;
     }
 
     /**

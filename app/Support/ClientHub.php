@@ -65,6 +65,9 @@ class ClientHub
         return [
             'version' => $version,
             'content' => $content,
+            // The name the approved copy was written for. A later Knowledge edit renames the product,
+            // not an already-approved hub; the new name reaches the hub with the next approval.
+            'productName' => (string) (data_get($content, 'product_details.name') ?: $product->name),
             'imageUrl' => $cover ? ($links['media'])($cover) : null,
             'images' => $version ? self::images($version)->map(fn ($creative) => [
                 'id' => $creative->id,

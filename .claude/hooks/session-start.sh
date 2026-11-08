@@ -12,8 +12,11 @@ cd "$CLAUDE_PROJECT_DIR"
 # installs. On an image still at 8.3, resolve a compatible vendor tree locally
 # and keep the committed lock untouched.
 if ! composer install --no-interaction --prefer-dist --no-progress; then
+    # Put the committed lock back even if the fallback update fails partway.
+    trap 'git checkout -- composer.lock' EXIT
     composer update -W --no-interaction --prefer-dist --no-progress
     git checkout -- composer.lock
+    trap - EXIT
 fi
 
 npm ci --no-audit --no-fund
@@ -30,6 +33,15 @@ touch database/database.sqlite
 # Pin Artisan to the local sqlite file so an inherited DB_* setting can never
 # point these commands at a shared database.
 export DB_CONNECTION=sqlite DB_DATABASE="$CLAUDE_PROJECT_DIR/database/database.sqlite" DB_URL=
+# Keep the same pin for the rest of the session, so a later `php artisan serve` can't pick up a
+# remote database from a reused checkout's .env.
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+    {
+        echo "export DB_CONNECTION=sqlite"
+        echo "export DB_DATABASE=\"$CLAUDE_PROJECT_DIR/database/database.sqlite\""
+        echo "export DB_URL="
+    } >> "$CLAUDE_ENV_FILE"
+fi
 # A cached config would ignore the exported DB_* values.
 php artisan config:clear --no-interaction
 php artisan migrate --force --no-interaction

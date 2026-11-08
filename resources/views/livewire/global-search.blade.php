@@ -1,5 +1,5 @@
 <div class="search-wrap" x-data="{ open: false }" @click.outside="open = false" @keydown.escape="open = false; $refs.input.blur()">
-    <form class="search" role="search" @submit.prevent="$el.querySelector('.search-results a')?.click()">
+    <form class="search" role="search" @submit.prevent="$root.querySelector('.search-results a')?.click()">
         <i class="ti ti-search" aria-hidden="true"></i>
         <input x-ref="input" wire:model.live.debounce.250ms="query" @focus="open = true" @input="open = true" type="search" placeholder="Search products and content" aria-label="Search products and content" autocomplete="off">
     </form>

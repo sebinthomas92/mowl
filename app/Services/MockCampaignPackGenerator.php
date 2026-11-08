@@ -19,6 +19,20 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
         $lines = fn (string $key) => array_values(array_filter(array_map('trim', preg_split('/\R/', (string) data_get($page, "team_knowledge.{$key}")))));
         $benefits = $lines('benefits');
         $audiences = $lines('audience');
+        $differentiators = $lines('differentiators');
+        // A confirmed availability the team kept over the page wins, as in the production prompts.
+        $availability = data_get($page, 'team_knowledge.availability') ?: data_get($page, 'product_truth.availability');
+
+        // Each team fact the pack uses gets its own team_confirmed evidence record.
+        $teamEvidence = [];
+        foreach (['benefits' => $benefits, 'audience' => $audiences, 'differentiators' => $differentiators] as $key => $values) {
+            foreach ($values as $value) {
+                $teamEvidence[] = ['id' => 'team-'.(count($teamEvidence) + 1), 'claim' => $value, 'source' => 'team_confirmed', 'excerpt' => $value, 'status' => 'directly_supported'];
+            }
+        }
+        if (data_get($page, 'team_knowledge.availability')) {
+            $teamEvidence[] = ['id' => 'team-'.(count($teamEvidence) + 1), 'claim' => $availability, 'source' => 'team_confirmed', 'excerpt' => $availability, 'status' => 'directly_supported'];
+        }
 
         $angles = [
             $this->angle(1, 'The everyday upgrade', 'Make the product feel like a useful improvement to a familiar routine.', 'Routine-led shoppers', 'While comparing practical options', 'A more considered everyday choice', $claimId, 'recommended'),
@@ -36,14 +50,14 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
             'product_truth' => [
                 'name' => $name,
                 'price' => $product->price ?: 'Price not supplied',
-                'availability' => data_get($page, 'product_truth.availability') ?: 'Not confirmed',
+                'availability' => $availability ?: 'Not confirmed',
                 'verified_facts' => [['statement' => $fact, 'claim_id' => $claimId]],
-                'supported_benefits' => $benefits ?: ['A product story grounded in the supplied page'],
+                'supported_benefits' => array_values(array_merge($benefits, $differentiators)) ?: ['A product story grounded in the supplied page'],
                 'offers_and_trust_signals' => [],
                 'brand_context' => [$product->brand?->name ?: 'Brand context not supplied'],
                 'missing_information' => array_values(array_filter([
                     $product->price ? null : 'Price was not supplied.',
-                    data_get($page, 'product_truth.availability') ? null : 'Availability was not confirmed.',
+                    $availability ? null : 'Availability was not confirmed.',
                     'No discount or scarcity claim was confirmed.',
                 ])),
                 'prohibited_claims' => ['Do not add materials, origin, manufacturing, review, discount, or scarcity claims not stated by the source.'],
@@ -92,7 +106,7 @@ class MockCampaignPackGenerator implements CampaignPackGenerator
                 'source' => $source->url,
                 'excerpt' => $fact,
                 'status' => 'directly_supported',
-            ]],
+            ], ...$teamEvidence],
             complianceFlags: [],
             provider: 'mock',
             model: null,

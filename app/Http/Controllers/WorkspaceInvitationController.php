@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Livewire\TeamIndex;
 use App\Models\WorkspaceInvitation;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,6 +24,7 @@ class WorkspaceInvitationController extends Controller
         DB::transaction(function () use ($invitation, $request): void {
             $lockedInvitation = WorkspaceInvitation::query()->lockForUpdate()->findOrFail($invitation->id);
             abort_unless($lockedInvitation->isOpen(), 410);
+            TeamIndex::lockSeats($lockedInvitation->workspace_id);
 
             $existing = $lockedInvitation->workspace->users()->whereKey($request->user()->id)->first();
             // An owner keeps ownership; an invitation never demotes them.
