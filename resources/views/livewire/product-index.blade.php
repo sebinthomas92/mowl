@@ -76,7 +76,7 @@
                             $this->isStale($product) => ['warn', 'Stale · '.$checked->diffForHumans()],
                             default => ['ok', 'Fresh · '.$checked->diffForHumans()],
                         };
-                        $image = $product->mediaAssets->first();
+                        $image = $product->coverImage();
 
                         return compact('product', 'tone', 'state', 'label', 'url', 'source', 'image');
                     });

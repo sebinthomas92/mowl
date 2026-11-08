@@ -45,6 +45,23 @@ class CampaignRequestProcessingTest extends TestCase
             ->assertSee('campaign job');
     }
 
+    public function test_a_failure_after_the_page_was_read_marks_the_writing_step(): void
+    {
+        [$user, , $job] = $this->generationFixture();
+        $job->sourceSnapshot->update(['status' => 'ready']);
+        $job->update(['status' => 'failed', 'phase' => 'failed', 'error_code' => 'provider_error']);
+        $job->campaignPack->update(['status' => 'failed']);
+
+        $html = Livewire::actingAs($user)
+            ->test(CampaignWorkspace::class, ['pack' => $job->campaignPack->fresh()])
+            ->assertOk()
+            ->assertSee('Writing the launch pack failed.')
+            ->html();
+
+        $this->assertMatchesRegularExpression('/tdot ok[^<]*<\/span><span class="grow"><strong class="medium">Read the product page/', $html);
+        $this->assertMatchesRegularExpression('/tdot bad[^<]*<\/span><span class="grow"><strong class="medium">Write the outputs/', $html);
+    }
+
     public function test_a_job_can_finish_when_the_review_status_column_is_not_migrated(): void
     {
         [$user, , $job] = $this->generationFixture();

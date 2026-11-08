@@ -111,7 +111,16 @@
                     @php
                         $phases = ['fetching_source' => ['Read the product page', 'We fetch the page again so nothing is written from stale facts.'], 'generating_pack' => ['Write the outputs', 'Positioning, ad angles, video scripts and channel copy.'], 'complete' => ['Check every claim', 'Each claim is matched to the page or your confirmed Knowledge.']];
                         $order = array_keys($phases);
-                        $at = array_search($job?->phase, $order, true);
+                        // A failed or waiting job loses its phase, so the source snapshot tells which step stopped.
+                        $stepPhase = $job?->phase;
+                        if (in_array($stepPhase, ['failed', 'retry_wait'], true)) {
+                            $stepPhase = match ($job->sourceSnapshot?->status) {
+                                'failed' => 'fetching_source',
+                                'ready' => 'generating_pack',
+                                default => null,
+                            };
+                        }
+                        $at = array_search($stepPhase, $order, true);
                         $failed = $pack->status === 'failed';
                         $jobStatus = $job?->status ?? $pack->status;
                         [$runTone, $runLabel] = match (true) {
@@ -132,14 +141,14 @@
                     <div class="run-layout">
                         <section class="card col run-steps" aria-label="Progress">
                             <div class="row"><span class="small">Progress</span><span class="sp"></span><span class="muted xs">Attempt {{ $job?->attempts ?? 0 }} of 3</span></div>
-                            @php $share = $failed ? 100 : ($at === false ? 5 : (int) round(($at + ($job?->phase === 'complete' ? 1 : .5)) / count($order) * 100)); @endphp
+                            @php $share = $failed ? 100 : ($at === false ? 5 : (int) round(($at + ($stepPhase === 'complete' ? 1 : .5)) / count($order) * 100)); @endphp
                             <div class="bar" role="progressbar" aria-label="Run progress" aria-valuenow="{{ $share }}" aria-valuemin="0" aria-valuemax="100"><span style="width:{{ $share }}%"></span></div>
                             <ol class="timeline">
                                 @foreach($phases as $phase => [$label, $hint])
                                     @php
                                         $index = array_search($phase, $order, true);
                                         $dot = match (true) {
-                                            $failed && $index === ($at === false ? 0 : $at) => 'bad',
+                                            $failed && $at !== false && $index === $at => 'bad',
                                             $at !== false && $index < $at => 'ok',
                                             ! $failed && $at !== false && $index === $at => 'cur',
                                             ! $failed && $at === false && $index === 0 => 'cur',
