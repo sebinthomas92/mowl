@@ -8,6 +8,7 @@ use App\Livewire\Auth\ResetPassword;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Auth\Notifications\ResetPassword as ResetPasswordNotification;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -121,15 +122,60 @@ class AccountPasswordTest extends TestCase
             ->call('updatePassword')
             ->assertHasNoErrors()
             ->assertSet('current_password', '')
-            ->assertSet('password', '');
+            ->assertSet('password', '')
+            ->assertRedirect(route('account.edit'));
 
         $user->refresh();
         $this->assertTrue(Hash::check('brand-new-password', $user->password));
         $this->assertNotSame($oldRemember, $user->remember_token);
         $this->assertNotSame($oldSessionId, session()->getId());
-        $this->assertSame($csrfToken, session()->token());
+        $this->assertNotSame($csrfToken, session()->token());
         $this->assertDatabaseMissing('sessions', ['id' => 'other-device']);
         $this->assertDatabaseHas('sessions', ['id' => 'someone-else']);
+    }
+
+    public function test_password_rotation_reloads_csrf_tokens_and_the_next_post_succeeds(): void
+    {
+        $user = $this->member();
+        $this->actingAs($user)->get(route('account.edit'))->assertOk();
+        $oldToken = session()->token();
+        $oldSession = session()->getId();
+        $component = Livewire::actingAs($user)->test(AccountSettings::class);
+
+        // Laravel normally skips CSRF in tests. Enforce the real token comparison
+        // for these HTTP requests, rather than relying on the Livewire test helper.
+        $this->app->bind(PreventRequestForgery::class,
+            fn ($app) => new class($app, $app['encrypter']) extends PreventRequestForgery
+            {
+                protected function runningUnitTests()
+                {
+                    return false;
+                }
+            });
+        $this->withHeader('X-Livewire', 'true')->postJson(app('livewire')->getUpdateUri(), [
+            '_token' => $oldToken,
+            'components' => [[
+                'snapshot' => json_encode($component->snapshot),
+                'updates' => [
+                    'current_password' => 'old-password',
+                    'password' => 'brand-new-password',
+                    'password_confirmation' => 'brand-new-password',
+                ],
+                'calls' => [['method' => 'updatePassword', 'params' => []]],
+            ]],
+        ])->assertOk()->assertJsonPath('components.0.effects.redirect', route('account.edit'))
+            ->assertJsonMissingPath('components.0.effects.redirectUsingNavigate');
+        $this->assertNotSame($oldSession, session()->getId());
+        $newToken = session()->token();
+        $this->assertNotSame($oldToken, $newToken);
+
+        $page = $this->get(route('account.edit'))->assertOk()->assertSee('Password changed.');
+        $page->assertSee('<meta name="csrf-token" content="'.$newToken.'">', false);
+        $page->assertSee('value="'.$newToken.'"', false);
+        // Prove the CSRF middleware is active, then use the token from the reload.
+        $this->post(route('logout'), ['_token' => $oldToken])->assertStatus(419);
+        $this->post(route('logout'), ['_token' => $newToken])->assertRedirect(route('login'));
+        $this->assertGuest();
     }
 
     public function test_wrong_current_password_is_rate_limited(): void

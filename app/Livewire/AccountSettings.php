@@ -61,12 +61,13 @@ class AccountSettings extends Component
                 ->where('id', '!=', session()->getId())
                 ->delete();
         }
-        // New session ID and the old one destroyed, so a copied cookie stops working. migrate() keeps the
-        // CSRF token, so forms already on this page (Livewire, sign out) keep working without a reload.
-        session()->migrate(true);
+        // Destroy the old session and rotate its CSRF token, then reload the full
+        // page so Livewire, the meta tag and sign-out forms all receive the new token.
+        session()->regenerate(true);
 
         $this->reset('current_password', 'password', 'password_confirmation');
         session()->flash('status', 'Password changed. Other devices have been signed out.');
+        $this->redirectRoute('account.edit', navigate: false);
     }
 
     public function render()
