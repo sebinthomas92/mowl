@@ -17,8 +17,8 @@ concurrency:
 jobs:
   quality:
     name: quality
-    # Fork PRs keep GitHub runners. Disable the repository variable to roll back.
-    runs-on: ${{ vars.INSTABOX_CI_ENABLED == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'instabox-medium' || 'ubuntu-latest' }}
+    # Fork PRs keep GitHub runners; same-repository events use Depot.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'depot-ubuntu-24.04' || 'ubuntu-latest' }}
     timeout-minutes: 20
     services:
       postgres:
